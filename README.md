@@ -1,30 +1,32 @@
-# Lenkdrachen LED Beleuchtung mit Bewegungsreaktion
+# Lenkdrachen LED Beleuchtung mit Bewegungsreaktion (Kite LED Lighting with Motion Response)
+
+## Deutsch
 
 Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die auf deren Bewegungen und Beschleunigungen reagiert. Die Farbe der LEDs wird durch den aktuellen Winkel des Drachens bestimmt, während die Geschwindigkeit der Animationsabläufe von der Bewegungsgeschwindigkeit des Drachens abhängt.
 
-## Verwendete Technologien und Komponenten
+### Verwendete Technologien und Komponenten
 
 * **Mikrocontroller:** [Pimoroni Pico Lipo](https://shop.pimoroni.com) **(mit integriertem Akku-Management)**
 * **Akku:** 500mAh LiPo Akku
-* **Gyroskop/Beschleunigungsmesser:** [MPU6050 Modul]
+* **Gyroskop/Beschleunigungsmesser:** [MPU6050 Modul](https://www.reichelt.de/de/de/shop/produkt/entwicklerboards_-_beschleunigung_gyroskop_3-achsen_mpu-6050-253987)
 * **LED-Strip:** WS2812B Fairyight LED-Strip, ca. 5 Meter
 * **Programmiersprache:** C++
 * **Entwicklungsumgebung (optional):** [PlatformIO](https://platformio.org/) (für eigene Anpassungen)
 * **Gewicht:** ca. 60 Gramm (Controller mit Gehäuse ca. 30 Gramm, LED-Strip ca. 30 Gramm)
 
-## Hardware
+### Hardware
 
 ![Bild der Platine](images/platine.png)
 
 ![Bild des Controllers](images/controller.png)
 
-### 3D-Druck Gehäuse
+#### 3D-Druck Gehäuse
 
 Für dieses Projekt steht ein Gehäuse zur Verfügung, das mit einem 3D-Drucker gefertigt werden kann. Die Dateien für den 3D-Druck (im 3MF- und STEP-Format) sowie eine Vorschau des Gehäuses befinden sich im Verzeichnis `case/` dieses Repositorys.
 
 ![Vorschau des Gehäuses](case/nightkite-multi.png)
 
-### Verdrahtung
+#### Verdrahtung
 
 Die folgende Tabelle zeigt die Verbindungen zwischen dem Pimoroni Pico Lipo, dem LED-Strip und dem MPU6050:
 
@@ -40,7 +42,7 @@ Die folgende Tabelle zeigt die Verbindungen zwischen dem Pimoroni Pico Lipo, dem
 | MPU6050 SDA        | GP4                    |
 | MPU6050 SCL        | GP5                    |
 
-## Stromversorgung und Laufzeit
+### Stromversorgung und Laufzeit
 
 Das System wird über einen integrierten 500mAh LiPo Akku betrieben. Der Pimoroni Pico Lipo verfügt über ein integriertes Akku-Management, das ein sicheres Laden und Entladen des Akkus gewährleistet.
 
@@ -48,7 +50,7 @@ Das System wird über einen integrierten 500mAh LiPo Akku betrieben. Der Pimoron
 
 **Laufzeit:** Die Akkulaufzeit beträgt, abhängig von der gewählten LED-Animation und der Helligkeit, zwischen 1 und 2,5 Stunden.
 
-## Einfache Installation über .UF2-Datei
+### Einfache Installation über .UF2-Datei
 
 Für eine schnelle Inbetriebnahme kann eine fertig kompilierte `.uf2`-Datei verwendet werden. Gehe dazu wie folgt vor:
 
@@ -56,11 +58,11 @@ Für eine schnelle Inbetriebnahme kann eine fertig kompilierte `.uf2`-Datei verw
 
 2.  **Laufwerk erkennen:** Dein Computer sollte nun ein neues Laufwerk mit dem Namen `RPI-RP2` oder ähnlich anzeigen.
 
-3.  **`.uf2`-Datei kopieren:** Lade die Datei `[NAME_DER_UF2_DATEI].uf2` aus dem Release-Bereich dieses Repositorys herunter und ziehe sie per Drag & Drop auf das erkannte `RPI-RP2`-Laufwerk.
+3.  **`.uf2`-Datei kopieren:** Lade die Datei `firmware.uf2` aus dem Release-Bereich dieses Repositorys herunter und ziehe sie per Drag & Drop auf das erkannte `RPI-RP2`-Laufwerk.
 
 4.  **Automatischer Neustart:** Sobald die Datei kopiert wurde, wird der Pico automatisch neu gestartet und die LED-Beleuchtung sollte aktiv sein.
 
-## Einrichtung und Start (für Entwickler und eigene Anpassungen)
+### Einrichtung und Start (für Entwickler und eigene Anpassungen)
 
 Wenn du die Software selbst kompilieren oder Anpassungen vornehmen möchtest, sind folgende Schritte notwendig:
 
@@ -68,14 +70,13 @@ Wenn du die Software selbst kompilieren oder Anpassungen vornehmen möchtest, si
 
 2.  **Klonen des Repositorys:** Klone dieses GitHub-Repository auf deinen lokalen Rechner.
     ```bash
-    git clone [URL_DEINES_REPOSITORYS]
-    cd [NAME_DEINES_REPOSITORYS]
+    git clone [https://github.com/SunnyCodes86/nightkite-multi.git](https://github.com/SunnyCodes86/nightkite-multi.git)
+    cd nightkite-multi
     ```
-    *(Bitte ersetze `[URL_DEINES_REPOSITORYS]` mit der tatsächlichen URL deines GitHub-Repositorys und `[NAME_DEINES_REPOSITORYS]` mit dem Namen deines Repository-Ordners.)*
 
 3.  **Konfiguration in `platformio.ini` (optional):** Überprüfe die `platformio.ini`-Datei im Projektverzeichnis. Hier sind die Umgebungsbedingungen für den Pimoroni Pico Lipo und die benötigten Bibliotheken definiert. Passe diese Datei bei Bedarf an deine spezifischen Bedürfnisse an.
 
-4.  **Bibliotheken installieren:** PlatformIO sollte die benötigten Bibliotheken (wahrscheinlich für den MPU6050 und die WS2812B LEDs) automatisch herunterladen und installieren, wenn du das Projekt kompilierst. Stelle sicher, dass in deiner `platformio.ini` die notwendigen Bibliotheken unter `lib_deps` aufgeführt sind.
+4.  **Bibliotheken installieren:** PlatformIO sollte die benötigten Bibliotheken automatisch herunterladen und installieren, wenn du das Projekt kompilierst. Stelle sicher, dass in deiner `platformio.ini` die notwendigen Bibliotheken unter `lib_deps` aufgeführt sind.
 
 5.  **Kompilieren und Hochladen:** Verbinde deinen Pimoroni Pico Lipo über USB mit deinem Computer. Nutze dann PlatformIO, um das Projekt zu kompilieren und auf den Mikrocontroller hochzuladen. Dies kann in der PlatformIO IDE oder über die Kommandozeile erfolgen:
     ```bash
@@ -84,10 +85,107 @@ Wenn du die Software selbst kompilieren oder Anpassungen vornehmen möchtest, si
 
 6.  **Los geht's!** Sobald die Software hochgeladen ist (entweder über `.uf2` oder PlatformIO) und die Hardware korrekt verbunden ist, sollte die LED-Beleuchtung deines Lenkdrachens auf dessen Bewegungen reagieren.
 
-## Beispiele für die Nutzung
+### Beispiele für die Nutzung
 
-*(Hier könnten wir später Beispiele für typische Bewegungsmuster und die daraus resultierenden LED-Effekte beschreiben. Hast du da schon konkrete Beispiele im Kopf?)*
+tbd
 
-## Lizenz
+### Lizenz
 
 Dieses Projekt ist unter der [MIT Lizenz](LICENSE.txt) lizenziert.
+
+---
+
+## English
+
+This project implements dynamic LED lighting for kites that reacts to their movements and accelerations. The color of the LEDs is determined by the current angle of the kite, while the speed of the animation sequences depends on the kite's speed of motion.
+
+### Used Technologies and Components
+
+* **Microcontroller:** [Pimoroni Pico Lipo](https://shop.pimoroni.com) **(with integrated battery management)**
+* **Battery:** 500mAh LiPo battery
+* **Gyroscope/Accelerometer:** [MPU6050 Module](https://www.reichelt.de/de/en/shop/product/developer-boards-acceleration-gyroscope-3-axes-mpu-6050-253987)
+* **LED Strip:** WS2812B Fairyight LED strip, approx. 5 meters
+* **Programming Language:** C++
+* **Development Environment (optional):** [PlatformIO](https://platformio.org/) (for own adaptations)
+* **Weight:** approx. 60 grams (controller with case approx. 30 grams, LED strip approx. 30 grams)
+
+### Hardware
+
+![Board Image](images/platine.png)
+
+![Controller Image](images/controller.png)
+
+#### 3D-Printed Case
+
+An optional case for this project is available and can be manufactured with a 3D printer. The files for 3D printing (in 3MF and STEP format) as well as a preview of the case can be found in the `case/` directory of this repository.
+
+![Case Preview](case/nightkite-multi.png)
+
+#### Wiring
+
+The following table shows the connections between the Pimoroni Pico Lipo, the LED strip, and the MPU6050:
+
+| Component          | Pin on Microcontroller |
+| ------------------ | ---------------------- |
+| LED Strip +        | VS (VSYS)              |
+| LED Strip -        | GND                    |
+| LED Strip 1 DIN    | GP12                   |
+| LED Strip 2 DIN    | GP13                   |
+| MPU6050 VCC        | 3V3\_OUT               |
+| MPU6050 GND        | GND                    |
+| MPU6050 INT        | GP3                    |
+| MPU6050 SDA        | GP4                    |
+| MPU6050 SCL        | GP5                    |
+
+### Power Supply and Runtime
+
+The system is powered by an integrated 500mAh LiPo battery. The Pimoroni Pico Lipo features integrated battery management, ensuring safe charging and discharging of the battery.
+
+**Charging:** Charging is conveniently done via the USB-C port on the microcontroller.
+
+**Runtime:** The battery runtime is between 1 and 2.5 hours, depending on the selected LED animation and brightness.
+
+### Easy Installation via .UF2 File
+
+For quick setup, a pre-compiled `.uf2` file can be used. Proceed as follows:
+
+1.  **Activate Boot Mode:** Press and hold the **right button** on the Pimoroni Pico Lipo while connecting it to your computer via USB. This puts the microcontroller into boot mode.
+
+2.  **Recognize Drive:** Your computer should now display a new drive named `RPI-RP2` or similar.
+
+3.  **Copy `.uf2` File:** Download the file `firmware.uf2` from the release section of this repository and drag and drop it onto the recognized `RPI-RP2` drive.
+
+4.  **Automatic Restart:** Once the file is copied, the Pico will restart automatically, and the LED lighting should be active.
+
+### Setup and Start (for Developers and Own Adaptations)
+
+If you want to compile the software yourself or make adjustments, the following steps are necessary:
+
+1.  **Install PlatformIO:** Make sure PlatformIO is installed on your system. Detailed instructions can be found on the [PlatformIO website](https://platformio.org/install).
+
+2.  **Clone the Repository:** Clone this GitHub repository to your local machine.
+    ```bash
+    git clone [https://github.com/SunnyCodes86/nightkite-multi.git](https://github.com/SunnyCodes86/nightkite-multi.git)
+    cd nightkite-multi
+    ```
+
+3.  **Configuration in `platformio.ini` (optional):** Check the `platformio.ini` file in the project directory. Here, the environment settings for the Pimoroni Pico Lipo and the required libraries are defined. Adjust this file to your specific needs if necessary.
+
+4.  **Install Libraries:** PlatformIO should automatically download and install the required libraries when you compile the project. Ensure that the necessary libraries are listed under `lib_deps` in your `platformio.ini`.
+
+5.  **Compile and Upload:** Connect your Pimoroni Pico Lipo to your computer via USB. Then use PlatformIO to compile the project and upload it to the microcontroller. This can be done in the PlatformIO IDE or via the command line:
+    ```bash
+    pio run -t upload
+    ```
+
+6.  **Let's Go!** Once the software is uploaded (either via `.uf2` or PlatformIO) and the hardware is correctly connected, the LED lighting of your kite should react to its movements.
+
+### Usage Examples
+
+tbd
+
+### License
+
+This project is licensed under the [MIT License](LICENSE.txt).
+
+---
