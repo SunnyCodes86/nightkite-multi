@@ -22,9 +22,9 @@ Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die 
 
 ### Hardware
 
-![Bild der Platine](images/platine.png)
+![Bild des Controllers](images/controller.jpg)
 
-![Bild des Controllers](images/controller.png)
+![Bild der Platine](images/platine.jpg)
 
 #### 3D-Druck Gehäuse
 
@@ -135,9 +135,9 @@ This project implements dynamic LED lighting for kites that reacts to their move
 
 ### Hardware
 
-![Board Image](images/platine.png)
+![Controller Image](images/controller.jpg)
 
-![Controller Image](images/controller.png)
+![Board Image](images/platine.jpg)
 
 #### 3D-Printed Case
 
