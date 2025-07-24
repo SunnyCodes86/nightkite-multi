@@ -179,6 +179,7 @@ int lastSavedBrightness = 95;
 // for timekeeping
 unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
+//const unsigned long UPDATE_INTERVAL = 30 * 1000; // 30 sec for debug
 
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 {
@@ -594,9 +595,135 @@ enum triggers
   usbpower
 };
 
-bool unplugged()
+bool pattern1()
 {
-  return !UsbConnected;
+  if (currentPattern == 2){
+  return false;
+  }
+return false;
+}
+
+bool pattern2()
+{
+  if (currentPattern == 3){
+  return true;
+  }
+return false;
+}
+
+bool pattern3()
+{
+  if (currentPattern == 4){
+  return true;
+  }
+return false;
+}
+
+bool pattern4()
+{
+  if (currentPattern == 5){
+  return true;
+  }
+return false;
+}
+
+bool pattern5()
+{
+  if (currentPattern == 6){
+  return true;
+  }
+return false;
+}
+
+bool pattern6()
+{
+  if (currentPattern == 7){
+  return true;
+  }
+return false;
+}
+
+bool pattern7()
+{
+  if (currentPattern == 8){
+  return true;
+  }
+return false;
+}
+
+bool pattern8()
+{
+  if (currentPattern == 9){
+  return true;
+  }
+return false;
+}
+
+bool unplugged()
+//{
+//  return !UsbConnected;
+//}
+{
+  if (currentPattern == 2 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged2()
+{
+  if (currentPattern == 3 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged3()
+{
+  if (currentPattern == 4 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged4()
+{
+  if (currentPattern == 5 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged5()
+{
+  if (currentPattern == 6 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged6()
+{
+  if (currentPattern == 7 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged7()
+{
+  if (currentPattern == 8 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
+bool unplugged8()
+{
+  if (currentPattern == 9 && UsbConnected == false){
+  return true;
+  }
+return false;
 }
 
 Transition transitions[] = {
@@ -627,8 +754,22 @@ Transition transitions[] = {
     Transition(&s[9], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
-    TimedTransition(&s[0], &s[2], 5000),
-    TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged)};
+    TimedTransition(&s[0], &s[2], 5000, NULL, "", pattern1),
+    TimedTransition(&s[0], &s[3], 5000, NULL, "", pattern2),
+    TimedTransition(&s[0], &s[4], 5000, NULL, "", pattern3),
+    TimedTransition(&s[0], &s[5], 5000, NULL, "", pattern4),
+    TimedTransition(&s[0], &s[6], 5000, NULL, "", pattern5),
+    TimedTransition(&s[0], &s[7], 5000, NULL, "", pattern6),
+    TimedTransition(&s[0], &s[8], 5000, NULL, "", pattern7),
+    TimedTransition(&s[0], &s[9], 5000, NULL, "", pattern8),
+    TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged),
+    TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged2),
+    TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged3),
+    TimedTransition(&s[1], &s[5], 2000, NULL, "", unplugged4),
+    TimedTransition(&s[1], &s[6], 2000, NULL, "", unplugged5),
+    TimedTransition(&s[1], &s[7], 2000, NULL, "", unplugged6),
+    TimedTransition(&s[1], &s[8], 2000, NULL, "", unplugged7),
+    TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged8)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
@@ -970,8 +1111,8 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  //UsbConnected = digitalRead(24);
-   UsbConnected = 0;
+  UsbConnected = digitalRead(24);
+  //UsbConnected = 0;
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
