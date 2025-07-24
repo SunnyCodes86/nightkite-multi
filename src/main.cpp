@@ -25,7 +25,8 @@
   https://github.com/ElectronicCats/mpu6050/wiki
 
 */
-
+//Arduino.h
+#include <Arduino.h>
 // #include "I2Cdev.h"
 // #include "MPU6050_6Axis_MotionApps20.h"
 #include "MPU6050_6Axis_MotionApps612.h" // Uncomment this library to work with DMP 6.12 and comment on the above library.
@@ -37,6 +38,8 @@
 #include "avdweb_Switch.h"
 // Smoothing library
 #include <Smoothed.h>
+//EEPROM Library
+#include <EEPROM.h>
 
 /* MPU6050 default I2C address is 0x68*/
 MPU6050 mpu;
@@ -151,6 +154,31 @@ uint8_t baseBrightness = 0;  // Brightness of LEDs when not pulsing. Set to 0 fo
 
 int ledeffect;
 int ledeffect2;
+
+// EEPROM stuff
+// Memory addresses in the emulated EEPROM
+// An int on the Pico is 4 bytes.
+// We store value1 at address 0 and value2 directly after it.
+#define EEPROM_ADDR_VALUE1 0
+#define EEPROM_ADDR_VALUE2 sizeof(int) // Address for value2, directly after value1
+
+// Size of emulated EEPROM.
+// has to big enough to store our variables
+// 2 * sizeof(int) = 8 Bytes.
+#define EEPROM_SIZE 16 // 16 Bytes should be plenty
+
+// variables we want to store in EEPROM
+int currentPattern = 2;
+int currentBrightness = 95;
+
+// copies of current values
+// needed to detect chances (to limit wear of flash memory)
+int lastSavedPattern = 2;
+int lastSavedBrightness = 95;
+
+// for timekeeping
+unsigned long lastUpdateTime = 0;
+const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
 
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 {
@@ -350,12 +378,20 @@ void RunEntry()
 {
   fill_solid(Strip1, NUM_LEDS, CRGB::Black);
   fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 2;
 }
 
 void running()
 {
   fill_rainbow(Strip1, NUM_LEDS, gHue, 7);
   fill_rainbow(Strip2, NUM_LEDS, gHue, 7);
+}
+
+void RunEntry2()
+{
+  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 3;
 }
 
 void running2()
@@ -370,6 +406,7 @@ void RunEntry3()
   fill_solid(Strip1, NUM_LEDS, CRGB::Black);
   fill_solid(Strip2, NUM_LEDS, CRGB::Black);
   FastLED.setBrightness(30);
+  currentPattern = 4;
 }
 
 void running3()
@@ -395,6 +432,13 @@ void RunExit3()
   FastLED.setBrightness(BRIGHTNESS);
 }
 
+void RunEntry4()
+{
+  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 4;
+}
+
 void running4()
 {
   color = map(color, -180, 180, 0, 255);
@@ -404,6 +448,13 @@ void running4()
 
   fadeToBlackBy(Strip1, NUM_LEDS, 12);
   fadeToBlackBy(Strip2, NUM_LEDS, 12);
+}
+
+void RunEntry5()
+{
+  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 6;
 }
 
 void running5()
@@ -434,6 +485,13 @@ void running5()
 
     timingObj.setPeriod(accel);
   }
+}
+
+void RunEntry6()
+{
+  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 7;
 }
 
 void running6()
@@ -471,6 +529,13 @@ void running6()
   }
 }
 
+void RunEntry7()
+{
+  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 8;
+}
+
 void running7()
 {
   color = map(color, -180, 180, 0, 255);
@@ -482,6 +547,13 @@ void running7()
     Strip1[i] = CHSV(bloodHue, bloodSat, bloodVal);
     Strip2[i] = CHSV(bloodHue, bloodSat, bloodVal);
   }
+}
+
+void RunEntry8()
+{
+  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  currentPattern = 9;
 }
 
 void running8()
@@ -507,13 +579,13 @@ State s[] = {
     State("battery", BatteryEntry, BatteryRunning),
     State("charging", ChargingEntry, ChargingRunning, ChargingExit),
     State("running", RunEntry, running),
-    State("running2", RunEntry, running2),
+    State("running2", RunEntry2, running2),
     State("running3", RunEntry3, running3, RunExit3),
-    State("running4", RunEntry, running4),
-    State("running5", RunEntry, running5),
-    State("running6", RunEntry, running6),
-    State("running7", RunEntry, running7),
-    State("running8", RunEntry, running8)};
+    State("running4", RunEntry4, running4),
+    State("running5", RunEntry5, running5),
+    State("running6", RunEntry6, running6),
+    State("running7", RunEntry7, running7),
+    State("running8", RunEntry8, running8)};
 
 enum triggers
 {
@@ -683,11 +755,39 @@ void setup()
   // Although it is unnecessary here, the stored values can be cleared if needed.
   myAccel.clear();
 
+// Init the emulated EEPROM
+    EEPROM.begin(EEPROM_SIZE);
+    Serial.println("EEPROM initialized.");
+
+
+    // Read values from EEPROM
+    EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
+    EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
+    Serial.println("Current values:");
+    Serial.print("Pattern: ");
+    Serial.println(currentPattern);
+    Serial.print("Brightness: ");
+    Serial.println(currentBrightness);
+
+
+    // Store current values for changecheck
+    lastSavedPattern = currentPattern;
+    lastSavedBrightness = currentBrightness;
+
+    // Set Timestamp for first check
+    lastUpdateTime = millis();
+
+
+//state machine init
   fsm.add(timedTransitions, num_timed);
   fsm.add(transitions, num_transitions);
 
+  // Brightness on Powerup
+  BRIGHTNESS = currentBrightness;
+  FastLED.setBrightness(BRIGHTNESS);
+
   // initialState on Powerup
-  fsm.setInitialState(&s[2]);
+  fsm.setInitialState(&s[currentPattern]);
 }
 
 void loop()
@@ -798,6 +898,48 @@ void loop()
     digitalWrite(LED_BUILTIN, blinkState);
   }
 
+  // Check if 5 minutes has passed
+    unsigned long currentTime = millis();
+    if (currentTime - lastUpdateTime >= UPDATE_INTERVAL) {
+        // Set timestamp for next check
+        lastUpdateTime = currentTime;
+
+        Serial.println("5 minute interval reached. Checking values for changes...");
+
+        // Check if the current values differ from the last saved ones
+        if (currentPattern != lastSavedPattern || currentBrightness != lastSavedBrightness) {
+            // At least one value has changed
+            Serial.println("Values have changed. Saving new values to EEPROM...");
+
+           // Update values in EEPROM
+            EEPROM.put(EEPROM_ADDR_VALUE1, currentPattern);
+            EEPROM.put(EEPROM_ADDR_VALUE2, currentBrightness);
+            
+            Serial.print("Pattern: ");
+            Serial.println(currentPattern);
+            Serial.print("Brightness: ");
+            Serial.println(currentBrightness);
+
+            // Important: For flash-based emulation, EEPROM.commit() must be called
+            // to actually write the changes to flash!
+            if (EEPROM.commit()) {
+                Serial.println("New values successfully saved to EEPROM.");
+
+                // Update the last saved values for the next check
+                lastSavedPattern = currentPattern;
+                lastSavedBrightness = currentBrightness;
+
+            } else {
+                Serial.println("ERROR: Could not save values to EEPROM.");
+            }
+
+        } else {
+            // No change
+            Serial.println("Values are unchanged. No EEPROM update needed.");
+        }
+    }
+
+
   // send the 'leds' array out to the actual LED strip
   // FastLED.show();
   // insert a delay to keep the framerate modest
@@ -828,8 +970,8 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  UsbConnected = digitalRead(24);
-  // UsbConnected = 0;
+  //UsbConnected = digitalRead(24);
+   UsbConnected = 0;
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
@@ -844,5 +986,6 @@ void loop()
     }
     // Serial.println(BRIGHTNESS);
     FastLED.setBrightness(BRIGHTNESS);
+    currentBrightness = BRIGHTNESS;
   }
 }
