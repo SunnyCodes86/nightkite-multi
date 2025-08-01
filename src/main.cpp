@@ -129,8 +129,9 @@ void DMPDataReady()
 #endif
 
 #define NUM_LEDS 25
-CRGB Strip1[NUM_LEDS];
-CRGB Strip2[NUM_LEDS];
+// CRGB Strip1[NUM_LEDS];
+// CRGB Strip2[NUM_LEDS];
+CRGB Strip[NUM_LEDS * 2];
 
 int BRIGHTNESS = 95;
 #define MAX_BRIGHTNESS 256
@@ -229,8 +230,7 @@ int fade;
 
 void ChargingEntry()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(32);
 }
 void ChargingRunning()
@@ -258,44 +258,44 @@ void ChargingRunning()
 
   if (UsbConnected == 1 && blink == 1)
   {
-    fill_solid(Strip2, 1, CRGB::Red);
+    Strip[25] = CRGB::Red;
   }
   else if (UsbConnected == 1 && blink == 0)
   {
-    fill_solid(Strip2, 1, CRGB::Black);
+    Strip[25] = CRGB::Black;
   }
 
   if (Voltage >= 4.2)
   {
-    fill_solid(Strip1, 5, CRGB::Blue);
+    fill_solid(Strip, 5, CRGB::Blue);
   }
   if (Voltage < 4.2 && Voltage > 4.0)
   {
-    fill_solid(Strip1, 4, CRGB::Green);
+    fill_solid(Strip, 4, CRGB::Green);
   }
   if (Voltage < 4.0 && Voltage > 3.8)
   {
-    fill_solid(Strip1, 3, CRGB::Green);
+    fill_solid(Strip, 3, CRGB::Green);
   }
   if (Voltage < 3.8 && Voltage > 3.6)
   {
-    fill_solid(Strip1, 2, CRGB::Yellow);
+    fill_solid(Strip, 2, CRGB::Yellow);
   }
   if (Voltage < 3.6 && Voltage > 3.4)
   {
-    fill_solid(Strip1, 1, CRGB::Yellow);
+    fill_solid(Strip, 1, CRGB::Yellow);
   }
   if (Voltage < 3.4 && Voltage > 3.2)
   {
-    fill_solid(Strip1, 1, CRGB::Red);
+    fill_solid(Strip, 1, CRGB::Red);
   }
   if (Voltage < 3.2 && Voltage > 3.0)
   {
-    fill_solid(Strip1, 1, CRGB::Black);
+    fill_solid(Strip, 1, CRGB::Black);
   }
   if (Voltage < 3.0 && Voltage > 2.8)
   {
-    fill_solid(Strip1, 1, CRGB::Black);
+    fill_solid(Strip, 1, CRGB::Black);
   }
 }
 
@@ -306,8 +306,7 @@ void ChargingExit()
 
 void BatteryEntry()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
 }
 
 void BatteryRunning()
@@ -334,78 +333,73 @@ void BatteryRunning()
 
   if (blink == 1)
   {
-    fill_solid(Strip2, 1, CRGB::Blue);
+    Strip[25] = CRGB::Blue;
   }
   else if (blink == 0)
   {
-    fill_solid(Strip2, 1, CRGB::Black);
+    Strip[25] = CRGB::Black;
   }
 
   if (Voltage >= 4.2)
   {
-    fill_solid(Strip1, 5, CRGB::Blue);
+    fill_solid(Strip, 5, CRGB::Blue);
   }
   if (Voltage < 4.2 && Voltage > 4.0)
   {
-    fill_solid(Strip1, 4, CRGB::Green);
+    fill_solid(Strip, 4, CRGB::Green);
   }
   if (Voltage < 4.0 && Voltage > 3.8)
   {
-    fill_solid(Strip1, 3, CRGB::Green);
+    fill_solid(Strip, 3, CRGB::Green);
   }
   if (Voltage < 3.8 && Voltage > 3.6)
   {
-    fill_solid(Strip1, 2, CRGB::Yellow);
+    fill_solid(Strip, 2, CRGB::Yellow);
   }
   if (Voltage < 3.6 && Voltage > 3.4)
   {
-    fill_solid(Strip1, 1, CRGB::Yellow);
+    fill_solid(Strip, 1, CRGB::Yellow);
   }
   if (Voltage < 3.4 && Voltage > 3.2)
   {
-    fill_solid(Strip1, 1, CRGB::Red);
+    fill_solid(Strip, 1, CRGB::Red);
   }
   if (Voltage < 3.2 && Voltage > 3.0)
   {
-    fill_solid(Strip1, 1, CRGB::Black);
+    fill_solid(Strip, 1, CRGB::Black);
   }
   if (Voltage < 3.0 && Voltage > 2.8)
   {
-    fill_solid(Strip1, 1, CRGB::Black);
+    fill_solid(Strip, 1, CRGB::Black);
   }
 }
 
 void RunEntry()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 2;
 }
 
 void running()
 {
-  fill_rainbow(Strip1, NUM_LEDS, gHue, 7);
-  fill_rainbow(Strip2, NUM_LEDS, gHue, 7);
+  fill_rainbow(Strip, NUM_LEDS * 2, gHue, 7);
 }
 
 void RunEntry2()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 3;
 }
 
 void running2()
 {
   color = map(color, -180, 180, 0, 255);
-  fill_solid(Strip1, NUM_LEDS, CHSV(color, 255, 255));
-  fill_solid(Strip2, NUM_LEDS, CHSV(color, 255, 255));
+  fill_solid(Strip, NUM_LEDS * 2, CHSV(color, 255, 255));
 }
 
 void RunEntry3()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(30);
   currentPattern = 4;
 }
@@ -422,21 +416,18 @@ void running3()
   color = map(color, -180, 180, 0, 255);
   FastLED.setBrightness(accelcon); // Set master brightness based on potentiometer position.
 
-  fill_solid(Strip1, NUM_LEDS, CHSV(color, 255, 255));
-  fill_solid(Strip2, NUM_LEDS, CHSV(color, 255, 255));
+  fill_solid(Strip, NUM_LEDS * 2, CHSV(color, 255, 255));
 }
 
 void RunExit3()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(BRIGHTNESS);
 }
 
 void RunEntry4()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 4;
 }
 
@@ -444,17 +435,15 @@ void running4()
 {
   color = map(color, -180, 180, 0, 255);
   uint8_t pos = map(beat16(40, 0), 0, 65535, 0, NUM_LEDS - 1);
-  Strip1[pos] = CHSV(color, 200, 255);
-  Strip2[pos] = CHSV(color, 200, 255);
+  Strip[pos] = CHSV(color, 200, 255);
+  Strip[pos + NUM_LEDS] = CHSV(color, 200, 255);
 
-  fadeToBlackBy(Strip1, NUM_LEDS, 12);
-  fadeToBlackBy(Strip2, NUM_LEDS, 12);
+  fadeToBlackBy(Strip, NUM_LEDS * 2, 12);
 }
 
 void RunEntry5()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 6;
 }
 
@@ -476,11 +465,10 @@ void running5()
       ledeffect = 0;
     }
 
-    fadeToBlackBy(Strip1, NUM_LEDS, fade);
-    fadeToBlackBy(Strip2, NUM_LEDS, fade);
+    fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
 
-    Strip1[ledeffect] = CHSV(color, 255, 255);
-    Strip2[ledeffect] = CHSV(color, 255, 255);
+    Strip[ledeffect] = CHSV(color, 255, 255);
+    Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
 
     ledeffect = ledeffect + 1;
 
@@ -490,8 +478,7 @@ void running5()
 
 void RunEntry6()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 7;
 }
 
@@ -515,13 +502,12 @@ void running6()
       ledeffect2 = 0;
     }
 
-    fadeToBlackBy(Strip1, NUM_LEDS, fade);
-    fadeToBlackBy(Strip2, NUM_LEDS, fade);
+    fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
 
-    Strip1[ledeffect] = CHSV(color, 255, 255);
-    Strip1[ledeffect2] = CHSV(color2, 255, 255);
-    Strip2[ledeffect] = CHSV(color, 255, 255);
-    Strip2[ledeffect2] = CHSV(color2, 255, 255);
+    Strip[ledeffect] = CHSV(color, 255, 255);
+    Strip[ledeffect2] = CHSV(color2, 255, 255);
+    Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
+    Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
 
     ledeffect2 = ledeffect;
     ledeffect = ledeffect + 1;
@@ -532,8 +518,8 @@ void running6()
 
 void RunEntry7()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+
   currentPattern = 8;
 }
 
@@ -545,15 +531,14 @@ void running7()
   for (int i = 0; i < NUM_LEDS; i++)
   {
     uint8_t bloodVal = sumPulse((5 / NUM_LEDS / 2) + (NUM_LEDS / 2) * i * flowDirection);
-    Strip1[i] = CHSV(bloodHue, bloodSat, bloodVal);
-    Strip2[i] = CHSV(bloodHue, bloodSat, bloodVal);
+    Strip[i] = CHSV(bloodHue, bloodSat, bloodVal);
+    Strip[i + NUM_LEDS] = CHSV(bloodHue, bloodSat, bloodVal);
   }
 }
 
 void RunEntry8()
 {
-  fill_solid(Strip1, NUM_LEDS, CRGB::Black);
-  fill_solid(Strip2, NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 9;
 }
 
@@ -569,11 +554,87 @@ void running8()
 
   uint8_t pos = map(beatsin16(80, 0), 0, 65535, 0, NUM_LEDS - 1);
 
-  Strip1[pos] = CHSV(color, 200, 255);
-  Strip2[pos] = CHSV(color, 200, 255);
+  Strip[pos] = CHSV(color, 200, 255);
+  Strip[pos + NUM_LEDS] = CHSV(color, 200, 255);
 
-  fadeToBlackBy(Strip1, NUM_LEDS, fade);
-  fadeToBlackBy(Strip2, NUM_LEDS, fade);
+  fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
+}
+
+void RunEntry9()
+{
+  fill_solid(Strip, NUM_LEDS * NUM_LEDS, CRGB::Black);
+  currentPattern = 10;
+}
+
+void running9()
+{
+#define TOTAL_LEDS 50 // both strips lenght
+#define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
+#define NUM_COMETS 4        // comet count
+
+float speed = ypr[0];
+ 
+    static float headPos[NUM_COMETS];
+    static bool initialized = false;
+    
+    const uint8_t tailLength = 3;          // tail lenght
+    const uint8_t maxBrightness = 255;      // Max brightness of comet (global brightness control still applies)
+
+    color = map(color, -180, 180, 0, 255);
+    const CRGB cometColor = CHSV(color, 200, 255); //comet color
+
+    // init once
+    if (!initialized) {
+        for (int i = 0; i < NUM_COMETS; i++) {
+            headPos[i] = (float)(i * TOTAL_LEDS / NUM_COMETS);
+        }
+        initialized = true;
+    }
+
+    // clear strip
+    FastLED.clear();
+
+    // draw comets
+    for (int k = 0; k < NUM_COMETS; k++) {
+        headPos[k] += (speed * 0.5);
+
+        while (headPos[k] >= TOTAL_LEDS) {
+            headPos[k] -= TOTAL_LEDS;
+        }
+        while (headPos[k] < 0) {
+            headPos[k] += TOTAL_LEDS;
+        }
+    }
+
+    for (int p_idx = 0; p_idx < TOTAL_LEDS; p_idx++) {
+        int logical_idx;
+
+        if (p_idx < HALF_LEDS) {
+            logical_idx = p_idx;
+        } else {
+            logical_idx = (TOTAL_LEDS - 1) - p_idx + HALF_LEDS;
+        }
+
+        CRGB finalColorForPixel = CRGB::Black;
+        for (int k = 0; k < NUM_COMETS; k++) {
+            float delta = fmod(logical_idx - headPos[k] + TOTAL_LEDS, TOTAL_LEDS);
+            
+            if (delta > HALF_LEDS) {
+                delta = TOTAL_LEDS - delta;
+            }
+
+            uint8_t brightness = 0;
+            if (delta >= 0 && delta <= tailLength) {
+                brightness = map((int)(delta * 100), 0, (tailLength * 100), maxBrightness, 0);
+            }
+            
+            if ((int)roundf(headPos[k]) == logical_idx) {
+                brightness = maxBrightness;
+            }
+            finalColorForPixel |= cometColor.scale8(brightness);
+        }
+        Strip[p_idx] = finalColorForPixel;
+    }
 }
 
 State s[] = {
@@ -586,7 +647,8 @@ State s[] = {
     State("running5", RunEntry5, running5),
     State("running6", RunEntry6, running6),
     State("running7", RunEntry7, running7),
-    State("running8", RunEntry8, running8)};
+    State("running8", RunEntry8, running8),
+    State("running9", RunEntry9, running9)};
 
 enum triggers
 {
@@ -659,6 +721,14 @@ bool pattern8()
 return false;
 }
 
+bool pattern9()
+{
+  if (currentPattern == 10){
+  return true;
+  }
+return false;
+}
+
 bool unplugged()
 //{
 //  return !UsbConnected;
@@ -726,6 +796,14 @@ bool unplugged8()
 return false;
 }
 
+bool unplugged9()
+{
+  if (currentPattern == 10 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
 Transition transitions[] = {
     Transition(&s[2], &s[0], longpress),
     Transition(&s[3], &s[0], longpress),
@@ -735,6 +813,7 @@ Transition transitions[] = {
     Transition(&s[7], &s[0], longpress),
     Transition(&s[8], &s[0], longpress),
     Transition(&s[9], &s[0], longpress),
+    Transition(&s[10], &s[0], longpress),
     Transition(&s[2], &s[3], doubleClick),
     Transition(&s[3], &s[4], doubleClick),
     Transition(&s[4], &s[5], doubleClick),
@@ -742,7 +821,8 @@ Transition transitions[] = {
     Transition(&s[6], &s[7], doubleClick),
     Transition(&s[7], &s[8], doubleClick),
     Transition(&s[8], &s[9], doubleClick),
-    Transition(&s[9], &s[2], doubleClick),
+    Transition(&s[9], &s[10], doubleClick),
+    Transition(&s[10], &s[2], doubleClick),
     Transition(&s[0], &s[1], usbpower),
     Transition(&s[2], &s[1], usbpower),
     Transition(&s[3], &s[1], usbpower),
@@ -751,7 +831,8 @@ Transition transitions[] = {
     Transition(&s[6], &s[1], usbpower),
     Transition(&s[7], &s[1], usbpower),
     Transition(&s[8], &s[1], usbpower),
-    Transition(&s[9], &s[1], usbpower)};
+    Transition(&s[9], &s[1], usbpower),
+    Transition(&s[10], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[2], 5000, NULL, "", pattern1),
@@ -762,6 +843,7 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[7], 5000, NULL, "", pattern6),
     TimedTransition(&s[0], &s[8], 5000, NULL, "", pattern7),
     TimedTransition(&s[0], &s[9], 5000, NULL, "", pattern8),
+    TimedTransition(&s[0], &s[10], 5000, NULL, "", pattern9),
     TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged),
     TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged2),
     TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged3),
@@ -769,7 +851,8 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[1], &s[6], 2000, NULL, "", unplugged5),
     TimedTransition(&s[1], &s[7], 2000, NULL, "", unplugged6),
     TimedTransition(&s[1], &s[8], 2000, NULL, "", unplugged7),
-    TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged8)};
+    TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged8),
+    TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged9)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
@@ -883,8 +966,11 @@ void setup()
   delay(1000); // 1 second delay for recovery
 
   // tell FastLED about the LED strip configuration
-  FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip1, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip2, NUM_LEDS).setCorrection(TypicalLEDStrip);
+ // FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip1, NUM_LEDS).setCorrection(TypicalLEDStrip);
+ // FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip2, NUM_LEDS).setCorrection(TypicalLEDStrip);
+
+  FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip, 0, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip, NUM_LEDS, NUM_LEDS).setCorrection(TypicalLEDStrip);
 
   // set master brightness control
   FastLED.setBrightness(BRIGHTNESS);
