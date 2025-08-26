@@ -562,7 +562,7 @@ void running8()
 
 void RunEntry9()
 {
-  fill_solid(Strip, NUM_LEDS * NUM_LEDS, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 10;
 }
 
@@ -637,6 +637,129 @@ float speed = ypr[0];
     }
 }
 
+void RunEntry10()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 11;
+}
+
+void running10()
+{
+    #define TOTAL_LEDS 50       // Total length of both strips combined
+    #define HALF_LEDS (TOTAL_LEDS / 2) // Length of each mirrored segment
+    #define NUM_COMETS2 2        // *** GEÄNDERT: Anzahl der Kometen auf NUM_COMETS2 ***
+
+    // Use ypr[0] for speed input
+    float speed = ypr[0]; 
+    
+    // Static variables to maintain state across function calls
+    static float headPos[NUM_COMETS2]; // *** GEÄNDERT: Verwendet NUM_COMETS2 ***
+    static bool initialized = false;  
+    
+    // Animation constants - adjust these to fine-tune the effect
+    const uint8_t tailLength = 15;         
+    const uint8_t maxBrightness = 255;     
+
+    // Comet Color: Determined by your 'color' input
+    int hueValue = map(color, -180, 180, 0, 255);
+    const CRGB cometColor = CHSV(hueValue, 200, 255); 
+
+    // Base flicker/sparkle settings when comets are moving
+    const uint8_t MAX_BASE_FADE_AMOUNT = 35; // Max basic fade rate (higher = faster fade)
+    const uint8_t MAX_RANDOM_FADE_AMOUNT = 15; // Max additional random fade for subtle flicker
+
+    // GLITTER specific settings (for distinct brighter pixels)
+    const uint8_t MAX_GLITTER_CHANCE = 50; // Max probability for a pixel to glitter
+    const uint8_t GLITTER_BRIGHTNESS = 220; // Helligkeit des Glitzer-Aufleuchtens
+    const CRGB GLITTER_COLOR = CRGB::White; // Unabhängige Glitzerfarbe
+
+
+    // --- Dynamische Anpassung basierend auf Geschwindigkeit ---
+    float abs_speed = fabsf(speed); 
+    
+    const float SPEED_THRESHOLD = 20.0; 
+    float speed_factor_float;
+
+    if (abs_speed >= SPEED_THRESHOLD) {
+        speed_factor_float = 1.0; 
+    } else {
+        speed_factor_float = abs_speed / SPEED_THRESHOLD; 
+    }
+
+    uint8_t speed_fraction_8bit = (uint8_t)(speed_factor_float * 255);
+    speed_fraction_8bit = constrain(speed_fraction_8bit, 0, 255); 
+
+    uint8_t currentBaseFadeAmount = lerp8by8(1, MAX_BASE_FADE_AMOUNT, speed_fraction_8bit); 
+    uint8_t currentRandomFadeAmount = lerp8by8(0, MAX_RANDOM_FADE_AMOUNT, speed_fraction_8bit);
+    uint8_t currentGlitterChance = lerp8by8(0, MAX_GLITTER_CHANCE, speed_fraction_8bit);
+    // --- Ende der dynamischen Anpassung ---
+
+    // Initialize comet start positions once
+    if (!initialized) {
+        for (int i = 0; i < NUM_COMETS2; i++) { // *** GEÄNDERT: Verwendet NUM_COMETS2 ***
+            headPos[i] = (float)(i * TOTAL_LEDS / NUM_COMETS2); // *** GEÄNDERT: Verwendet NUM_COMETS2 ***
+        }
+        initialized = true;
+    }
+
+    // Step 1: Dim all existing pixels to create the tail fade with subtle flicker
+    for (int p_idx = 0; p_idx < TOTAL_LEDS; p_idx++) {
+        uint8_t actualFadeAmount = currentBaseFadeAmount + random8(currentRandomFadeAmount + 1); 
+        Strip[p_idx].fadeToBlackBy(actualFadeAmount);
+    }
+
+    // Step 2: Update logical positions of all comets
+    for (int k = 0; k < NUM_COMETS2; k++) { // *** GEÄNDERT: Verwendet NUM_COMETS2 ***
+        headPos[k] += (speed * 0.5); 
+
+        while (headPos[k] >= TOTAL_LEDS) {
+            headPos[k] -= TOTAL_LEDS;
+        }
+        while (headPos[k] < 0) {
+            headPos[k] += TOTAL_LEDS;
+        }
+    }
+
+    // Step 3: Draw comet heads AND add distinct glitter pixels
+    for (int k = 0; k < NUM_COMETS2; k++) { // *** GEÄNDERT: Verwendet NUM_COMETS2 ***
+        int logical_head_idx = (int)roundf(headPos[k]);
+
+        // Convert logical head index to its physical LED index
+        int physicalLedIndex;
+        if (logical_head_idx < HALF_LEDS) {
+            physicalLedIndex = logical_head_idx;
+        } else {
+            physicalLedIndex = (TOTAL_LEDS - 1) - logical_head_idx + HALF_LEDS;
+        }
+        
+        // Set the comet head to its full color and brightness
+        Strip[physicalLedIndex] = cometColor;
+
+        // Add distinct glitter pixels in the tail area
+        for (int i = 1; i <= tailLength; i++) { 
+            int logical_tail_pixel_idx = logical_head_idx - i;
+            if (logical_tail_pixel_idx < 0) {
+                logical_tail_pixel_idx += TOTAL_LEDS;
+            }
+
+            // Convert logical tail pixel index to physical LED index
+            int physicalTailLedIndex;
+            if (logical_tail_pixel_idx < HALF_LEDS) {
+                physicalTailLedIndex = logical_tail_pixel_idx;
+            } else {
+                physicalTailLedIndex = (TOTAL_LEDS - 1) - logical_tail_pixel_idx + HALF_LEDS;
+            }
+
+            // Randomly make this tail pixel glitter, based on currentGlitterChance
+            if (random8() < currentGlitterChance) { 
+                CRGB currentPixelColor = Strip[physicalTailLedIndex];
+                CRGB blendedGlitterColor = blend(currentPixelColor, GLITTER_COLOR, GLITTER_BRIGHTNESS);
+                Strip[physicalTailLedIndex] = blendedGlitterColor;
+            }
+        }
+    }
+}
+
 State s[] = {
     State("battery", BatteryEntry, BatteryRunning),
     State("charging", ChargingEntry, ChargingRunning, ChargingExit),
@@ -648,7 +771,8 @@ State s[] = {
     State("running6", RunEntry6, running6),
     State("running7", RunEntry7, running7),
     State("running8", RunEntry8, running8),
-    State("running9", RunEntry9, running9)};
+    State("running9", RunEntry9, running9),
+    State("running10", RunEntry10, running10)};
 
 enum triggers
 {
@@ -660,7 +784,7 @@ enum triggers
 bool pattern1()
 {
   if (currentPattern == 2){
-  return false;
+  return true;
   }
 return false;
 }
@@ -724,6 +848,14 @@ return false;
 bool pattern9()
 {
   if (currentPattern == 10){
+  return true;
+  }
+return false;
+}
+
+bool pattern10()
+{
+  if (currentPattern == 11){
   return true;
   }
 return false;
@@ -804,6 +936,14 @@ bool unplugged9()
 return false;
 }
 
+bool unplugged10()
+{
+  if (currentPattern == 11 && UsbConnected == false){
+  return true;
+  }
+return false;
+}
+
 Transition transitions[] = {
     Transition(&s[2], &s[0], longpress),
     Transition(&s[3], &s[0], longpress),
@@ -813,7 +953,8 @@ Transition transitions[] = {
     Transition(&s[7], &s[0], longpress),
     Transition(&s[8], &s[0], longpress),
     Transition(&s[9], &s[0], longpress),
-    Transition(&s[10], &s[0], longpress),
+    Transition(&s[10], &s[11], longpress),
+    Transition(&s[11], &s[0], longpress),
     Transition(&s[2], &s[3], doubleClick),
     Transition(&s[3], &s[4], doubleClick),
     Transition(&s[4], &s[5], doubleClick),
@@ -822,7 +963,8 @@ Transition transitions[] = {
     Transition(&s[7], &s[8], doubleClick),
     Transition(&s[8], &s[9], doubleClick),
     Transition(&s[9], &s[10], doubleClick),
-    Transition(&s[10], &s[2], doubleClick),
+    Transition(&s[10], &s[11], doubleClick),
+    Transition(&s[11], &s[2], doubleClick),
     Transition(&s[0], &s[1], usbpower),
     Transition(&s[2], &s[1], usbpower),
     Transition(&s[3], &s[1], usbpower),
@@ -832,7 +974,8 @@ Transition transitions[] = {
     Transition(&s[7], &s[1], usbpower),
     Transition(&s[8], &s[1], usbpower),
     Transition(&s[9], &s[1], usbpower),
-    Transition(&s[10], &s[1], usbpower)};
+    Transition(&s[10], &s[1], usbpower),
+    Transition(&s[11], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[2], 5000, NULL, "", pattern1),
@@ -844,6 +987,7 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[8], 5000, NULL, "", pattern7),
     TimedTransition(&s[0], &s[9], 5000, NULL, "", pattern8),
     TimedTransition(&s[0], &s[10], 5000, NULL, "", pattern9),
+    TimedTransition(&s[0], &s[11], 5000, NULL, "", pattern10),
     TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged),
     TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged2),
     TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged3),
@@ -852,7 +996,8 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[1], &s[7], 2000, NULL, "", unplugged6),
     TimedTransition(&s[1], &s[8], 2000, NULL, "", unplugged7),
     TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged8),
-    TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged9)};
+    TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged9),
+    TimedTransition(&s[1], &s[11], 2000, NULL, "", unplugged10)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
