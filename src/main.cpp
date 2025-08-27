@@ -40,6 +40,8 @@
 #include <Smoothed.h>
 //EEPROM Library
 #include <EEPROM.h>
+// Math library
+#include <math.h>
 
 /* MPU6050 default I2C address is 0x68*/
 MPU6050 mpu;
@@ -73,16 +75,13 @@ reference frame. Yaw is relative if there is no magnetometer present.
 #define OUTPUT_READABLE_WORLDACCEL
 // #define OUTPUT_TEAPOT
 
-// Controller definition für offsets und led reihenfolge
-#define Controller2
-
 int const INTERRUPT_PIN = 3; // Define the interruption #0 pin
 bool blinkState;
 
 // Generally, you should use "unsigned long" for variables that hold time
 // The value will quickly become too large for an int to store
 unsigned long previousMillis = 0; // will store last time LED was updated
-unsigned long currentMillis = millis();
+unsigned long currentMillis = 0;
 // constants won't change:
 const long interval = 1000; // interval at which to blink (milliseconds)
 bool blink;
@@ -109,8 +108,7 @@ uint8_t teapotPacket[14] = {'$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r',
 
 /*------Interrupt detection routine------*/
 volatile bool MPUInterrupt = false; // Indicates whether MPU6050 interrupt pin has gone high
-void DMPDataReady()
-{
+void DMPDataReady(){
   MPUInterrupt = true;
 }
 
@@ -121,12 +119,7 @@ void DMPDataReady()
 // #define CLK_PIN   4
 #define LED_TYPE WS2811
 
-#ifdef Controller1
-#define COLOR_ORDER BGR
-#endif
-#ifdef Controller2
 #define COLOR_ORDER GRB
-#endif
 
 #define NUM_LEDS 25
 // CRGB Strip1[NUM_LEDS];
@@ -140,10 +133,7 @@ int BRIGHTNESS = 95;
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 
 // led stuff
-u_int32_t combined = 0;
-u_int32_t CombinedSmooth;
-
-Smoothed<u_int32_t> myAccel;
+Smoothed<uint32_t> myAccel;
 
 uint8_t bloodHue = 96;       // Blood color [hue from 0-255]
 uint8_t bloodSat = 255;      // Blood staturation [0-255]
@@ -155,6 +145,11 @@ uint8_t baseBrightness = 0;  // Brightness of LEDs when not pulsing. Set to 0 fo
 
 int ledeffect;
 int ledeffect2;
+
+#define TOTAL_LEDS 50 // both strips lenght
+#define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
+#define NUM_COMETS 4        // comet count
+#define NUM_COMETS2 2        // comet count2
 
 // EEPROM stuff
 // Memory addresses in the emulated EEPROM
@@ -206,13 +201,17 @@ int sumPulse(int time_shift)
   return qadd8(pulse1, pulse2); // Add pulses together without overflow
 }
 
+inline uint32_t smoothedMotion() {
+  uint32_t s = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
+  myAccel.add(s);
+  return myAccel.get();
+}
+
 // Button config
 const byte multiresponseButtonpin = 23;
 Switch multiresponseButton = Switch(multiresponseButtonpin, INPUT);
 
 // Battery variables
-float full_battery = 4.2;  // reference voltages for a full/empty battery, in volts
-float empty_battery = 3.2; // the values could vary by battery size/manufacturer so you might need to adjust them
 int UsbConnected = 0;
 int RawVoltage = 0;
 float Voltage = 0;
@@ -233,12 +232,12 @@ void ChargingEntry()
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(32);
 }
+
 void ChargingRunning()
 {
   RawVoltage = analogRead(29);
   Voltage = RawVoltage * 3.0 * 3.3 / 4096.0;
 
-  UsbConnected = digitalRead(24);
   currentMillis = millis();
 
   if (currentMillis - previousMillis >= 500)
@@ -246,57 +245,30 @@ void ChargingRunning()
     // save the last time you blinked the LED
     previousMillis = currentMillis;
     // if the LED is off turn it on and vice-versa:
-    if (blink == 0)
-    {
+    if (blink == 0){
       blink = 1;
     }
-    else
-    {
+    else{
       blink = 0;
     }
   }
 
-  if (UsbConnected == 1 && blink == 1)
-  {
-    Strip[25] = CRGB::Red;
-  }
-  else if (UsbConnected == 1 && blink == 0)
-  {
-    Strip[25] = CRGB::Black;
-  }
+//hysteresis for voltage measurement
+  static float vLast = 0;
+const float HYS = 0.03;  // 30 mV
+if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
 
-  if (Voltage >= 4.2)
-  {
-    fill_solid(Strip, 5, CRGB::Blue);
-  }
-  if (Voltage < 4.2 && Voltage > 4.0)
-  {
-    fill_solid(Strip, 4, CRGB::Green);
-  }
-  if (Voltage < 4.0 && Voltage > 3.8)
-  {
-    fill_solid(Strip, 3, CRGB::Green);
-  }
-  if (Voltage < 3.8 && Voltage > 3.6)
-  {
-    fill_solid(Strip, 2, CRGB::Yellow);
-  }
-  if (Voltage < 3.6 && Voltage > 3.4)
-  {
-    fill_solid(Strip, 1, CRGB::Yellow);
-  }
-  if (Voltage < 3.4 && Voltage > 3.2)
-  {
-    fill_solid(Strip, 1, CRGB::Red);
-  }
-  if (Voltage < 3.2 && Voltage > 3.0)
-  {
-    fill_solid(Strip, 1, CRGB::Black);
-  }
-  if (Voltage < 3.0 && Voltage > 2.8)
-  {
-    fill_solid(Strip, 1, CRGB::Black);
-  }
+fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
+
+Strip[25] = blink ? CRGB::Red : CRGB::Black;
+
+if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
+else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
+else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
+else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
+else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
+else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
+else                      {/* leer lassen = sehr leer */}
 }
 
 void ChargingExit()
@@ -321,57 +293,30 @@ void BatteryRunning()
     // save the last time you blinked the LED
     previousMillis = currentMillis;
     // if the LED is off turn it on and vice-versa:
-    if (blink == 0)
-    {
+    if (blink == 0){
       blink = 1;
     }
-    else
-    {
+    else{
       blink = 0;
     }
   }
 
-  if (blink == 1)
-  {
-    Strip[25] = CRGB::Blue;
-  }
-  else if (blink == 0)
-  {
-    Strip[25] = CRGB::Black;
-  }
+  //hysteresis for voltage measurement
+  static float vLast = 0;
+const float HYS = 0.03;  // 30 mV
+if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
 
-  if (Voltage >= 4.2)
-  {
-    fill_solid(Strip, 5, CRGB::Blue);
-  }
-  if (Voltage < 4.2 && Voltage > 4.0)
-  {
-    fill_solid(Strip, 4, CRGB::Green);
-  }
-  if (Voltage < 4.0 && Voltage > 3.8)
-  {
-    fill_solid(Strip, 3, CRGB::Green);
-  }
-  if (Voltage < 3.8 && Voltage > 3.6)
-  {
-    fill_solid(Strip, 2, CRGB::Yellow);
-  }
-  if (Voltage < 3.6 && Voltage > 3.4)
-  {
-    fill_solid(Strip, 1, CRGB::Yellow);
-  }
-  if (Voltage < 3.4 && Voltage > 3.2)
-  {
-    fill_solid(Strip, 1, CRGB::Red);
-  }
-  if (Voltage < 3.2 && Voltage > 3.0)
-  {
-    fill_solid(Strip, 1, CRGB::Black);
-  }
-  if (Voltage < 3.0 && Voltage > 2.8)
-  {
-    fill_solid(Strip, 1, CRGB::Black);
-  }
+fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
+
+Strip[25] = blink ? CRGB::Blue : CRGB::Black;
+
+if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
+else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
+else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
+else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
+else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
+else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
+else                      {/* leer lassen = sehr leer */}
 }
 
 void RunEntry()
@@ -408,13 +353,10 @@ void running3()
 {
 #define MASTER_BRIGHTNESS 255  // Set the master brigtness value [should be greater then min_brightness value].
   uint8_t min_brightness = 30; // Set a minimum brightness level.
-  combined = abs(aaWorld.x) + abs(aaWorld.y);
-  myAccel.add(combined);
-  CombinedSmooth = myAccel.get();
-  accel = map(CombinedSmooth, 2000, 20000, min_brightness, MASTER_BRIGHTNESS);
+  accel = map(smoothedMotion(), 2000, 20000, min_brightness, MASTER_BRIGHTNESS);
   accelcon = constrain(accel, min_brightness, MASTER_BRIGHTNESS);
   color = map(color, -180, 180, 0, 255);
-  FastLED.setBrightness(accelcon); // Set master brightness based on potentiometer position.
+  FastLED.setBrightness(accelcon); // Set master brightness based on acceleration.
 
   fill_solid(Strip, NUM_LEDS * 2, CHSV(color, 255, 255));
 }
@@ -428,7 +370,7 @@ void RunExit3()
 void RunEntry4()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 4;
+  currentPattern = 5;
 }
 
 void running4()
@@ -450,10 +392,7 @@ void RunEntry5()
 void running5()
 {
   color = map(color, -180, 180, 0, 255);
-  combined = abs(aaWorld.x) + abs(aaWorld.y);
-  myAccel.add(combined);
-  CombinedSmooth = myAccel.get();
-  accel = map(CombinedSmooth, 2000, 20000, 100, 0);
+  accel = map(smoothedMotion(), 2000, 20000, 100, 0);
   fade = map(accel, 20, 160, 60, 12);
   accel = constrain(accel, 0, 100);
 
@@ -486,10 +425,7 @@ void running6()
 {
   color = map(color, -180, 180, 0, 255);
   color2 = map(color2, 180, -180, 0, 255);
-  combined = abs(aaWorld.x) + abs(aaWorld.y);
-  myAccel.add(combined);
-  CombinedSmooth = myAccel.get();
-  accel = map(CombinedSmooth, 2000, 20000, 100, 0);
+  accel = map(smoothedMotion(), 2000, 20000, 100, 0);
   fade = map(accel, 20, 160, 60, 12);
   accel = constrain(accel, 0, 100);
 
@@ -545,10 +481,7 @@ void RunEntry8()
 void running8()
 {
   color = map(color, -180, 180, 0, 255);
-  combined = abs(aaWorld.x) + abs(aaWorld.y);
-  myAccel.add(combined);
-  CombinedSmooth = myAccel.get();
-  accel = map(CombinedSmooth, 0, 10000, 20, 160);
+  accel = map(smoothedMotion(), 0, 10000, 20, 160);
   fade = map(accel, 20, 160, 48, 6);
   fade = constrain(fade, 6, 48);
 
@@ -568,9 +501,6 @@ void RunEntry9()
 
 void running9()
 {
-#define TOTAL_LEDS 50 // both strips lenght
-#define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
-#define NUM_COMETS 4        // comet count
 
 float speed = ypr[0];
  
@@ -645,9 +575,6 @@ void RunEntry10()
 
 void running10()
 {
-    #define TOTAL_LEDS 50       // Total length of both strips combined
-    #define HALF_LEDS (TOTAL_LEDS / 2) // Length of each mirrored segment
-    #define NUM_COMETS2 2        // *** GEÄNDERT: Anzahl der Kometen auf NUM_COMETS2 ***
 
     // Use ypr[0] for speed input
     float speed = ypr[0]; 
@@ -781,167 +708,12 @@ enum triggers
   usbpower
 };
 
-bool pattern1()
-{
-  if (currentPattern == 2){
-  return true;
-  }
-return false;
-}
+template<int N>
+static inline bool PatternIs() { return currentPattern == N; }
 
-bool pattern2()
-{
-  if (currentPattern == 3){
-  return true;
-  }
-return false;
-}
-
-bool pattern3()
-{
-  if (currentPattern == 4){
-  return true;
-  }
-return false;
-}
-
-bool pattern4()
-{
-  if (currentPattern == 5){
-  return true;
-  }
-return false;
-}
-
-bool pattern5()
-{
-  if (currentPattern == 6){
-  return true;
-  }
-return false;
-}
-
-bool pattern6()
-{
-  if (currentPattern == 7){
-  return true;
-  }
-return false;
-}
-
-bool pattern7()
-{
-  if (currentPattern == 8){
-  return true;
-  }
-return false;
-}
-
-bool pattern8()
-{
-  if (currentPattern == 9){
-  return true;
-  }
-return false;
-}
-
-bool pattern9()
-{
-  if (currentPattern == 10){
-  return true;
-  }
-return false;
-}
-
-bool pattern10()
-{
-  if (currentPattern == 11){
-  return true;
-  }
-return false;
-}
-
-bool unplugged()
-//{
-//  return !UsbConnected;
-//}
-{
-  if (currentPattern == 2 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged2()
-{
-  if (currentPattern == 3 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged3()
-{
-  if (currentPattern == 4 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged4()
-{
-  if (currentPattern == 5 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged5()
-{
-  if (currentPattern == 6 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged6()
-{
-  if (currentPattern == 7 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged7()
-{
-  if (currentPattern == 8 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged8()
-{
-  if (currentPattern == 9 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged9()
-{
-  if (currentPattern == 10 && UsbConnected == false){
-  return true;
-  }
-return false;
-}
-
-bool unplugged10()
-{
-  if (currentPattern == 11 && UsbConnected == false){
-  return true;
-  }
-return false;
+template<int N>
+static inline bool unplugged() {
+  return !UsbConnected && (currentPattern == N);
 }
 
 Transition transitions[] = {
@@ -978,26 +750,26 @@ Transition transitions[] = {
     Transition(&s[11], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
-    TimedTransition(&s[0], &s[2], 5000, NULL, "", pattern1),
-    TimedTransition(&s[0], &s[3], 5000, NULL, "", pattern2),
-    TimedTransition(&s[0], &s[4], 5000, NULL, "", pattern3),
-    TimedTransition(&s[0], &s[5], 5000, NULL, "", pattern4),
-    TimedTransition(&s[0], &s[6], 5000, NULL, "", pattern5),
-    TimedTransition(&s[0], &s[7], 5000, NULL, "", pattern6),
-    TimedTransition(&s[0], &s[8], 5000, NULL, "", pattern7),
-    TimedTransition(&s[0], &s[9], 5000, NULL, "", pattern8),
-    TimedTransition(&s[0], &s[10], 5000, NULL, "", pattern9),
-    TimedTransition(&s[0], &s[11], 5000, NULL, "", pattern10),
-    TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged),
-    TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged2),
-    TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged3),
-    TimedTransition(&s[1], &s[5], 2000, NULL, "", unplugged4),
-    TimedTransition(&s[1], &s[6], 2000, NULL, "", unplugged5),
-    TimedTransition(&s[1], &s[7], 2000, NULL, "", unplugged6),
-    TimedTransition(&s[1], &s[8], 2000, NULL, "", unplugged7),
-    TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged8),
-    TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged9),
-    TimedTransition(&s[1], &s[11], 2000, NULL, "", unplugged10)};
+    TimedTransition(&s[0], &s[2], 5000, NULL, "", PatternIs<2>),
+    TimedTransition(&s[0], &s[3], 5000, NULL, "", PatternIs<3>),
+    TimedTransition(&s[0], &s[4], 5000, NULL, "", PatternIs<4>),
+    TimedTransition(&s[0], &s[5], 5000, NULL, "", PatternIs<5>),
+    TimedTransition(&s[0], &s[6], 5000, NULL, "", PatternIs<6>),
+    TimedTransition(&s[0], &s[7], 5000, NULL, "", PatternIs<7>),
+    TimedTransition(&s[0], &s[8], 5000, NULL, "", PatternIs<8>),
+    TimedTransition(&s[0], &s[9], 5000, NULL, "", PatternIs<9>),
+    TimedTransition(&s[0], &s[10], 5000, NULL, "", PatternIs<10>),
+    TimedTransition(&s[0], &s[11], 5000, NULL, "", PatternIs<11>),
+    TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged<2>),
+    TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged<3>),
+    TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged<4>),
+    TimedTransition(&s[1], &s[5], 2000, NULL, "", unplugged<5>),
+    TimedTransition(&s[1], &s[6], 2000, NULL, "", unplugged<6>),
+    TimedTransition(&s[1], &s[7], 2000, NULL, "", unplugged<7>),
+    TimedTransition(&s[1], &s[8], 2000, NULL, "", unplugged<8>),
+    TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged<9>),
+    TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged<10>),
+    TimedTransition(&s[1], &s[11], 2000, NULL, "", unplugged<11>)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
@@ -1052,24 +824,12 @@ void setup()
   devStatus = mpu.dmpInitialize();
 
   /* Supply your gyro offsets here, scaled for min sensitivity */
-#ifdef Controller1
-  /*controller1 */
-  mpu.setXGyroOffset(80);
-  mpu.setYGyroOffset(-13);
-  mpu.setZGyroOffset(14);
-  mpu.setXAccelOffset(-503);
-  mpu.setYAccelOffset(-537);
-  mpu.setZAccelOffset(2601);
-#endif
-#ifdef Controller2
-  /*controller2*/
   mpu.setXGyroOffset(111);
   mpu.setYGyroOffset(-6);
   mpu.setZGyroOffset(34);
   mpu.setXAccelOffset(-3137);
   mpu.setYAccelOffset(-7);
   mpu.setZAccelOffset(3687);
-#endif
 
   /* Making sure it worked (returns 0 if so) */
   if (devStatus == 0)
@@ -1135,6 +895,9 @@ void setup()
     // Read values from EEPROM
     EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
     EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
+  // Guards
+  if (currentPattern < 2 || currentPattern > 11) currentPattern = 2;
+  if (currentBrightness < 95 || currentBrightness > 255) currentBrightness = 95;
     Serial.println("Current values:");
     Serial.print("Pattern: ");
     Serial.println(currentPattern);
