@@ -692,8 +692,8 @@ State s[] = {
     State("running8", RunEntry8, running8),
     State("running9", RunEntry9, running9),
     State("running10", RunEntry10, running10),
-    State("running10", RunEntry11, running11),
-    State("running10", RunEntry12, running12)};
+    State("running11", RunEntry11, running11),
+    State("running12", RunEntry12, running12)};
 
 enum triggers
 {
@@ -747,7 +747,7 @@ Transition transitions[] = {
     Transition(&s[10], &s[1], usbpower),
     Transition(&s[11], &s[1], usbpower),
     Transition(&s[12], &s[1], usbpower),
-    Transition(&s[12], &s[1], usbpower)};
+    Transition(&s[13], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[2], 5000, NULL, "", PatternIs<2>),
@@ -773,7 +773,7 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged<10>),
     TimedTransition(&s[1], &s[11], 2000, NULL, "", unplugged<11>),
     TimedTransition(&s[1], &s[12], 2000, NULL, "", unplugged<12>),
-    TimedTransition(&s[1], &s[12], 2000, NULL, "", unplugged<13>)};
+    TimedTransition(&s[1], &s[13], 2000, NULL, "", unplugged<13>)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
