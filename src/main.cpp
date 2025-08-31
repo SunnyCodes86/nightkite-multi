@@ -126,7 +126,7 @@ void DMPDataReady(){
 CRGB Strip[NUM_LEDS * 2];
 
 int BRIGHTNESS = 95;
-#define MAX_BRIGHTNESS 256
+#define MAX_BRIGHTNESS 255
 #define FRAMES_PER_SECOND 120
 
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
@@ -1109,8 +1109,8 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  //UsbConnected = digitalRead(24);
-  UsbConnected = 0;
+  UsbConnected = digitalRead(24);
+  //UsbConnected = 0;
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
