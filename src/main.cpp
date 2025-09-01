@@ -1119,7 +1119,7 @@ void loop()
   if (multiresponseButton.singleClick())
   {
     BRIGHTNESS += 32; // brightness = 95-255, so steps of 32
-    if (BRIGHTNESS >= MAX_BRIGHTNESS)
+    if (BRIGHTNESS > MAX_BRIGHTNESS)
     {
       BRIGHTNESS = 95; // we roll over to 95 bright
     }
