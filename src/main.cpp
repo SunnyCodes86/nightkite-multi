@@ -167,7 +167,7 @@ int currentPattern = 2;
 int currentBrightness = 95;
 
 // copies of current values
-// needed to detect chances (to limit wear of flash memory)
+// needed to detect changes (to limit wear of flash memory)
 int lastSavedPattern = 2;
 int lastSavedBrightness = 95;
 
@@ -267,7 +267,7 @@ else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
 else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
 else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
 else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
-else                      {/* leer lassen = sehr leer */}
+else                      {/* leave empty = very empty */}
 }
 
 void ChargingExit()
@@ -315,7 +315,7 @@ else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
 else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
 else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
 else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
-else                      {/* leer lassen = sehr leer */}
+else                      {/* leave empty = very empty */}
 }
 
 void RunEntry()
@@ -578,11 +578,11 @@ void running10()
   uint8_t hue = map((int)(ypr[0]*180.0f/M_PI), -180, 180, 0, 255);
 
   if (m < 3500) {
-    // ruhiges „Atmen“
+    // calm  „Breathing“
     uint8_t breath = beatsin8(10, 40, 180);
     fill_solid(Strip, TOTAL_LEDS, CHSV(hue, 255, breath));
   } else {
-    // Sturm: Funken proportional zu Bewegung
+    // Storm: Sparcs propotional to Movement.
     fadeToBlackBy(Strip, TOTAL_LEDS, 40);
     uint8_t sparks = constrain(map((int)m, 3500, 20000, 1, 8), 1, 12);
     for (uint8_t s=0; s<sparks; s++) {
@@ -600,7 +600,7 @@ void RunEntry11()
 
 void running11()
 {
-  // einfacher Magnitude-Trigger (|x|+|y|+|z|)
+  // simple Magnitude-Trigger (|x|+|y|+|z|)
   uint32_t mag = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y) + (uint32_t)abs(aaWorld.z);
 
   static uint16_t phase = 10000;
@@ -609,7 +609,7 @@ void running11()
   int32_t jerk = (int32_t)mag - (int32_t)prevMag;
   prevMag = mag;
 
-  if (jerk > 4000) { // Schwelle feinjustieren
+  if (jerk > 4000) { // threshold adjustment
     phase = 0;
   }
 
@@ -619,11 +619,11 @@ void running11()
     phase += 20 + map((int)smoothedMotion(), 2000, 20000, 0, 20);
     uint8_t hue = map((int)(ypr[0]*180.0f/M_PI), -180, 180, 0, 255);
 
-    // Welle von der Mitte zu den Enden – auf beiden Strips identisch
+    // wave from middle to the ends - identical on both strips
     int center = NUM_LEDS / 2;
     for (int i = 0; i < NUM_LEDS; i++) {
       int16_t d = abs(i - center);
-      int16_t k = (int16_t)d * 24 - (int16_t)phase;   // 24 = Wellenabstand
+      int16_t k = (int16_t)d * 24 - (int16_t)phase;   // 24 = Wave distance
       k = abs(k);
       if (k < 24) {
         uint8_t bri = map(k, 0, 24, 255, 0);
@@ -644,7 +644,7 @@ void running12()
 {
   static float head = 0;
   static float prevYaw = 0;
-  static int   dir = +1;            // gemerkte Richtung (+1 oder -1)
+  static int   dir = +1;            // stored direction (+1 or -1)
 
   float yaw = ypr[0];
   float dy  = yaw - prevYaw;
@@ -653,11 +653,11 @@ void running12()
   if (dy < -M_PI) dy += 2*M_PI;
   prevYaw = yaw;
 
-  // Rate -> LED-Geschwindigkeit
+  // Rate -> LED-Speed
   float speed = dy * (TOTAL_LEDS * 0.5f);  // Skala nach Geschmack
 
-  // Richtung mit kleiner Totzone (verhindert Richtungsflackern um 0)
-  const float DEAD_BAND = 0.02f;           // ~justierbar
+  // Direction with dead band (prevents flickering around 0)
+  const float DEAD_BAND = 0.02f;           // ~adjustable
   if (speed >  DEAD_BAND) dir = +1;
   if (speed < -DEAD_BAND) dir = -1;
 
@@ -665,17 +665,17 @@ void running12()
   while (head >= TOTAL_LEDS) head -= TOTAL_LEDS;
   while (head < 0)           head += TOTAL_LEDS;
 
-  // weicher Nachleuchteffekt (symmetrisch)
+  // smooth afterglow (symmetrical)
   blur1d(Strip, TOTAL_LEDS, 64);
 
   uint8_t hue = map((int)(yaw*180.0f/M_PI), -180, 180, 0, 255);
   int h = (int)head;
   Strip[h] += CHSV(hue, 220, 255);
 
-  // Schweif immer hinter der Bewegungsrichtung dimmen
+  // dim tail always behind movement direction
   for (int i = 1; i <= 6; ++i) {
-    int p = (h - dir * i + TOTAL_LEDS) % TOTAL_LEDS;  // hinter dem Kopf
-    Strip[p].nscale8(230);                             // leicht abdunkeln
+    int p = (h - dir * i + TOTAL_LEDS) % TOTAL_LEDS;  // behind head
+    Strip[p].nscale8(230);                             // dim tail
   }
 }
 
