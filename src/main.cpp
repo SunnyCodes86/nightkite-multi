@@ -25,27 +25,23 @@
   https://github.com/ElectronicCats/mpu6050/wiki
 
 */
-//Arduino.h
-#include <Arduino.h>
-// mpu5060 library
-#include "MPU6050_6Axis_MotionApps612.h" 
-// FastLED
-#include <FastLED.h>
-// State Machine
-#include "SimpleFSM.h"
-// Button library
-#include "avdweb_Switch.h"
-// Smoothing library
-#include <Smoothed.h>
-//EEPROM Library
-#include <EEPROM.h>
-// Math library
-#include <math.h>
 
-/* MPU6050 default I2C address is 0x68*/
-MPU6050 mpu;
-// MPU6050 mpu(0x69); //Use for AD0 high
-// MPU6050 mpu(0x68, &Wire1); //Use for AD0 low, but 2nd Wire (TWI/I2C) object.
+// ============================================================================
+//  INCLUDES
+// ============================================================================
+
+#include <Arduino.h> //Arduino.h
+#include "MPU6050_6Axis_MotionApps612.h" // mpu5060 library
+#include <FastLED.h> // FastLED
+#include "SimpleFSM.h" // State Machine
+#include "avdweb_Switch.h" // Button library
+#include <Smoothed.h> // Smoothing library
+#include <EEPROM.h> //EEPROM Library
+#include <math.h> // Math library
+
+// ============================================================================
+//  OUTPUT FORMAT SELECTION
+// ============================================================================
 
 /* OUTPUT FORMAT DEFINITION-------------------------------------------------------------------------------------------
 - Use "OUTPUT_READABLE_QUATERNION" for quaternion commponents in [w, x, y, z] format. Quaternion does not
@@ -74,53 +70,24 @@ reference frame. Yaw is relative if there is no magnetometer present.
 #define OUTPUT_READABLE_WORLDACCEL
 // #define OUTPUT_TEAPOT
 
+// ============================================================================
+//  HARDWARE & LED CONFIG
+// ============================================================================
+
 int const INTERRUPT_PIN = 3; // Define the interruption #0 pin
-bool blinkState;
-
-// Generally, you should use "unsigned long" for variables that hold time
-// The value will quickly become too large for an int to store
-unsigned long previousMillis = 0; // will store last time LED was updated
-unsigned long currentMillis = 0;
-// constants won't change:
-const long interval = 1000; // interval at which to blink (milliseconds)
-bool blink;
-
-/*---MPU6050 Control/Status Variables---*/
-bool DMPReady = false;  // Set true if DMP init was successful
-uint8_t MPUIntStatus;   // Holds actual interrupt status byte from MPU
-uint8_t devStatus;      // Return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // Expected DMP packet size (default is 42 bytes)
-uint8_t FIFOBuffer[64]; // FIFO storage buffer
-
-/*---Orientation/Motion Variables---*/
-Quaternion q;        // [w, x, y, z]         Quaternion container
-VectorInt16 aa;      // [x, y, z]            Accel sensor measurements
-VectorInt16 gy;      // [x, y, z]            Gyro sensor measurements
-VectorInt16 aaReal;  // [x, y, z]            Gravity-free accel sensor measurements
-VectorInt16 aaWorld; // [x, y, z]            World-frame accel sensor measurements
-VectorFloat gravity; // [x, y, z]            Gravity vector
-float euler[3];      // [psi, theta, phi]    Euler angle container
-float ypr[3];        // [yaw, pitch, roll]   Yaw/Pitch/Roll container and gravity vector
-
-/*-Packet structure for InvenSense teapot demo-*/
-uint8_t teapotPacket[14] = {'$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n'};
-
-/*------Interrupt detection routine------*/
-volatile bool MPUInterrupt = false; // Indicates whether MPU6050 interrupt pin has gone high
-void DMPDataReady(){
-  MPUInterrupt = true;
-}
-
-// LED config
 
 #define PinStrip1 12
 #define PinStrip2 13
 // #define CLK_PIN   4
 #define LED_TYPE WS2811
-
 #define COLOR_ORDER GRB
 
 #define NUM_LEDS 25
+#define TOTAL_LEDS 50 // both strips lenght
+#define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
+#define NUM_COMETS 4        // comet count
+#define NUM_COMETS2 2        // comet count2
+
 // CRGB Strip1[NUM_LEDS];
 // CRGB Strip2[NUM_LEDS];
 CRGB Strip[NUM_LEDS * 2];
@@ -131,26 +98,10 @@ int BRIGHTNESS = 95;
 
 uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 
-// led stuff
-Smoothed<uint32_t> myAccel;
+// ============================================================================
+//  EEPROM LAYOUT
+// ============================================================================
 
-uint8_t bloodHue = 96;       // Blood color [hue from 0-255]
-uint8_t bloodSat = 255;      // Blood staturation [0-255]
-int flowDirection = -1;      // Use either 1 or -1 to set flow direction
-uint16_t cycleLength = 1300; // Lover values = continuous flow, higher values = distinct pulses.
-uint16_t pulseLength = 200;  // How long the pulse takes to fade out.  Higher value is longer.
-uint16_t pulseOffset = 250;  // Delay before second pulse.  Higher value is more delay.
-uint8_t baseBrightness = 0;  // Brightness of LEDs when not pulsing. Set to 0 for off.
-
-int ledeffect;
-int ledeffect2;
-
-#define TOTAL_LEDS 50 // both strips lenght
-#define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
-#define NUM_COMETS 4        // comet count
-#define NUM_COMETS2 2        // comet count2
-
-// EEPROM stuff
 // Memory addresses in the emulated EEPROM
 // An int on the Pico is 4 bytes.
 // We store value1 at address 0 and value2 directly after it.
@@ -175,6 +126,93 @@ int lastSavedBrightness = 95;
 unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
 //const unsigned long UPDATE_INTERVAL = 30 * 1000; // 30 sec for debug
+
+// ============================================================================
+//  MPU6050 & MOTION STATE
+// ============================================================================
+/* MPU6050 default I2C address is 0x68*/
+MPU6050 mpu;
+// MPU6050 mpu(0x69); //Use for AD0 high
+// MPU6050 mpu(0x68, &Wire1); //Use for AD0 low, but 2nd Wire (TWI/I2C) object.
+
+/*---MPU6050 Control/Status Variables---*/
+bool DMPReady = false;  // Set true if DMP init was successful
+uint8_t MPUIntStatus;   // Holds actual interrupt status byte from MPU
+uint8_t devStatus;      // Return status after each device operation (0 = success, !0 = error)
+uint16_t packetSize;    // Expected DMP packet size (default is 42 bytes)
+uint8_t FIFOBuffer[64]; // FIFO storage buffer
+
+/*---Orientation/Motion Variables---*/
+Quaternion q;        // [w, x, y, z]         Quaternion container
+VectorInt16 aa;      // [x, y, z]            Accel sensor measurements
+VectorInt16 gy;      // [x, y, z]            Gyro sensor measurements
+VectorInt16 aaReal;  // [x, y, z]            Gravity-free accel sensor measurements
+VectorInt16 aaWorld; // [x, y, z]            World-frame accel sensor measurements
+VectorFloat gravity; // [x, y, z]            Gravity vector
+float euler[3];      // [psi, theta, phi]    Euler angle container
+float ypr[3];        // [yaw, pitch, roll]   Yaw/Pitch/Roll container and gravity vector
+
+/*-Packet structure for InvenSense teapot demo-*/
+uint8_t teapotPacket[14] = {'$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n'};
+
+volatile bool MPUInterrupt = false; // Indicates whether MPU6050 interrupt pin has gone high
+/*------Interrupt detection routine------*/
+void DMPDataReady(){
+  MPUInterrupt = true;
+}
+
+// ============================================================================
+//  BUTTON, BATTERY, TIMING
+// ============================================================================
+
+// Button config
+const byte multiresponseButtonpin = 23;
+Switch multiresponseButton = Switch(multiresponseButtonpin, INPUT);
+
+// Battery variables
+int UsbConnected = 0;
+int RawVoltage = 0;
+float Voltage = 0;
+
+unsigned long previousMillis = 0; // will store last time LED was updated
+unsigned long currentMillis = 0;
+bool blinkState;
+bool blink;
+
+// ============================================================================
+//  LED EFFECT PARAMETERS & SMOOTHING
+// ============================================================================
+
+Smoothed<uint32_t> myAccel;
+
+uint8_t bloodHue = 96;       // Blood color [hue from 0-255]
+uint8_t bloodSat = 255;      // Blood staturation [0-255]
+int flowDirection = -1;      // Use either 1 or -1 to set flow direction
+uint16_t cycleLength = 1300; // Lover values = continuous flow, higher values = distinct pulses.
+uint16_t pulseLength = 200;  // How long the pulse takes to fade out.  Higher value is longer.
+uint16_t pulseOffset = 250;  // Delay before second pulse.  Higher value is more delay.
+uint8_t baseBrightness = 0;  // Brightness of LEDs when not pulsing. Set to 0 for off.
+
+int ledeffect;
+int ledeffect2;
+
+// variables for mpu to led mapping
+int color;
+int color2;
+int accel;
+uint8_t accelcon;
+int accelabs;
+int fade;
+
+// ============================================================================
+//  FSM INSTANCE
+// ============================================================================
+// FSM instance init
+SimpleFSM fsm;
+
+// ============================================================================
+//  HELPERS
+// ============================================================================
 
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 {
@@ -206,25 +244,9 @@ inline uint32_t smoothedMotion() {
   return myAccel.get();
 }
 
-// Button config
-const byte multiresponseButtonpin = 23;
-Switch multiresponseButton = Switch(multiresponseButtonpin, INPUT);
-
-// Battery variables
-int UsbConnected = 0;
-int RawVoltage = 0;
-float Voltage = 0;
-
-// FSM init
-SimpleFSM fsm;
-
-// variables for mpu to led mapping
-int color;
-int color2;
-int accel;
-uint8_t accelcon;
-int accelabs;
-int fade;
+// ============================================================================
+//  FSM STATES — ENTRY/RUN/EXIT
+// ============================================================================
 
 void ChargingEntry()
 {
@@ -679,6 +701,10 @@ void running12()
   }
 }
 
+// ============================================================================
+//  FSM TABLES & TRIGGERS
+// ============================================================================
+
 State s[] = {
     State("battery", BatteryEntry, BatteryRunning),
     State("charging", ChargingEntry, ChargingRunning, ChargingExit),
@@ -777,6 +803,10 @@ TimedTransition timedTransitions[] = {
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
+
+// ============================================================================
+//  SETUP
+// ============================================================================
 
 void setup()
 {
@@ -886,6 +916,7 @@ void setup()
 
   // FastLED.setMaxRefreshRate(120);
 
+  //motion smoothing init
   myAccel.begin(SMOOTHED_AVERAGE, 100);
 
   // Although it is unnecessary here, the stored values can be cleared if needed.
@@ -916,7 +947,6 @@ void setup()
     // Set Timestamp for first check
     lastUpdateTime = millis();
 
-
 //state machine init
   fsm.add(timedTransitions, num_timed);
   fsm.add(transitions, num_transitions);
@@ -928,6 +958,10 @@ void setup()
   // initialState on Powerup
   fsm.setInitialState(&s[currentPattern]);
 }
+
+// ============================================================================
+//  LOOP
+// ============================================================================
 
 void loop()
 {
