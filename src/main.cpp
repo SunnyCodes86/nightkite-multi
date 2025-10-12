@@ -701,6 +701,43 @@ void running12()
   }
 }
 
+void RunEntry13()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 14;
+}
+
+void running13()
+{
+  color = map(color, -180, 180, 0, 255);
+  color2 = map(color2, 180, -180, 0, 255);
+  accel = map(smoothedMotion(), 2000, 20000, 100, 0);
+  fade = map(accel, 20, 160, 60, 12);
+  accel = constrain(accel, 0, 100);
+
+  EVERY_N_MILLIS_I(timingObj, 1)
+  {
+
+    if (ledeffect == 0)
+    {
+      ledeffect = NUM_LEDS;
+      ledeffect2 = NUM_LEDS;
+    }
+
+    fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
+
+    Strip[ledeffect] = CHSV(color, 255, 255);
+    Strip[ledeffect2] = CHSV(color2, 255, 255);
+    Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
+    Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
+
+    ledeffect2 = ledeffect;
+    ledeffect = ledeffect -1;
+
+    timingObj.setPeriod(accel);
+  }
+}
+
 // ============================================================================
 //  FSM TABLES & TRIGGERS
 // ============================================================================
@@ -719,7 +756,8 @@ State s[] = {
     State("running9", RunEntry9, running9),
     State("running10", RunEntry10, running10),
     State("running11", RunEntry11, running11),
-    State("running12", RunEntry12, running12)};
+    State("running12", RunEntry12, running12),
+    State("running12", RunEntry13, running13)};
 
 enum triggers
 {
@@ -749,6 +787,7 @@ Transition transitions[] = {
     Transition(&s[11], &s[0], longpress),
     Transition(&s[12], &s[0], longpress),
     Transition(&s[13], &s[0], longpress),
+    Transition(&s[14], &s[0], longpress),
     Transition(&s[2], &s[3], doubleClick),
     Transition(&s[3], &s[4], doubleClick),
     Transition(&s[4], &s[5], doubleClick),
@@ -760,7 +799,8 @@ Transition transitions[] = {
     Transition(&s[10], &s[11], doubleClick),
     Transition(&s[11], &s[12], doubleClick),
     Transition(&s[12], &s[13], doubleClick),
-    Transition(&s[13], &s[2], doubleClick),
+    Transition(&s[13], &s[14], doubleClick),
+    Transition(&s[14], &s[2], doubleClick),
     Transition(&s[0], &s[1], usbpower),
     Transition(&s[2], &s[1], usbpower),
     Transition(&s[3], &s[1], usbpower),
@@ -773,7 +813,8 @@ Transition transitions[] = {
     Transition(&s[10], &s[1], usbpower),
     Transition(&s[11], &s[1], usbpower),
     Transition(&s[12], &s[1], usbpower),
-    Transition(&s[13], &s[1], usbpower)};
+    Transition(&s[13], &s[1], usbpower),
+    Transition(&s[14], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[2], 5000, NULL, "", PatternIs<2>),
@@ -788,6 +829,7 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[0], &s[11], 5000, NULL, "", PatternIs<11>),
     TimedTransition(&s[0], &s[12], 5000, NULL, "", PatternIs<12>),
     TimedTransition(&s[0], &s[13], 5000, NULL, "", PatternIs<13>),
+    TimedTransition(&s[0], &s[14], 5000, NULL, "", PatternIs<14>),
     TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged<2>),
     TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged<3>),
     TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged<4>),
@@ -799,7 +841,8 @@ TimedTransition timedTransitions[] = {
     TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged<10>),
     TimedTransition(&s[1], &s[11], 2000, NULL, "", unplugged<11>),
     TimedTransition(&s[1], &s[12], 2000, NULL, "", unplugged<12>),
-    TimedTransition(&s[1], &s[13], 2000, NULL, "", unplugged<13>)};
+    TimedTransition(&s[1], &s[13], 2000, NULL, "", unplugged<13>),
+    TimedTransition(&s[1], &s[14], 2000, NULL, "", unplugged<14>)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
@@ -931,7 +974,7 @@ void setup()
     EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
     EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
   // Guards
-  if (currentPattern < 2 || currentPattern > 13) currentPattern = 2;
+  if (currentPattern < 2 || currentPattern > 14) currentPattern = 2;
   if (currentBrightness < 95 || currentBrightness > 255) currentBrightness = 95;
     Serial.println("Current values:");
     Serial.print("Pattern: ");
@@ -1143,8 +1186,8 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  UsbConnected = digitalRead(24);
-  //UsbConnected = 0;
+  //UsbConnected = digitalRead(24);
+  UsbConnected = 0;
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
