@@ -1186,8 +1186,8 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  //UsbConnected = digitalRead(24);
-  UsbConnected = 0;
+  UsbConnected = digitalRead(24);
+  //UsbConnected = 0;
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
