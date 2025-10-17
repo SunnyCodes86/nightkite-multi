@@ -4,6 +4,8 @@
 
 Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die auf deren Bewegungen und Beschleunigungen reagiert. Die Farbe der LEDs wird durch den aktuellen Winkel des Drachens bestimmt, während die Geschwindigkeit der Animationsabläufe von der Bewegungsgeschwindigkeit des Drachens abhängt.
 
+[Bedienungsanleitung](manual/manual_de.md)
+
 ### Features
 
 * Helligkeit in 6 Stufen einstellbar (hat Einfluss auf Akkulaufzeit)
@@ -116,6 +118,8 @@ Dieses Projekt ist unter der [MIT Lizenz](LICENSE.txt) lizenziert.
 ## English
 
 This project implements dynamic LED lighting for kites that reacts to their movements and accelerations. The color of the LEDs is determined by the current angle of the kite, while the speed of the animation sequences depends on the kite's speed of motion.
+
+[Bedienungsanleitung](manual/manual_en.md)
 
 ### Features
 
