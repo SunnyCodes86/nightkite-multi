@@ -32,7 +32,7 @@ The NightKite Multi lighting system offers the following core features:
 - **Brightness Levels:**  
   Six selectable brightness levels (95 → 255 in steps of 32), which also affect battery life.
 - **Animation Patterns:**  
-  12 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
+  13 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
 - **Battery Indicator:**  
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  

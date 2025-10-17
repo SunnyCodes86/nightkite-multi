@@ -32,7 +32,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 - **Helligkeitsstufen:**  
   Sechs Helligkeitsstufen (95 → 255 in Schritten von 32), beeinflussen auch die Akkulaufzeit.
 - **Animations-Muster:**  
-  12 vordefinierte Animations-Muster zur Anpassung des Erscheinungsbilds (ebenfalls Einfluss auf die Laufzeit).
+  13 vordefinierte Animations-Muster zur Anpassung des Erscheinungsbilds (ebenfalls Einfluss auf die Laufzeit).
 - **Ladestandsanzeige:**  
   Zeigt den aktuellen Akkustand direkt über das LED-Band an.
 - **Speicherfunktion:**  
