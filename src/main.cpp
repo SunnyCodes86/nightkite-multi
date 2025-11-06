@@ -757,7 +757,7 @@ State s[] = {
     State("running10", RunEntry10, running10),
     State("running11", RunEntry11, running11),
     State("running12", RunEntry12, running12),
-    State("running12", RunEntry13, running13)};
+    State("running13", RunEntry13, running13)};
 
 enum triggers
 {
