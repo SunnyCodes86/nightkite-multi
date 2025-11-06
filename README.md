@@ -1,21 +1,24 @@
 # Lenkdrachen LED Beleuchtung mit Bewegungsreaktion (Kite LED Lighting with Motion Response)
 
-## Deutsch
+## Deutsch *(Version 2.0)*
 
 Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die auf deren Bewegungen und Beschleunigungen reagiert. Die Farbe der LEDs wird durch den aktuellen Winkel des Drachens bestimmt, während die Geschwindigkeit der Animationsabläufe von der Bewegungsgeschwindigkeit des Drachens abhängt.
 
+[Bedienungsanleitung](manual/manual_de.md)
+
 ### Features
 
-* Helligkeit in 6 Stufen einstellbar (hat Einfluss auf Akkulaufzeit)
-* 8 Patterns/Animationen einstellbar (hat Einfluss auf Akkulaufzeit)
-* Ladestand Anzeige
+* Helligkeit in 6 Stufen (95 → 255 in Schritten von 32) einstellbar – beeinflusst die Akkulaufzeit
+* 13 reaktionsfreudige Patterns/Animationen, teilweise bewegungsabhängig
+* Ladestandsanzeige über das LED-Band inkl. Ladefortschritt während USB-Verbindung
+* Automatisches Speichern von Muster & Helligkeit (EEPROM) – Start mit den letzten Einstellungen
 
 ### Verwendete Technologien und Komponenten
 
 * **Mikrocontroller:** [Pimoroni Pico Lipo](https://shop.pimoroni.com) **(mit integriertem Akku-Management)**
 * **Akku:** 500mAh LiPo Akku
 * **Gyroskop/Beschleunigungsmesser:** [MPU6050 Modul](https://www.reichelt.de/de/de/shop/produkt/entwicklerboards_-_beschleunigung_gyroskop_3-achsen_mpu-6050-253987)
-* **LED-Strip:** WS2812B Fairyight LED-Strip, ca. 5 Meter
+* **LED-Strip:** Zwei WS2812B Fairyight LED-Stränge mit je 25 Pixeln (50 Pixel gesamt)
 * **Programmiersprache:** C++
 * **Entwicklungsumgebung (optional):** [PlatformIO](https://platformio.org/) (für eigene Anpassungen)
 * **Gewicht:** ca. 60 Gramm (Controller mit Gehäuse ca. 30 Gramm, LED-Strip ca. 30 Gramm)
@@ -52,9 +55,9 @@ Die folgende Tabelle zeigt die Verbindungen zwischen dem Pimoroni Pico Lipo, dem
 
 Das System wird über einen integrierten 500mAh LiPo Akku betrieben. Der Pimoroni Pico Lipo verfügt über ein integriertes Akku-Management, das ein sicheres Laden und Entladen des Akkus gewährleistet.
 
-**Aufladen:** Das Aufladen erfolgt bequem über den USB-C Anschluss am Mikrocontroller. Während des Ladevorgangs ist die Akkuladestandsanzeige aktiv. Wenn die Farbe der 4 LEDs auf blau wechselt, ist der Akku vollständig geladen.
+**Aufladen:** Das Aufladen erfolgt bequem über den USB-C Anschluss am Mikrocontroller. Während des Ladevorgangs zeigt das LED-Band den Ladefortschritt als Balken, eine rote LED blinkt zur Bestätigung. Voll geladen bedeutet fünf blaue LEDs und die rote Status-LED erlischt.
 
-**Laufzeit:** Die Akkulaufzeit beträgt, abhängig von der gewählten LED-Animation und der Helligkeit, zwischen 1 und 2,5 Stunden.
+**Laufzeit:** Die Akkulaufzeit beträgt, abhängig von der gewählten LED-Animation und der Helligkeit, zwischen 1 und 2,5 Stunden. Nach dem Abziehen vom USB springt das System automatisch zurück zum zuletzt aktiven Muster.
 
 ### Bedienung
 
@@ -62,11 +65,11 @@ Der Controller verfügt über zwei Tasten:
 
 * **Linker Button:** Schaltet den Controller ein und aus.
 * **Rechter Button:** Hat drei Funktionen:
-    * **Doppelklick (2x kurz hintereinander):** Schaltet das Muster/die Animation um.
-    * **Kurz drücken (Shortpress):** Schaltet durch die 6 Helligkeitsstufen.
-    * **Gedrückt halten (Longpress):** Zeigt für 5 Sekunden den Akkuladestand an (4 LEDs an für 100%, 3 für 75%, 2 für 50%, 1 für 25%).
+    * **Doppelklick (2x kurz hintereinander):** Schaltet zyklisch durch die 13 Animationsmuster.
+    * **Kurz drücken (Shortpress):** Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95).
+    * **Gedrückt halten (Longpress):** Zeigt für 5 Sekunden den Akkuladestand an. Bis zu fünf LEDs dienen als Balkenanzeige; eine blaue Markierung blinkt während der Messung.
 
-**Initialisierung:** Nach dem Einschalten führt der Controller eine kurze Kalibrierung des MPU6050 durch. Während dieser Kalibrierungsphase (einige Sekunden) muss der Controller ruhig gehalten werden. Sobald die Einmessung abgeschlossen ist, schalten sich die LEDs ein.
+**Initialisierung & Speicherfunktion:** Nach dem Einschalten führt der Controller eine kurze Kalibrierung des MPU6050 durch. Während dieser Kalibrierungsphase (einige Sekunden) muss der Controller ruhig gehalten werden. Sobald die Einmessung abgeschlossen ist, schalten sich die LEDs ein. Der zuletzt verwendete Modus und die Helligkeit werden automatisch aus dem Speicher geladen.
 
 ### Einfache Installation über .UF2-Datei
 
@@ -113,22 +116,25 @@ Dieses Projekt ist unter der [MIT Lizenz](LICENSE.txt) lizenziert.
 
 ---
 
-## English
+## English *(Version 2.0)*
 
 This project implements dynamic LED lighting for kites that reacts to their movements and accelerations. The color of the LEDs is determined by the current angle of the kite, while the speed of the animation sequences depends on the kite's speed of motion.
 
+[User Manual](manual/manual_en.md)
+
 ### Features
 
-* Brightness adjustable in 6 levels (affects battery life)
-* 8 patterns/animations adjustable (affects battery life)
-* Battery level indicator
+* Six brightness levels (95 → 255 in steps of 32) impact the battery runtime
+* 13 motion-reactive patterns/animations with mirrored dual-strip output
+* Battery level indicator on the LED strip including charging progress while on USB power
+* Automatic persistence of pattern & brightness in EEPROM for seamless restarts
 
 ### Used Technologies and Components
 
 * **Microcontroller:** [Pimoroni Pico Lipo](https://shop.pimoroni.com) **(with integrated battery management)**
 * **Battery:** 500mAh LiPo battery
 * **Gyroscope/Accelerometer:** [MPU6050 Module](https://www.reichelt.de/de/en/shop/product/developer-boards-acceleration-gyroscope-3-axes-mpu-6050-253987)
-* **LED Strip:** WS2812B Fairyight LED strip, approx. 5 meters
+* **LED Strips:** Two WS2812B Fairyight strings with 25 pixels each (50 pixels total)
 * **Programming Language:** C++
 * **Development Environment (optional):** [PlatformIO](https://platformio.org/) (for own adaptations)
 * **Weight:** approx. 60 grams (controller with case approx. 30 grams, LED strip approx. 30 grams)
@@ -165,21 +171,21 @@ The following table shows the connections between the Pimoroni Pico Lipo, the LE
 
 The system is powered by an integrated 500mAh LiPo battery. The Pimoroni Pico Lipo features integrated battery management, ensuring safe charging and discharging of the battery.
 
-**Charging:** Charging is conveniently done via the USB-C port on the microcontroller. During charging, the battery level indicator is active. When the color of the 4 LEDs turns blue, the battery is fully charged.
+**Charging:** Charging is done via the USB-C port on the microcontroller. While charging, the LED strip displays a progress bar and a red LED blinks to indicate active charging. When five blue LEDs remain and the red LED switches off, the battery is fully charged.
 
-**Runtime:** The battery runtime is between 1 and 2.5 hours, depending on the selected LED animation and brightness.
+**Runtime:** Battery runtime is between 1 and 2.5 hours, depending on the selected LED animation and brightness. After unplugging USB power the controller automatically resumes the last active pattern.
 
 ### Operation
 
 The controller has two buttons:
 
 * **Left Button:** Turns the controller on and off.
-* **Right Button:** Has three functions:
-    * **Double Click (2x short presses in quick succession):** Switches the pattern/animation.
-    * **Short Press:** Cycles through the 6 brightness levels.
-    * **Long Press:** Shows the battery level for 5 seconds (4 LEDs on for 100%, 3 for 75%, 2 for 50%, 1 for 25%).
+* **Right Button:** Provides three functions:
+    * **Double click (two quick presses):** Cycles through the 13 animation patterns.
+    * **Short press:** Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95).
+    * **Long press:** Shows the battery level for 5 seconds. Up to five LEDs form a bar indicator while a blue marker LED blinks during the readout.
 
-**Initialization:** After switching on, the controller performs a short calibration of the MPU6050. During this calibration phase (a few seconds), the controller must be kept still. Once the calibration is complete, the LEDs will turn on.
+**Initialization & Persistence:** After powering on, the controller performs a short calibration of the MPU6050. Keep the controller still during this calibration phase (a few seconds). Once complete the LEDs will turn on, resuming the last used pattern and brightness from EEPROM.
 
 ### Easy Installation via .UF2 File
 
