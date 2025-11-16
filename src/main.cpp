@@ -204,7 +204,6 @@ const uint8_t INDICATOR_MODE_BOTH = 2;
 // for timekeeping
 unsigned long lastUpdateTime = 0;
 bool indicatorShownForCurrentPattern = false;
-uint8_t brightnessIndicatorLevel = 0;
 const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
 //const unsigned long UPDATE_INTERVAL = 30 * 1000; // 30 sec for debug
 
@@ -343,8 +342,6 @@ void displayPatternIndicator(uint8_t patternId);
 bool parseOnOff(const String &value, bool &result);
 void setBatteryViewActive(bool active);
 uint8_t brightnessLevelFromValue(uint8_t value);
-void triggerBatteryBrightnessIndicator();
-void renderBatteryBrightnessIndicator();
 
 // ============================================================================
 //  HELPERS
@@ -404,14 +401,6 @@ inline bool shouldShowChargingAnimation()
 void setBatteryViewActive(bool active)
 {
   batteryViewActive = active;
-  if (batteryViewActive)
-  {
-    triggerBatteryBrightnessIndicator();
-  }
-  else
-  {
-    brightnessIndicatorLevel = 0;
-  }
 }
 
 uint8_t brightnessLevelFromValue(uint8_t value)
@@ -430,44 +419,6 @@ uint8_t brightnessLevelFromValue(uint8_t value)
   return BRIGHTNESS_LEVEL_COUNT;
 }
 
-void triggerBatteryBrightnessIndicator()
-{
-  if (!batteryViewActive)
-  {
-    return;
-  }
-  brightnessIndicatorLevel = brightnessLevelFromValue(static_cast<uint8_t>(currentBrightness));
-}
-
-void renderBatteryBrightnessIndicator()
-{
-  if (!batteryViewActive)
-  {
-    return;
-  }
-  if (brightnessIndicatorLevel == 0)
-  {
-    brightnessIndicatorLevel = brightnessLevelFromValue(static_cast<uint8_t>(currentBrightness));
-  }
-  uint8_t ledsToLight = brightnessIndicatorLevel;
-  if (ledsToLight < 1)
-  {
-    ledsToLight = 1;
-  }
-  if (ledsToLight > BRIGHTNESS_LEVEL_COUNT)
-  {
-    ledsToLight = BRIGHTNESS_LEVEL_COUNT;
-  }
-  const uint8_t baseIndex = NUM_LEDS + 2;
-  for (uint8_t i = 0; i < ledsToLight; ++i)
-  {
-    uint8_t idx = baseIndex + i;
-    if (idx < NUM_LEDS * 2)
-    {
-      Strip[idx] = CRGB::Yellow;
-    }
-  }
-}
 
 inline uint8_t userPatternIdFromInternal(uint8_t internalPatternId)
 {
@@ -1731,17 +1682,16 @@ if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
 
 fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
 
-Strip[25] = blink ? CRGB::Red : CRGB::Black;
+  Strip[25] = blink ? CRGB::Red : CRGB::Black;
 
-if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
-else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
-else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
-else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
-else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
-else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
-else                      {/* leave empty = very empty */}
+  if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
+  else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
+  else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
+  else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
+  else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
+  else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
+  else                      {/* leave empty = very empty */}
 
-  renderBatteryBrightnessIndicator();
 }
 
 void ChargingExit()
@@ -1791,6 +1741,14 @@ else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
 else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
 else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
 else                      {/* leave empty = very empty */}
+
+  uint8_t brightnessLevel = brightnessLevelFromValue(static_cast<uint8_t>(currentBrightness));
+  brightnessLevel = constrain(brightnessLevel, (uint8_t)1, BRIGHTNESS_LEVEL_COUNT);
+  const uint8_t indicatorStart = NUM_LEDS + 2;
+  for (uint8_t i = 0; i < BRIGHTNESS_LEVEL_COUNT && (indicatorStart + i) < NUM_LEDS * 2; ++i)
+  {
+    Strip[indicatorStart + i] = (i < brightnessLevel) ? CRGB::Yellow : CRGB::Black;
+  }
 }
 
 void RunEntry()
@@ -2689,10 +2647,6 @@ void loop()
     currentBrightness = BRIGHTNESS;
     deviceConfig.brightness = currentBrightness;
     markConfigDirty();
-    if (batteryViewActive)
-    {
-      triggerBatteryBrightnessIndicator();
-    }
     logSerialValue(F("Button: brightness -> "), BRIGHTNESS);
   }
 }
