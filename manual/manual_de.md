@@ -141,6 +141,7 @@ Alle Einstellungen lassen sich zusätzlich über die serielle USB-Schnittstelle 
 - `pattern-indicator <on/off>` – schaltet die Anzeige der Musternummer vor jedem Effekt ein/aus.  
 - `pattern-indicator-param <name> <wert>` – konfiguriert `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` (die Blinkanzahl entspricht der Anzahl leuchtender LEDs).  
 - `brightness-mode <battery|anywhere>` – begrenzt Helligkeitsänderungen optional auf die Akkuanzeige oder erlaubt sie überall.
+- `battery-display <milliseconds>` – legt fest, wie lange die Akkuanzeige sichtbar bleibt (1 000–15 000 ms).
 - `config-reset` – setzt alle Einstellungen auf Werkseinstellungen zurück.  
 
 IDs können mit Kommas oder Leerzeichen kombiniert werden (z. B. `pattern-enable 1,3,5`). Jede Änderung wird unmittelbar aktiv. Der Controller speichert automatisch alle 5 Minuten, sobald sich etwas geändert hat. Mit `config-save` lässt sich dieser Vorgang manuell anstoßen (z. B. nach einem größeren Setup). Die Muster lassen sich sowohl über ihre Nummern als auch über die internen Namen (`running`, `running2`, …, `running13`) ansprechen.

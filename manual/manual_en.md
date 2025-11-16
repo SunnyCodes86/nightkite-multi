@@ -141,6 +141,7 @@ You can also configure the controller through the USB serial interface (115200 b
 - `pattern-indicator <on/off>` – toggles the pre-pattern number blink.  
 - `pattern-indicator-param <name> <value>` – adjusts indicator `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` (blink count equals the number of lit LEDs).  
 - `brightness-mode <battery|anywhere>` – optionally restricts brightness changes to the battery view or allows them everywhere.  
+- `battery-display <milliseconds>` – sets how long the battery view remains visible (1,000–15,000 ms).  
 - `config-reset` – restores all settings to factory defaults.  
 
 You can combine IDs with commas or spaces (e.g. `pattern-disable 2,4,6`). Changes take effect instantly. The controller autosaves roughly every 5 minutes whenever something changed, but you can force a save with `config-save` (handy after a full setup). Patterns can be referenced either by their numeric IDs or by the internal names (`running`, `running2`, …, `running13`).

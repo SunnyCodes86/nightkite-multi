@@ -112,6 +112,8 @@ const uint8_t PATTERN_USER_MIN = 1;
 const uint8_t PATTERN_USER_MAX = PATTERN_USER_MIN + PATTERN_COUNT - 1;
 const uint8_t BRIGHTNESS_LEVEL_VALUES[] = {95, 127, 159, 191, 223, 255};
 const uint8_t BRIGHTNESS_LEVEL_COUNT = sizeof(BRIGHTNESS_LEVEL_VALUES) / sizeof(BRIGHTNESS_LEVEL_VALUES[0]);
+const uint16_t BATTERY_DISPLAY_MIN_MS = 1000;
+const uint16_t BATTERY_DISPLAY_MAX_MS = 15000;
 
 struct LedEffectConfig
 {
@@ -154,6 +156,7 @@ struct DeviceConfig
   LedEffectConfig led;
   MotionEffectConfig motion;
   PatternIndicatorConfig indicator;
+  uint16_t batteryDisplayMs;
   uint8_t brightnessBatteryOnly;
   uint8_t patternEnabled[PATTERN_COUNT];
 };
@@ -168,6 +171,7 @@ const DeviceConfig DEFAULT_CONFIG = {
     {96, 255, -1, 1300, 200, 250, 0},
     {3, 4000, 24, 20},
     {1, 1, 2000, NUM_LEDS, 160, 2, 0},
+    5000,
     0,
     {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}};
 
@@ -317,6 +321,7 @@ void handlePatternIndicator(cmd *c);
 void handlePatternIndicatorParam(cmd *c);
 void handleConfigReset(cmd *c);
 void handleBrightnessMode(cmd *c);
+void handleBatteryDisplayDuration(cmd *c);
 
 // Forward declarations for configuration helpers
 void applyLedConfig();
@@ -342,6 +347,7 @@ void displayPatternIndicator(uint8_t patternId);
 bool parseOnOff(const String &value, bool &result);
 void setBatteryViewActive(bool active);
 uint8_t brightnessLevelFromValue(uint8_t value);
+void applyBatteryDisplayDuration();
 
 // ============================================================================
 //  HELPERS
@@ -468,6 +474,10 @@ bool configsEqual(const DeviceConfig &a, const DeviceConfig &b)
       a.indicator.hue != b.indicator.hue ||
       a.indicator.displayMode != b.indicator.displayMode ||
       a.indicator.dynamicDuration != b.indicator.dynamicDuration)
+  {
+    return false;
+  }
+  if (a.batteryDisplayMs != b.batteryDisplayMs)
   {
     return false;
   }
@@ -708,6 +718,11 @@ void loadConfig()
     deviceConfig.indicator.dynamicDuration = DEFAULT_CONFIG.indicator.dynamicDuration;
     markConfigDirty();
   }
+  if (deviceConfig.batteryDisplayMs < BATTERY_DISPLAY_MIN_MS || deviceConfig.batteryDisplayMs > BATTERY_DISPLAY_MAX_MS)
+  {
+    deviceConfig.batteryDisplayMs = DEFAULT_CONFIG.batteryDisplayMs;
+    markConfigDirty();
+  }
   if (deviceConfig.brightnessBatteryOnly > 1)
   {
     deviceConfig.brightnessBatteryOnly = DEFAULT_CONFIG.brightnessBatteryOnly;
@@ -715,6 +730,7 @@ void loadConfig()
   }
   // hue inherently 0-255; no change needed
 
+  applyBatteryDisplayDuration();
   ensureValidPattern();
 
   currentPattern = deviceConfig.currentPattern;
@@ -1017,6 +1033,8 @@ void printConfig()
   Serial.println(deviceConfig.indicator.displayMode);
   Serial.print(F("Indicator dynamic duration: "));
   Serial.println(deviceConfig.indicator.dynamicDuration ? F("yes") : F("no"));
+  Serial.print(F("Battery display duration (ms): "));
+  Serial.println(deviceConfig.batteryDisplayMs);
   Serial.print(F("Brightness only in battery view: "));
   Serial.println(deviceConfig.brightnessBatteryOnly ? F("yes") : F("no"));
   printPatternStatus();
@@ -1073,6 +1091,7 @@ void printConfigDiff(const DeviceConfig &oldCfg, const DeviceConfig &newCfg)
   printScalarChange("running11JerkThreshold", oldCfg.motion.running11JerkThreshold, newCfg.motion.running11JerkThreshold, anyChange);
   printScalarChange("running11WaveSpacing", oldCfg.motion.running11WaveSpacing, newCfg.motion.running11WaveSpacing, anyChange);
   printFloatChange("running12Deadband", oldCfg.motion.running12DeadbandMilli / 1000.0f, newCfg.motion.running12DeadbandMilli / 1000.0f, anyChange);
+  printScalarChange("Battery display (ms)", oldCfg.batteryDisplayMs, newCfg.batteryDisplayMs, anyChange);
   if (oldCfg.indicator.enabled != newCfg.indicator.enabled)
   {
     Serial.print(F("  Pattern indicator: "));
@@ -1644,6 +1663,29 @@ void handleBrightnessMode(cmd *c)
   Serial.println(batteryOnly ? F("limited to battery view.") : F("allowed in all modes."));
 }
 
+void handleBatteryDisplayDuration(cmd *c)
+{
+  Command command(c);
+  Argument arg = command.getArgument("ms");
+  long value = arg.getValue().toInt();
+  if (value <= 0)
+  {
+    Serial.print(F("Usage: battery-display <milliseconds "));
+    Serial.print(BATTERY_DISPLAY_MIN_MS);
+    Serial.print(F("-"));
+    Serial.print(BATTERY_DISPLAY_MAX_MS);
+    Serial.println(F(">"));
+    return;
+  }
+  value = constrain(value, (long)BATTERY_DISPLAY_MIN_MS, (long)BATTERY_DISPLAY_MAX_MS);
+  deviceConfig.batteryDisplayMs = static_cast<uint16_t>(value);
+  applyBatteryDisplayDuration();
+  markConfigDirty();
+  Serial.print(F("Battery display duration set to "));
+  Serial.print(deviceConfig.batteryDisplayMs);
+  Serial.println(F(" ms"));
+}
+
 // ============================================================================
 //  FSM STATES — ENTRY/RUN/EXIT
 // ============================================================================
@@ -2207,6 +2249,21 @@ static inline bool unplugged() {
   return !shouldShowChargingAnimation() && (currentPattern == N);
 }
 
+const GuardCondition BATTERY_PATTERN_GUARDS[PATTERN_COUNT] = {
+    PatternIs<2>,
+    PatternIs<3>,
+    PatternIs<4>,
+    PatternIs<5>,
+    PatternIs<6>,
+    PatternIs<7>,
+    PatternIs<8>,
+    PatternIs<9>,
+    PatternIs<10>,
+    PatternIs<11>,
+    PatternIs<12>,
+    PatternIs<13>,
+    PatternIs<14>};
+
 Transition transitions[] = {
     Transition(&s[2], &s[0], longpress),
     Transition(&s[3], &s[0], longpress),
@@ -2279,6 +2336,15 @@ TimedTransition timedTransitions[] = {
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
+
+void applyBatteryDisplayDuration()
+{
+  uint16_t interval = constrain(deviceConfig.batteryDisplayMs, BATTERY_DISPLAY_MIN_MS, BATTERY_DISPLAY_MAX_MS);
+  for (uint8_t i = 0; i < PATTERN_COUNT; ++i)
+  {
+    timedTransitions[i].setup(&s[0], &s[2 + i], interval, NULL, "", BATTERY_PATTERN_GUARDS[i]);
+  }
+}
 
 // ============================================================================
 //  SETUP
@@ -2443,6 +2509,8 @@ void setup()
   indicatorParamCmd.addPositionalArgument("value");
   Command brightnessModeCmd = cli.addCommand("brightness-mode", handleBrightnessMode);
   brightnessModeCmd.addPositionalArgument("mode");
+  Command batteryDurationCmd = cli.addCommand("battery-display", handleBatteryDisplayDuration);
+  batteryDurationCmd.addPositionalArgument("ms");
 }
 
 // ============================================================================
@@ -2658,6 +2726,7 @@ void resetConfigToDefaults()
   applyLedConfig();
   applySensorConfig();
   applySmoothingConfig();
+  applyBatteryDisplayDuration();
   ensureValidPattern();
   fsm.setInitialState(&s[currentPattern]);
   Serial.println(F("Configuration reset to defaults."));

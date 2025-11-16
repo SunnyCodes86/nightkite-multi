@@ -91,6 +91,7 @@ Zusätzlich zum Button steht eine serielle Kommandozeile (USB, 115200 Baud) zur 
 | `pattern-indicator <on/off>` | Aktiviert/deaktiviert das Anzeigen der Musternummer vor jedem Effekt. |
 | `pattern-indicator-param <name> <wert>` | Passt `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` an (Blinkanzahl = Anzahl leuchtender LEDs). |
 | `brightness-mode <battery\|anywhere>` | Legt fest, ob die Helligkeit nur in der Akkuanzeige oder überall per Button geändert werden darf. |
+| `battery-display <ms>` | Setzt die Anzeigedauer der Akkuanzeige in Millisekunden (1 000–15 000). |
 | `config-reset` | Setzt alle Einstellungen auf Werkseinstellungen zurück. |
 
 Mehrere IDs können kommasepariert (oder mit Leerzeichen) angegeben werden, z. B. `pattern-enable 1,3,5`. Muster können sowohl über die Zahlen `1…13` als auch über ihre Namen (`running`, `running2`, … `running13`) adressiert werden. Änderungen an Sensoren, Smoothing oder LED-Parametern werden sofort aktiv, die Werte landen beim nächsten automatischen Speichern oder per `config-save` dauerhaft im Speicher.
@@ -231,6 +232,7 @@ The USB serial port (115200 baud) exposes a CLI for advanced configuration. Typi
 | `pattern-indicator <on/off>` | Enables or disables the pre-pattern number blink. |
 | `pattern-indicator-param <name> <value>` | Adjusts indicator `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` (blink count matches the LED count). |
 | `brightness-mode <battery\|anywhere>` | Sets whether brightness changes via button are only allowed in the battery view or everywhere. |
+| `battery-display <ms>` | Sets the battery-screen display duration in milliseconds (1 000–15 000). |
 | `config-reset` | Resets the entire configuration to defaults. |
 
 You can pass multiple IDs separated by commas or spaces, e.g. `pattern-disable 2,4,6`. Patterns can be referenced either by their numeric IDs (1…13) or by the internal names (`running`, `running2`, …, `running13`). Changes to sensors, smoothing, or LED parameters take effect instantly and persist after the next automatic or manual save.
