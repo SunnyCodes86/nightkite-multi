@@ -12,6 +12,7 @@ Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die 
 * 13 reaktionsfreudige Patterns/Animationen, teilweise bewegungsabhängig
 * Ladestandsanzeige über das LED-Band inkl. Ladefortschritt während USB-Verbindung
 * Automatisches Speichern von Muster & Helligkeit (EEPROM) – Start mit den letzten Einstellungen
+* **Neues Command Line Interface:** Muster aktivieren/deaktivieren, Sensor-Empfindlichkeit und LED-Parameter einstellen, Konfiguration jederzeit speichern
 
 ### Verwendete Technologien und Komponenten
 
@@ -66,10 +67,33 @@ Der Controller verfügt über zwei Tasten:
 * **Linker Button:** Schaltet den Controller ein und aus.
 * **Rechter Button:** Hat drei Funktionen:
     * **Doppelklick (2x kurz hintereinander):** Schaltet zyklisch durch die 13 Animationsmuster.
-    * **Kurz drücken (Shortpress):** Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95).
+    * **Kurz drücken (Shortpress):** Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95). Auf Wunsch lässt sich per CLI (`brightness-mode battery`) einstellen, dass diese Änderung nur im Akku-/Batteriemodus möglich ist.
     * **Gedrückt halten (Longpress):** Zeigt für 5 Sekunden den Akkuladestand an. Bis zu fünf LEDs dienen als Balkenanzeige; eine blaue Markierung blinkt während der Messung.
 
 **Initialisierung & Speicherfunktion:** Nach dem Einschalten führt der Controller eine kurze Kalibrierung des MPU6050 durch. Während dieser Kalibrierungsphase (einige Sekunden) muss der Controller ruhig gehalten werden. Sobald die Einmessung abgeschlossen ist, schalten sich die LEDs ein. Der zuletzt verwendete Modus und die Helligkeit werden automatisch aus dem Speicher geladen.
+
+### Command Line Interface
+
+Zusätzlich zum Button steht eine serielle Kommandozeile (USB, 115200 Baud) zur Verfügung. Nach dem Verbinden über einen Terminal oder den PlatformIO-Monitor können folgende Befehle genutzt werden:
+
+| Befehl | Beschreibung |
+| ------ | ------------ |
+| `pattern-list` | Zeigt alle Muster mit ID und Status an. |
+| `pattern-enable <ID[,ID...]\|Name\|all>` | Aktiviert ein oder mehrere Muster (IDs kommasepariert). `all` reaktiviert alle. |
+| `pattern-disable <ID[,ID...]\|Name\|all>` | Deaktiviert Muster (mindestens ein Pattern muss aktiv bleiben). |
+| `set-accel <0-3\|2\|4\|8\|16>` | Setzt den Beschleunigungsmesserbereich (Index oder ±g). |
+| `set-gyro <0-3\|250\|500\|1000\|2000>` | Setzt den Gyroskopbereich (Index oder °/s). |
+| `set-smoothing <1-100>` | Legt fest, wie viele Messwerte für das Bewegungs-Smoothing genutzt werden. |
+| `led-param <name> <wert>` | Passt Parameter wie `bloodHue`, `bloodSat`, `flowDirection`, `cycleLength`, `pulseLength`, `pulseOffset`, `baseBrightness`, `running9Tail`, `running11JerkThreshold`, `running11WaveSpacing`, `running12Deadband` an. |
+| `config-show` | Gibt die aktuelle Konfiguration inklusive Sensorbereiche und LED-Parameter aus. |
+| `config-save` | Speichert die aktuelle Konfiguration sofort im EEPROM (ansonsten erfolgt dies alle 5 Minuten automatisch). |
+| `reset` | Startet den RP2040 neu (nützlich nach Konfigurationsänderungen). |
+| `pattern-indicator <on/off>` | Aktiviert/deaktiviert das Anzeigen der Musternummer vor jedem Effekt. |
+| `pattern-indicator-param <name> <wert>` | Passt `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` an (Blinkanzahl = Anzahl leuchtender LEDs). |
+| `brightness-mode <battery\|anywhere>` | Legt fest, ob die Helligkeit nur in der Akkuanzeige oder überall per Button geändert werden darf. |
+| `config-reset` | Setzt alle Einstellungen auf Werkseinstellungen zurück. |
+
+Mehrere IDs können kommasepariert (oder mit Leerzeichen) angegeben werden, z. B. `pattern-enable 1,3,5`. Muster können sowohl über die Zahlen `1…13` als auch über ihre Namen (`running`, `running2`, … `running13`) adressiert werden. Änderungen an Sensoren, Smoothing oder LED-Parametern werden sofort aktiv, die Werte landen beim nächsten automatischen Speichern oder per `config-save` dauerhaft im Speicher.
 
 ### Einfache Installation über .UF2-Datei
 
@@ -128,6 +152,7 @@ This project implements dynamic LED lighting for kites that reacts to their move
 * 13 motion-reactive patterns/animations with mirrored dual-strip output
 * Battery level indicator on the LED strip including charging progress while on USB power
 * Automatic persistence of pattern & brightness in EEPROM for seamless restarts
+* **Command Line Interface:** enable/disable patterns, tune sensor sensitivity and LED parameters, trigger manual config saves
 
 ### Used Technologies and Components
 
@@ -182,10 +207,33 @@ The controller has two buttons:
 * **Left Button:** Turns the controller on and off.
 * **Right Button:** Provides three functions:
     * **Double click (two quick presses):** Cycles through the 13 animation patterns.
-    * **Short press:** Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95).
+    * **Short press:** Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95). This can optionally be limited to the battery screen via the `brightness-mode battery` CLI command.
     * **Long press:** Shows the battery level for 5 seconds. Up to five LEDs form a bar indicator while a blue marker LED blinks during the readout.
 
 **Initialization & Persistence:** After powering on, the controller performs a short calibration of the MPU6050. Keep the controller still during this calibration phase (a few seconds). Once complete the LEDs will turn on, resuming the last used pattern and brightness from EEPROM.
+
+### Command Line Interface
+
+The USB serial port (115200 baud) exposes a CLI for advanced configuration. Typical commands are:
+
+| Command | Description |
+| ------- | ----------- |
+| `pattern-list` | Shows all patterns with their IDs and enabled state. |
+| `pattern-enable <ID[,ID...]\|Name\|all>` | Enables one or multiple patterns (comma-separated IDs). `all` restores every pattern. |
+| `pattern-disable <ID[,ID...]\|Name\|all>` | Disables patterns (at least one pattern must remain enabled). |
+| `set-accel <0-3\|2\|4\|8\|16>` | Sets the accelerometer range by index or ±g value. |
+| `set-gyro <0-3\|250\|500\|1000\|2000>` | Sets the gyroscope range by index or °/s value. |
+| `set-smoothing <1-100>` | Sets how many samples are used for motion smoothing. |
+| `led-param <name> <value>` | Adjusts effect parameters (`bloodHue`, `bloodSat`, `flowDirection`, `cycleLength`, `pulseLength`, `pulseOffset`, `baseBrightness`, `running9Tail`, `running11JerkThreshold`, `running11WaveSpacing`, `running12Deadband`). |
+| `config-show` | Prints the current configuration including sensor ranges and LED parameters. |
+| `config-save` | Stores the current configuration immediately (otherwise auto-save runs every 5 minutes). |
+| `reset` | Reboots the RP2040 so changes take effect cleanly. |
+| `pattern-indicator <on/off>` | Enables or disables the pre-pattern number blink. |
+| `pattern-indicator-param <name> <value>` | Adjusts indicator `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` (blink count matches the LED count). |
+| `brightness-mode <battery\|anywhere>` | Sets whether brightness changes via button are only allowed in the battery view or everywhere. |
+| `config-reset` | Resets the entire configuration to defaults. |
+
+You can pass multiple IDs separated by commas or spaces, e.g. `pattern-disable 2,4,6`. Patterns can be referenced either by their numeric IDs (1…13) or by the internal names (`running`, `running2`, …, `running13`). Changes to sensors, smoothing, or LED parameters take effect instantly and persist after the next automatic or manual save.
 
 ### Easy Installation via .UF2 File
 

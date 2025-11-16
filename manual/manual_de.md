@@ -17,6 +17,7 @@ Diese Anleitung hilft dir dabei, deine LED-Beleuchtung optimal zu nutzen.
    1. [Controller einschalten und Initialisierung](#31-controller-einschalten-und-initialisierung)  
    2. [Funktionen des rechten Buttons](#32-funktionen-des-rechten-buttons)  
    3. [Ausschalten](#33-ausschalten)  
+   4. [Konfiguration über die Kommandozeile](#34-konfiguration-über-die-kommandozeile)  
 4. [Stromversorgung und Aufladen](#4-stromversorgung-und-aufladen)  
 5. [Wichtige Hinweise](#5-wichtige-hinweise)
 
@@ -37,12 +38,14 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
   Zeigt den aktuellen Akkustand direkt über das LED-Band an.
 - **Speicherfunktion:**  
   Muster & Helligkeit werden automatisch im Speicher abgelegt und beim nächsten Start wiederhergestellt.
+- **Konfigurierbares Command Line Interface:**  
+  Muster aktivieren/deaktivieren, Sensor-Empfindlichkeiten wählen, LED-Effektparameter anpassen und Konfiguration auf Knopfdruck speichern.
 
 ---
 
 ### 1.1. Animations-Muster im Detail
 
-Die NightKite Multi (v2.0) verfügt über 12 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
+Die NightKite Multi (v2.0) verfügt über 13 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
 Nach dem Einschalten (und der Kalibrierung) startet der Controller mit dem zuletzt verwendeten Muster und der zuletzt gewählten Helligkeit.  
 Beim ersten Start: **Muster 1 „Regenbogen“**, **Helligkeit 95**.
 
@@ -95,9 +98,10 @@ Der Controller besitzt zwei Tasten: **links** und **rechts**.
 Der rechte Button ist ein **Multifunktions-Button**:
 
 - **Muster / Animation wechseln (Doppelklick):**  
-  → Zyklischer Wechsel zum nächsten der 12 Muster.
+  → Zyklischer Wechsel zum nächsten der 13 Muster.
 - **Helligkeitsstufe ändern (kurz drücken):**  
-  → Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.
+  → Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.  
+    Über den CLI-Befehl `brightness-mode battery` lässt sich optional festlegen, dass Helligkeitsänderungen nur innerhalb der Akkuanzeige möglich sind (Standard: überall).
 - **Akkuladestand anzeigen (gedrückt halten):**  
   → Für 5 Sekunden zeigt das LED-Band den Akkustand an.  
     Währenddessen blinkt eine blaue LED-Marke.
@@ -119,6 +123,27 @@ Der rechte Button ist ein **Multifunktions-Button**:
 ### 3.3. Ausschalten
 
 - **Ausschalten:** Linken Button erneut drücken.
+
+### 3.4. Konfiguration über die Kommandozeile
+
+Alle Einstellungen lassen sich zusätzlich über die serielle USB-Schnittstelle (115200 Baud, 8N1) vornehmen. Öffne dazu z. B. den PlatformIO Serial Monitor oder ein Terminalprogramm und gib einen der folgenden Befehle ein:
+
+- `pattern-list` – listet alle Muster mit ihrer ID (1 … 13) und dem Aktiv-Status auf.  
+- `pattern-enable <ID[,ID...]\|Name\|all>` – aktiviert ein oder mehrere Muster (IDs kommasepariert). `all` schaltet jedes Muster frei.  
+- `pattern-disable <ID[,ID...]\|Name\|all>` – deaktiviert Muster (mindestens ein Pattern muss aktiv bleiben).  
+- `set-accel <0-3\|2\|4\|8\|16>` – wählt den Beschleunigungsmesserbereich (Index oder Angabe in ±g).  
+- `set-gyro <0-3\|250\|500\|1000\|2000>` – wählt den Gyroskopbereich (Index oder Angabe in °/s).  
+- `set-smoothing <1-100>` – bestimmt, wie viele Messwerte für das Bewegungs-Smoothing gemittelt werden.  
+- `led-param <name> <wert>` – ändert Parameter wie `bloodHue`, `bloodSat`, `flowDirection`, `cycleLength`, `pulseLength`, `pulseOffset`, `baseBrightness`, `running9Tail`, `running11JerkThreshold`, `running11WaveSpacing`, `running12Deadband`.  
+- `config-show` – zeigt die aktuell aktive Konfiguration an (inkl. Sensorbereiche und LED-Werte).  
+- `config-save` – schreibt die aktuelle Konfiguration sofort dauerhaft ins EEPROM.
+- `reset` – startet den RP2040-Controller direkt neu.  
+- `pattern-indicator <on/off>` – schaltet die Anzeige der Musternummer vor jedem Effekt ein/aus.  
+- `pattern-indicator-param <name> <wert>` – konfiguriert `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` (die Blinkanzahl entspricht der Anzahl leuchtender LEDs).  
+- `brightness-mode <battery|anywhere>` – begrenzt Helligkeitsänderungen optional auf die Akkuanzeige oder erlaubt sie überall.
+- `config-reset` – setzt alle Einstellungen auf Werkseinstellungen zurück.  
+
+IDs können mit Kommas oder Leerzeichen kombiniert werden (z. B. `pattern-enable 1,3,5`). Jede Änderung wird unmittelbar aktiv. Der Controller speichert automatisch alle 5 Minuten, sobald sich etwas geändert hat. Mit `config-save` lässt sich dieser Vorgang manuell anstoßen (z. B. nach einem größeren Setup). Die Muster lassen sich sowohl über ihre Nummern als auch über die internen Namen (`running`, `running2`, …, `running13`) ansprechen.
 
 ---
 

@@ -17,6 +17,7 @@ This guide will help you get the most out of your LED lighting system.
    1. [Power On and Initialization](#31-power-on-and-initialization)  
    2. [Functions of the Right Button](#32-functions-of-the-right-button)  
    3. [Power Off](#33-power-off)  
+   4. [Configuration via Command Line](#34-configuration-via-command-line)  
 4. [Power Supply and Charging](#4-power-supply-and-charging)  
 5. [Important Notes](#5-important-notes)
 
@@ -37,12 +38,14 @@ The NightKite Multi lighting system offers the following core features:
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  
   Pattern and brightness are automatically stored and restored at the next startup.
+- **Configurable Command Line Interface:**  
+  Enable/disable patterns, adjust sensor sensitivity and LED effect parameters, and trigger a manual save at any time.
 
 ---
 
 ### 1.1. Animation Patterns in Detail
 
-The NightKite Multi (v2.0) includes 12 predefined animation patterns that can be changed with a double-click.  
+The NightKite Multi (v2.0) includes 13 predefined animation patterns that can be changed with a double-click.  
 After powering on and calibration, the controller starts with the last used pattern and brightness level.  
 On first startup: **Pattern 1 “Rainbow”**, **Brightness 95**.
 
@@ -95,9 +98,10 @@ The controller has two buttons: **left** and **right**.
 The right button is a **multi-function control**:
 
 - **Change Pattern / Animation (double-click):**  
-  → Cycles through the 12 available animation patterns.
+  → Cycles through the 13 available animation patterns.
 - **Change Brightness (short press):**  
-  → Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
+  → Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.  
+    With the CLI command `brightness-mode battery` you can optionally lock this adjustment to the battery indicator screen only (default: everywhere).
 - **Show Battery Level (hold):**  
   → Displays battery level for about 5 seconds.  
     During this time, a blue LED marker flashes on the strip.
@@ -119,6 +123,27 @@ The right button is a **multi-function control**:
 ### 3.3. Power Off
 
 - **Power Off:** Press the left button again to turn the controller off.
+
+### 3.4. Configuration via Command Line
+
+You can also configure the controller through the USB serial interface (115200 baud, 8N1). Open the PlatformIO serial monitor or any terminal program and use these commands:
+
+- `pattern-list` – lists every pattern (IDs 1…13) together with its enabled/disabled state.  
+- `pattern-enable <ID[,ID...]\|Name\|all>` – enables one or more patterns (comma-separated IDs). `all` re-enables every pattern at once.  
+- `pattern-disable <ID[,ID...]\|Name\|all>` – disables patterns (at least one pattern must stay active).  
+- `set-accel <0-3\|2\|4\|8\|16>` – selects the accelerometer range (index or ±g value).  
+- `set-gyro <0-3\|250\|500\|1000\|2000>` – selects the gyroscope range (index or °/s value).  
+- `set-smoothing <1-100>` – defines how many samples are averaged for motion smoothing.  
+- `led-param <name> <value>` – adjusts effect parameters (`bloodHue`, `bloodSat`, `flowDirection`, `cycleLength`, `pulseLength`, `pulseOffset`, `baseBrightness`, `running9Tail`, `running11JerkThreshold`, `running11WaveSpacing`, `running12Deadband`).  
+- `config-show` – prints the active configuration including sensor ranges and LED parameters.  
+- `config-save` – writes the current configuration to EEPROM immediately.
+- `reset` – reboots the RP2040 instantly.  
+- `pattern-indicator <on/off>` – toggles the pre-pattern number blink.  
+- `pattern-indicator-param <name> <value>` – adjusts indicator `blink`, `duration`, `maxleds`, `hue`, `mode`, `dynamic` (blink count equals the number of lit LEDs).  
+- `brightness-mode <battery|anywhere>` – optionally restricts brightness changes to the battery view or allows them everywhere.  
+- `config-reset` – restores all settings to factory defaults.  
+
+You can combine IDs with commas or spaces (e.g. `pattern-disable 2,4,6`). Changes take effect instantly. The controller autosaves roughly every 5 minutes whenever something changed, but you can force a save with `config-save` (handy after a full setup). Patterns can be referenced either by their numeric IDs or by the internal names (`running`, `running2`, …, `running13`).
 
 ---
 
