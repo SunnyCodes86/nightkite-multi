@@ -178,6 +178,7 @@ unsigned long previousMillis = 0; // will store last time LED was updated
 unsigned long currentMillis = 0;
 bool blinkState;
 bool blink;
+bool batteryViewActive = false;
 
 // ============================================================================
 //  LED EFFECT PARAMETERS & SMOOTHING
@@ -300,6 +301,7 @@ void ChargingExit()
 void BatteryEntry()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  batteryViewActive = true;
 }
 
 void BatteryRunning()
@@ -344,6 +346,7 @@ void RunEntry()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 2;
+  batteryViewActive = false;
 }
 
 void running()
@@ -355,6 +358,7 @@ void RunEntry2()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 3;
+  batteryViewActive = false;
 }
 
 void running2()
@@ -368,6 +372,7 @@ void RunEntry3()
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(30);
   currentPattern = 4;
+  batteryViewActive = false;
 }
 
 void running3()
@@ -392,6 +397,7 @@ void RunEntry4()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 5;
+  batteryViewActive = false;
 }
 
 void running4()
@@ -408,6 +414,7 @@ void RunEntry5()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 6;
+  batteryViewActive = false;
 }
 
 void running5()
@@ -440,6 +447,7 @@ void RunEntry6()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 7;
+  batteryViewActive = false;
 }
 
 void running6()
@@ -476,8 +484,8 @@ void running6()
 void RunEntry7()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-
   currentPattern = 8;
+  batteryViewActive = false;
 }
 
 void running7()
@@ -497,6 +505,7 @@ void RunEntry8()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 9;
+  batteryViewActive = false;
 }
 
 void running8()
@@ -518,6 +527,7 @@ void RunEntry9()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 10;
+  batteryViewActive = false;
 }
 
 void running9()
@@ -592,6 +602,7 @@ void RunEntry10()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 11;
+  batteryViewActive = false;
 }
 
 void running10()
@@ -618,6 +629,7 @@ void RunEntry11()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 12;
+  batteryViewActive = false;
 }
 
 void running11()
@@ -660,6 +672,7 @@ void RunEntry12()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 13;
+  batteryViewActive = false;
 }
 
 void running12()
@@ -705,6 +718,7 @@ void RunEntry13()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   currentPattern = 14;
+  batteryViewActive = false;
 }
 
 void running13()
