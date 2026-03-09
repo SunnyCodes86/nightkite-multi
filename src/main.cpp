@@ -34,6 +34,7 @@
 #include "MPU6050_6Axis_MotionApps612.h" // mpu5060 library
 #include <FastLED.h> // FastLED
 #include "SimpleFSM.h" // State Machine
+#include <SimpleCLI.h> // Serial command-line interface
 #include "avdweb_Switch.h" // Button library
 #include <Smoothed.h> // Smoothing library
 #include <EEPROM.h> //EEPROM Library
@@ -142,12 +143,26 @@ int currentBrightness = 95;
 int lastSavedPattern = 2;
 int lastSavedBrightness = 95;
 
+// supported brightness levels for button + CLI
+const int BRIGHTNESS_LEVELS[] = {95, 127, 159, 191, 223, 255};
+const size_t BRIGHTNESS_LEVEL_COUNT = sizeof(BRIGHTNESS_LEVELS) / sizeof(BRIGHTNESS_LEVELS[0]);
+
 // for timekeeping
 unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
 //const unsigned long UPDATE_INTERVAL = 30 * 1000; // 30 sec for debug
 const unsigned long BATTERY_VIEW_TIMEOUT_MS = 5000;
 unsigned long batteryViewLastInteractionMs = 0;
+
+// ====================================================================
+//  USB CLI STATE
+// ====================================================================
+
+SimpleCLI cli;
+String cliInputBuffer;
+bool cliPromptShown = false;
+unsigned long cliLastInputMs = 0;
+const unsigned long CLI_AUTOPARSE_TIMEOUT_MS = 200;
 
 // ============================================================================
 //  MPU6050 & MOTION STATE
@@ -237,6 +252,24 @@ SimpleFSM fsm;
 //  HELPERS
 // ============================================================================
 
+bool isValidBrightnessLevel(int value);
+void normalizePersistentConfig();
+bool saveConfigToEEPROM(bool verbose);
+void loadConfigFromEEPROM(bool verbose);
+void printCliHelp();
+void printCliPrompt();
+void setupCLI();
+void handleCLI();
+
+void onCliHelp(cmd* cPtr);
+void onCliShow(cmd* cPtr);
+void onCliGet(cmd* cPtr);
+void onCliSet(cmd* cPtr);
+void onCliSave(cmd* cPtr);
+void onCliLoad(cmd* cPtr);
+void onCliDefaults(cmd* cPtr);
+void onCliError(cmd_error* e);
+
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 {
   uint16_t T = ms % cycleLength;
@@ -265,6 +298,300 @@ inline uint32_t smoothedMotion() {
   uint32_t s = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
   myAccel.add(s);
   return myAccel.get();
+}
+
+bool isValidBrightnessLevel(int value)
+{
+  for (size_t i = 0; i < BRIGHTNESS_LEVEL_COUNT; i++)
+  {
+    if (BRIGHTNESS_LEVELS[i] == value)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+void normalizePersistentConfig()
+{
+  if (currentPattern < 2 || currentPattern > 14)
+  {
+    currentPattern = 2;
+  }
+
+  if (!isValidBrightnessLevel(currentBrightness))
+  {
+    currentBrightness = MIN_BRIGHTNESS;
+  }
+}
+
+bool saveConfigToEEPROM(bool verbose)
+{
+  normalizePersistentConfig();
+  EEPROM.put(EEPROM_ADDR_VALUE1, currentPattern);
+  EEPROM.put(EEPROM_ADDR_VALUE2, currentBrightness);
+
+  if (verbose)
+  {
+    Serial.print("Pattern: ");
+    Serial.println(currentPattern);
+    Serial.print("Brightness: ");
+    Serial.println(currentBrightness);
+  }
+
+  if (EEPROM.commit())
+  {
+    lastSavedPattern = currentPattern;
+    lastSavedBrightness = currentBrightness;
+    if (verbose)
+    {
+      Serial.println("New values successfully saved to EEPROM.");
+    }
+    return true;
+  }
+
+  if (verbose)
+  {
+    Serial.println("ERROR: Could not save values to EEPROM.");
+  }
+  return false;
+}
+
+void loadConfigFromEEPROM(bool verbose)
+{
+  EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
+  EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
+  normalizePersistentConfig();
+
+  BRIGHTNESS = currentBrightness;
+  FastLED.setBrightness(BRIGHTNESS);
+  lastSavedPattern = currentPattern;
+  lastSavedBrightness = currentBrightness;
+
+  if (verbose)
+  {
+    Serial.println("Current values:");
+    Serial.print("Pattern: ");
+    Serial.println(currentPattern);
+    Serial.print("Brightness: ");
+    Serial.println(currentBrightness);
+  }
+}
+
+void printCliHelp()
+{
+  Serial.println("Commands:");
+  Serial.println("  help");
+  Serial.println("  show");
+  Serial.println("  get <pattern|brightness>");
+  Serial.println("  set pattern <2..14>");
+  Serial.println("  set brightness <95|127|159|191|223|255>");
+  Serial.println("  save");
+  Serial.println("  load");
+  Serial.println("  defaults");
+}
+
+void printCliPrompt()
+{
+  Serial.print("nk> ");
+}
+
+void onCliHelp(cmd* cPtr)
+{
+  (void)cPtr;
+  printCliHelp();
+}
+
+void onCliShow(cmd* cPtr)
+{
+  (void)cPtr;
+  Serial.print("pattern=");
+  Serial.print(currentPattern);
+  Serial.print(" brightness=");
+  Serial.println(currentBrightness);
+}
+
+void onCliGet(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  String key = cmd.getArgument("key").getValue();
+  key.toLowerCase();
+
+  if (key == "pattern")
+  {
+    Serial.print("pattern=");
+    Serial.println(currentPattern);
+    return;
+  }
+  if (key == "brightness")
+  {
+    Serial.print("brightness=");
+    Serial.println(currentBrightness);
+    return;
+  }
+
+  Serial.println("ERR unknown key");
+}
+
+void onCliSet(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  String key = cmd.getArgument("key").getValue();
+  int value = cmd.getArgument("value").getValue().toInt();
+  key.toLowerCase();
+
+  if (key == "pattern")
+  {
+    if (value < 2 || value > 14)
+    {
+      Serial.println("ERR pattern range 2..14");
+      return;
+    }
+    currentPattern = value;
+    Serial.print("OK pattern=");
+    Serial.println(currentPattern);
+    return;
+  }
+
+  if (key == "brightness")
+  {
+    if (!isValidBrightnessLevel(value))
+    {
+      Serial.println("ERR brightness must be one of 95,127,159,191,223,255");
+      return;
+    }
+
+    currentBrightness = value;
+    BRIGHTNESS = currentBrightness;
+    FastLED.setBrightness(BRIGHTNESS);
+    batteryViewLastInteractionMs = millis();
+
+    Serial.print("OK brightness=");
+    Serial.println(currentBrightness);
+    return;
+  }
+
+  Serial.println("ERR unknown key");
+}
+
+void onCliSave(cmd* cPtr)
+{
+  (void)cPtr;
+  saveConfigToEEPROM(true);
+}
+
+void onCliLoad(cmd* cPtr)
+{
+  (void)cPtr;
+  loadConfigFromEEPROM(true);
+}
+
+void onCliDefaults(cmd* cPtr)
+{
+  (void)cPtr;
+  currentPattern = 2;
+  currentBrightness = MIN_BRIGHTNESS;
+  BRIGHTNESS = currentBrightness;
+  FastLED.setBrightness(BRIGHTNESS);
+  batteryViewLastInteractionMs = millis();
+  Serial.println("OK defaults loaded (not saved)");
+}
+
+void onCliError(cmd_error* e)
+{
+  CommandError cmdError(e);
+  Serial.print("ERR ");
+  Serial.println(cmdError.toString());
+}
+
+void setupCLI()
+{
+  Command help = cli.addCommand("help", onCliHelp);
+  (void)help;
+  Command show = cli.addCommand("show", onCliShow);
+  (void)show;
+
+  Command get = cli.addCommand("get", onCliGet);
+  get.addPositionalArgument("key");
+
+  Command set = cli.addCommand("set", onCliSet);
+  set.addPositionalArgument("key");
+  set.addPositionalArgument("value");
+
+  Command save = cli.addCommand("save", onCliSave);
+  (void)save;
+  Command load = cli.addCommand("load", onCliLoad);
+  (void)load;
+  Command defaults = cli.addCommand("defaults", onCliDefaults);
+  (void)defaults;
+
+  cli.setOnError(onCliError);
+}
+
+void handleCLI()
+{
+  bool commandExecuted = false;
+
+  if (UsbConnected != 1)
+  {
+    cliInputBuffer = "";
+    cliPromptShown = false;
+    cliLastInputMs = 0;
+    return;
+  }
+
+  if (!cliPromptShown)
+  {
+    Serial.println();
+    Serial.println("[NightKite CLI] USB connected. Type 'help'.");
+    printCliPrompt();
+    cliPromptShown = true;
+  }
+
+  while (Serial.available() > 0)
+  {
+    char ch = (char)Serial.read();
+
+    if (ch == '\r')
+    {
+      continue;
+    }
+    if (ch == '\n')
+    {
+      cliInputBuffer.trim();
+      if (cliInputBuffer.length() > 0)
+      {
+        cli.parse(cliInputBuffer);
+        commandExecuted = true;
+      }
+      cliInputBuffer = "";
+      continue;
+    }
+
+    if (isPrintable((int)ch) && cliInputBuffer.length() < 128)
+    {
+      cliInputBuffer += ch;
+      cliLastInputMs = millis();
+    }
+  }
+
+  // Some serial monitors send without newline; parse after a short idle time.
+  if (cliInputBuffer.length() > 0 && cliLastInputMs > 0 && (millis() - cliLastInputMs >= CLI_AUTOPARSE_TIMEOUT_MS))
+  {
+    cliInputBuffer.trim();
+    if (cliInputBuffer.length() > 0)
+    {
+      cli.parse(cliInputBuffer);
+      commandExecuted = true;
+    }
+    cliInputBuffer = "";
+    cliLastInputMs = 0;
+  }
+
+  if (commandExecuted)
+  {
+    printCliPrompt();
+  }
 }
 
 // ============================================================================
@@ -908,6 +1235,7 @@ void setup()
 #endif
 
   Serial.begin(115200); // 115200 is required for Teapot Demo output
+  Serial.setTimeout(5);
   // while (!Serial);
   delay(1000); // 1 second delay for recovery
 
@@ -1013,37 +1341,15 @@ void setup()
   myAccel.clear();
 
 // Init the emulated EEPROM
-    EEPROM.begin(EEPROM_SIZE);
-    Serial.println("EEPROM initialized.");
-
-
-    // Read values from EEPROM
-    EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
-    EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
-  // Guards
-  if (currentPattern < 2 || currentPattern > 14) currentPattern = 2;
-  if (currentBrightness < MIN_BRIGHTNESS || currentBrightness > MAX_BRIGHTNESS) currentBrightness = MIN_BRIGHTNESS;
-    Serial.println("Current values:");
-    Serial.print("Pattern: ");
-    Serial.println(currentPattern);
-    Serial.print("Brightness: ");
-    Serial.println(currentBrightness);
-
-
-    // Store current values for changecheck
-    lastSavedPattern = currentPattern;
-    lastSavedBrightness = currentBrightness;
-
-    // Set Timestamp for first check
-    lastUpdateTime = millis();
+  EEPROM.begin(EEPROM_SIZE);
+  Serial.println("EEPROM initialized.");
+  loadConfigFromEEPROM(true);
+  lastUpdateTime = millis();
 
 //state machine init
   fsm.add(timedTransitions, num_timed);
   fsm.add(transitions, num_transitions);
-
-  // Brightness on Powerup
-  BRIGHTNESS = currentBrightness;
-  FastLED.setBrightness(BRIGHTNESS);
+  setupCLI();
 
   // initialState on Powerup
   fsm.setInitialState(&s[currentPattern]);
@@ -1173,29 +1479,7 @@ void loop()
         if (currentPattern != lastSavedPattern || currentBrightness != lastSavedBrightness) {
             // At least one value has changed
             Serial.println("Values have changed. Saving new values to EEPROM...");
-
-           // Update values in EEPROM
-            EEPROM.put(EEPROM_ADDR_VALUE1, currentPattern);
-            EEPROM.put(EEPROM_ADDR_VALUE2, currentBrightness);
-            
-            Serial.print("Pattern: ");
-            Serial.println(currentPattern);
-            Serial.print("Brightness: ");
-            Serial.println(currentBrightness);
-
-            // Important: For flash-based emulation, EEPROM.commit() must be called
-            // to actually write the changes to flash!
-            if (EEPROM.commit()) {
-                Serial.println("New values successfully saved to EEPROM.");
-
-                // Update the last saved values for the next check
-                lastSavedPattern = currentPattern;
-                lastSavedBrightness = currentBrightness;
-
-            } else {
-                Serial.println("ERROR: Could not save values to EEPROM.");
-            }
-
+            saveConfigToEEPROM(true);
         } else {
             // No change
             Serial.println("Values are unchanged. No EEPROM update needed.");
@@ -1239,6 +1523,8 @@ void loop()
   {
     fsm.trigger(usbpower);
   }
+
+  handleCLI();
 
   if (multiresponseButton.singleClick() && batteryViewActive)
   {
