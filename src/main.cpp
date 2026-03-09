@@ -112,6 +112,7 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
 CRGB Strip[NUM_LEDS * 2];
 
 int BRIGHTNESS = 95;
+#define MIN_BRIGHTNESS 95
 #define MAX_BRIGHTNESS 255
 #define FRAMES_PER_SECOND 120
 
@@ -145,6 +146,8 @@ int lastSavedBrightness = 95;
 unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
 //const unsigned long UPDATE_INTERVAL = 30 * 1000; // 30 sec for debug
+const unsigned long BATTERY_VIEW_TIMEOUT_MS = 5000;
+unsigned long batteryViewLastInteractionMs = 0;
 
 // ============================================================================
 //  MPU6050 & MOTION STATE
@@ -272,6 +275,7 @@ void ChargingEntry()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(32);
+  batteryViewActive = false;
 }
 
 void ChargingRunning()
@@ -321,6 +325,7 @@ void BatteryEntry()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   batteryViewActive = true;
+  batteryViewLastInteractionMs = millis();
 }
 
 void BatteryRunning()
@@ -351,6 +356,13 @@ if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
 fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
 
 Strip[25] = blink ? CRGB::Blue : CRGB::Black;
+
+// Show brightness level (6 steps from 95 to 255) on the status strip.
+int brightnessLevel = ((BRIGHTNESS - MIN_BRIGHTNESS) / 32) + 1;
+brightnessLevel = constrain(brightnessLevel, 1, 6);
+for (int i = 0; i < 6; ++i) {
+  Strip[26 + i] = (i < brightnessLevel) ? CRGB::Yellow : CRGB::Black;
+}
 
 if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
 else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
@@ -800,7 +812,9 @@ enum triggers
 };
 
 template<int N>
-static inline bool PatternIs() { return currentPattern == N; }
+static inline bool BatteryTimeoutPatternIs() {
+  return currentPattern == N && (millis() - batteryViewLastInteractionMs >= BATTERY_VIEW_TIMEOUT_MS);
+}
 
 template<int N>
 static inline bool unplugged() {
@@ -850,19 +864,19 @@ Transition transitions[] = {
     Transition(&s[14], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
-    TimedTransition(&s[0], &s[2], 5000, NULL, "", PatternIs<2>),
-    TimedTransition(&s[0], &s[3], 5000, NULL, "", PatternIs<3>),
-    TimedTransition(&s[0], &s[4], 5000, NULL, "", PatternIs<4>),
-    TimedTransition(&s[0], &s[5], 5000, NULL, "", PatternIs<5>),
-    TimedTransition(&s[0], &s[6], 5000, NULL, "", PatternIs<6>),
-    TimedTransition(&s[0], &s[7], 5000, NULL, "", PatternIs<7>),
-    TimedTransition(&s[0], &s[8], 5000, NULL, "", PatternIs<8>),
-    TimedTransition(&s[0], &s[9], 5000, NULL, "", PatternIs<9>),
-    TimedTransition(&s[0], &s[10], 5000, NULL, "", PatternIs<10>),
-    TimedTransition(&s[0], &s[11], 5000, NULL, "", PatternIs<11>),
-    TimedTransition(&s[0], &s[12], 5000, NULL, "", PatternIs<12>),
-    TimedTransition(&s[0], &s[13], 5000, NULL, "", PatternIs<13>),
-    TimedTransition(&s[0], &s[14], 5000, NULL, "", PatternIs<14>),
+    TimedTransition(&s[0], &s[2], 5000, NULL, "", BatteryTimeoutPatternIs<2>),
+    TimedTransition(&s[0], &s[3], 5000, NULL, "", BatteryTimeoutPatternIs<3>),
+    TimedTransition(&s[0], &s[4], 5000, NULL, "", BatteryTimeoutPatternIs<4>),
+    TimedTransition(&s[0], &s[5], 5000, NULL, "", BatteryTimeoutPatternIs<5>),
+    TimedTransition(&s[0], &s[6], 5000, NULL, "", BatteryTimeoutPatternIs<6>),
+    TimedTransition(&s[0], &s[7], 5000, NULL, "", BatteryTimeoutPatternIs<7>),
+    TimedTransition(&s[0], &s[8], 5000, NULL, "", BatteryTimeoutPatternIs<8>),
+    TimedTransition(&s[0], &s[9], 5000, NULL, "", BatteryTimeoutPatternIs<9>),
+    TimedTransition(&s[0], &s[10], 5000, NULL, "", BatteryTimeoutPatternIs<10>),
+    TimedTransition(&s[0], &s[11], 5000, NULL, "", BatteryTimeoutPatternIs<11>),
+    TimedTransition(&s[0], &s[12], 5000, NULL, "", BatteryTimeoutPatternIs<12>),
+    TimedTransition(&s[0], &s[13], 5000, NULL, "", BatteryTimeoutPatternIs<13>),
+    TimedTransition(&s[0], &s[14], 5000, NULL, "", BatteryTimeoutPatternIs<14>),
     TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged<2>),
     TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged<3>),
     TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged<4>),
@@ -1008,7 +1022,7 @@ void setup()
     EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
   // Guards
   if (currentPattern < 2 || currentPattern > 14) currentPattern = 2;
-  if (currentBrightness < 95 || currentBrightness > 255) currentBrightness = 95;
+  if (currentBrightness < MIN_BRIGHTNESS || currentBrightness > MAX_BRIGHTNESS) currentBrightness = MIN_BRIGHTNESS;
     Serial.println("Current values:");
     Serial.print("Pattern: ");
     Serial.println(currentPattern);
@@ -1226,15 +1240,16 @@ void loop()
     fsm.trigger(usbpower);
   }
 
-  if (multiresponseButton.singleClick())
+  if (multiresponseButton.singleClick() && batteryViewActive)
   {
     BRIGHTNESS += 32; // brightness = 95-255, so steps of 32
     if (BRIGHTNESS > MAX_BRIGHTNESS)
     {
-      BRIGHTNESS = 95; // we roll over to 95 bright
+      BRIGHTNESS = MIN_BRIGHTNESS; // we roll over to minimum bright
     }
     // Serial.println(BRIGHTNESS);
     FastLED.setBrightness(BRIGHTNESS);
     currentBrightness = BRIGHTNESS;
+    batteryViewLastInteractionMs = millis();
   }
 }
