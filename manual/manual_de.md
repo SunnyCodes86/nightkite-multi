@@ -97,10 +97,12 @@ Der rechte Button ist ein **Multifunktions-Button**:
 - **Muster / Animation wechseln (Doppelklick):**  
   → Zyklischer Wechsel zum nächsten der 12 Muster.
 - **Helligkeitsstufe ändern (kurz drücken):**  
-  → Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.
+  → Nur während die Akkuanzeige aktiv ist.  
+    Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.
 - **Akkuladestand anzeigen (gedrückt halten):**  
-  → Für 5 Sekunden zeigt das LED-Band den Akkustand an.  
-    Währenddessen blinkt eine blaue LED-Marke.
+  → Zeigt den Akkustand auf dem Haupt-Strip an.  
+    Auf dem zweiten Strip blinkt eine blaue LED-Marke; zusätzlich zeigen gelbe LEDs die aktuelle Helligkeitsstufe (6 Stufen) an.  
+    Die Rückkehr zum zuletzt aktiven Muster erfolgt 5 Sekunden nach der letzten Helligkeitsänderung.
 
 **Skala der Akkuanzeige (Spannungsbasiert):**
 
@@ -152,4 +154,4 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 ---
 
 **Kurzüberblick für den schnellen Einstieg:**  
-`Einschalten → ruhig halten (Kalibrierung) → Kurztipp = Helligkeit → Doppelklick = Muster → Langdruck = Akkuanzeige`
+`Einschalten → ruhig halten (Kalibrierung) → Doppelklick = Muster → Langdruck = Akkuanzeige → Kurztipp (in Akkuanzeige) = Helligkeit`

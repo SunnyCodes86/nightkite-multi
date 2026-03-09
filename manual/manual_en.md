@@ -97,10 +97,12 @@ The right button is a **multi-function control**:
 - **Change Pattern / Animation (double-click):**  
   → Cycles through the 12 available animation patterns.
 - **Change Brightness (short press):**  
-  → Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
+  → Only while the battery display is active.  
+    Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
 - **Show Battery Level (hold):**  
-  → Displays battery level for about 5 seconds.  
-    During this time, a blue LED marker flashes on the strip.
+  → Shows the battery level on the main strip.  
+    On the second strip, a blue marker LED flashes and yellow LEDs show the current brightness step (6 levels).  
+    Return to the previously active pattern happens 5 seconds after the last brightness change.
 
 **Battery Level Scale (voltage-based):**
 
@@ -152,4 +154,4 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 ---
 
 **Quick Start Summary:**  
-`Power On → Hold Still (Calibration) → Short Press = Brightness → Double-Click = Pattern → Long Press = Battery Display`
+`Power On → Hold Still (Calibration) → Double-Click = Pattern → Long Press = Battery Display → Short Press (in battery display) = Brightness`
