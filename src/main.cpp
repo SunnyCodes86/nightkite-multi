@@ -74,10 +74,29 @@ reference frame. Yaw is relative if there is no magnetometer present.
 //  HARDWARE & LED CONFIG
 // ============================================================================
 
-int const INTERRUPT_PIN = 3; // Define the interruption #0 pin
+#ifndef PIN_MPU_INTERRUPT
+#define PIN_MPU_INTERRUPT 3
+#endif
+#ifndef PIN_LED_STRIP_1
+#define PIN_LED_STRIP_1 12
+#endif
+#ifndef PIN_LED_STRIP_2
+#define PIN_LED_STRIP_2 13
+#endif
+#ifndef PIN_BUTTON_MULTI
+#define PIN_BUTTON_MULTI 23
+#endif
+#ifndef PIN_BATTERY_ADC
+#define PIN_BATTERY_ADC 29
+#endif
+#ifndef PIN_USB_SENSE
+#define PIN_USB_SENSE 24
+#endif
 
-#define PinStrip1 12
-#define PinStrip2 13
+int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
+
+#define PinStrip1 PIN_LED_STRIP_1
+#define PinStrip2 PIN_LED_STRIP_2
 // #define CLK_PIN   4
 #define LED_TYPE WS2811
 #define COLOR_ORDER GRB
@@ -166,7 +185,7 @@ void DMPDataReady(){
 // ============================================================================
 
 // Button config
-const byte multiresponseButtonpin = 23;
+const byte multiresponseButtonpin = PIN_BUTTON_MULTI;
 Switch multiresponseButton = Switch(multiresponseButtonpin, INPUT);
 
 // Battery variables
@@ -257,7 +276,7 @@ void ChargingEntry()
 
 void ChargingRunning()
 {
-  RawVoltage = analogRead(29);
+  RawVoltage = analogRead(PIN_BATTERY_ADC);
   Voltage = RawVoltage * 3.0 * 3.3 / 4096.0;
 
   currentMillis = millis();
@@ -306,7 +325,7 @@ void BatteryEntry()
 
 void BatteryRunning()
 {
-  RawVoltage = analogRead(29);
+  RawVoltage = analogRead(PIN_BATTERY_ADC);
   Voltage = RawVoltage * 3.0 * 3.3 / 4096.0;
 
   currentMillis = millis();
@@ -955,8 +974,8 @@ void setup()
   pinMode(LED_BUILTIN, OUTPUT);
 
   // Battery stuff
-  pinMode(29, INPUT);
-  pinMode(24, INPUT);
+  pinMode(PIN_BATTERY_ADC, INPUT);
+  pinMode(PIN_USB_SENSE, INPUT);
   analogReadResolution(12);
 
   delay(1000); // 1 second delay for recovery
@@ -1200,7 +1219,7 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  UsbConnected = digitalRead(24);
+  UsbConnected = digitalRead(PIN_USB_SENSE);
   //UsbConnected = 0;
   if (UsbConnected == 1)
   {
