@@ -103,7 +103,7 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
 #define COLOR_ORDER GRB
 
 #define NUM_LEDS 25
-#define TOTAL_LEDS 50 // both strips lenght
+#define TOTAL_LEDS (NUM_LEDS * 2) // both strips length
 #define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
 #define NUM_COMETS 4        // comet count
 #define NUM_COMETS2 2        // comet count2
@@ -634,14 +634,19 @@ if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
 
 fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
 
-Strip[25] = blink ? CRGB::Red : CRGB::Black;
+int statusStart = NUM_LEDS;
+if (statusStart < TOTAL_LEDS)
+{
+  Strip[statusStart] = blink ? CRGB::Red : CRGB::Black;
+}
 
-if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
-else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
-else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
-else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
-else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
-else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
+int batteryBarMax = min(5, NUM_LEDS);
+if      (Voltage >= 4.20) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+else if (Voltage >  4.00) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+else if (Voltage >  3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+else if (Voltage >  3.60) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+else if (Voltage >  3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+else if (Voltage >  3.20) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
 }
 
@@ -684,21 +689,28 @@ if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
 
 fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
 
-Strip[25] = blink ? CRGB::Blue : CRGB::Black;
+int statusStart = NUM_LEDS;
+if (statusStart < TOTAL_LEDS)
+{
+  Strip[statusStart] = blink ? CRGB::Blue : CRGB::Black;
+}
 
 // Show brightness level (6 steps from 95 to 255) on the status strip.
 int brightnessLevel = ((BRIGHTNESS - MIN_BRIGHTNESS) / 32) + 1;
 brightnessLevel = constrain(brightnessLevel, 1, 6);
-for (int i = 0; i < 6; ++i) {
-  Strip[26 + i] = (i < brightnessLevel) ? CRGB::Yellow : CRGB::Black;
+int availableBrightnessPixels = max(0, NUM_LEDS - 1);
+int brightnessPixels = min(6, availableBrightnessPixels);
+for (int i = 0; i < brightnessPixels; ++i) {
+  Strip[statusStart + 1 + i] = (i < brightnessLevel) ? CRGB::Yellow : CRGB::Black;
 }
 
-if      (Voltage >= 4.20) fill_solid(Strip, 5, CRGB::Blue);
-else if (Voltage >  4.00) fill_solid(Strip, 4, CRGB::Green);
-else if (Voltage >  3.80) fill_solid(Strip, 3, CRGB::Green);
-else if (Voltage >  3.60) fill_solid(Strip, 2, CRGB::Yellow);
-else if (Voltage >  3.40) fill_solid(Strip, 1, CRGB::Yellow);
-else if (Voltage >  3.20) fill_solid(Strip, 1, CRGB::Red);
+int batteryBarMax = min(5, NUM_LEDS);
+if      (Voltage >= 4.20) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+else if (Voltage >  4.00) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+else if (Voltage >  3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+else if (Voltage >  3.60) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+else if (Voltage >  3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+else if (Voltage >  3.20) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
 }
 
@@ -787,7 +799,7 @@ void running5()
   EVERY_N_MILLIS_I(timingObj, 1)
   {
 
-    if (ledeffect == NUM_LEDS)
+    if (ledeffect < 0 || ledeffect >= NUM_LEDS)
     {
       ledeffect = 0;
     }
@@ -821,7 +833,7 @@ void running6()
   EVERY_N_MILLIS_I(timingObj, 1)
   {
 
-    if (ledeffect == NUM_LEDS)
+    if (ledeffect < 0 || ledeffect >= NUM_LEDS || ledeffect2 < 0 || ledeffect2 >= NUM_LEDS)
     {
       ledeffect = 0;
       ledeffect2 = 0;
@@ -1092,10 +1104,10 @@ void running13()
   EVERY_N_MILLIS_I(timingObj, 1)
   {
 
-    if (ledeffect == 0)
+    if (ledeffect <= 0 || ledeffect > (NUM_LEDS - 1))
     {
-      ledeffect = NUM_LEDS;
-      ledeffect2 = NUM_LEDS;
+      ledeffect = NUM_LEDS - 1;
+      ledeffect2 = NUM_LEDS - 1;
     }
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
@@ -1106,7 +1118,7 @@ void running13()
     Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
 
     ledeffect2 = ledeffect;
-    ledeffect = ledeffect -1;
+    ledeffect = ledeffect - 1;
 
     timingObj.setPeriod(accel);
   }
