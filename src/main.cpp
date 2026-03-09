@@ -208,6 +208,8 @@ Switch multiresponseButton = Switch(multiresponseButtonpin, INPUT);
 
 // Battery variables
 int UsbConnected = 0;
+int UsbPowerRaw = 0;
+bool SerialSessionActive = false;
 int RawVoltage = 0;
 float Voltage = 0;
 
@@ -532,7 +534,7 @@ void handleCLI()
 {
   bool commandExecuted = false;
 
-  if (UsbConnected != 1)
+  if (!SerialSessionActive)
   {
     cliInputBuffer = "";
     cliPromptShown = false;
@@ -1502,6 +1504,12 @@ void loop()
   // do some periodic updates
   EVERY_N_MILLISECONDS(20) { gHue++; } // slowly cycle the "base color" through the rainbow
 
+  // USB power state for charging logic and serial session detection for CLI.
+  UsbPowerRaw = digitalRead(PIN_USB_SENSE);
+  SerialSessionActive = (UsbPowerRaw == 1) && ((bool)Serial) && Serial.dtr();
+  // Disable charging view while a serial session is active.
+  UsbConnected = (UsbPowerRaw == 1 && !SerialSessionActive) ? 1 : 0;
+
   fsm.run(0);
   multiresponseButton.poll();
 
@@ -1517,7 +1525,6 @@ void loop()
     // Serial.println("singleclick");
   }
 
-  UsbConnected = digitalRead(PIN_USB_SENSE);
   //UsbConnected = 0;
   if (UsbConnected == 1)
   {
