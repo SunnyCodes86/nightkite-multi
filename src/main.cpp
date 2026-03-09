@@ -104,11 +104,12 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
 
 #define MIN_LEDS_PER_STRIP 10
 #define MAX_LEDS_PER_STRIP 35
+#define DEFAULT_LEDS_PER_STRIP 25
 #define MAX_TOTAL_LEDS (MAX_LEDS_PER_STRIP * 2)
 
-int ledsPerStrip = MAX_LEDS_PER_STRIP;
-int totalLeds = MAX_TOTAL_LEDS; // both strips length
-int halfLeds = (MAX_TOTAL_LEDS / 2); // segment length
+int ledsPerStrip = DEFAULT_LEDS_PER_STRIP;
+int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // both strips length
+int halfLeds = DEFAULT_LEDS_PER_STRIP; // segment length
 
 #define NUM_LEDS ledsPerStrip
 #define TOTAL_LEDS totalLeds
@@ -151,13 +152,13 @@ const int EEPROM_MAGIC = 0x4E4B3335; // "NK35"
 // variables we want to store in EEPROM
 int currentPattern = 2;
 int currentBrightness = 95;
-int currentStripLength = MAX_LEDS_PER_STRIP;
+int currentStripLength = DEFAULT_LEDS_PER_STRIP;
 
 // copies of current values
 // needed to detect changes (to limit wear of flash memory)
 int lastSavedPattern = 2;
 int lastSavedBrightness = 95;
-int lastSavedStripLength = MAX_LEDS_PER_STRIP;
+int lastSavedStripLength = DEFAULT_LEDS_PER_STRIP;
 
 // supported brightness levels for button + CLI
 const int BRIGHTNESS_LEVELS[] = {95, 127, 159, 191, 223, 255};
@@ -385,7 +386,7 @@ void normalizePersistentConfig()
 
   if (!isValidStripLength(currentStripLength))
   {
-    currentStripLength = MAX_LEDS_PER_STRIP;
+    currentStripLength = DEFAULT_LEDS_PER_STRIP;
   }
 }
 
@@ -438,7 +439,7 @@ void loadConfigFromEEPROM(bool verbose)
   }
   else
   {
-    currentStripLength = MAX_LEDS_PER_STRIP;
+    currentStripLength = DEFAULT_LEDS_PER_STRIP;
   }
   normalizePersistentConfig();
   applyConfiguredStripLength();
@@ -606,7 +607,7 @@ void onCliDefaults(cmd* cPtr)
   (void)cPtr;
   currentPattern = 2;
   currentBrightness = MIN_BRIGHTNESS;
-  currentStripLength = MAX_LEDS_PER_STRIP;
+  currentStripLength = DEFAULT_LEDS_PER_STRIP;
   applyConfiguredStripLength();
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
