@@ -17,6 +17,7 @@ Diese Anleitung hilft dir dabei, deine LED-Beleuchtung optimal zu nutzen.
    1. [Controller einschalten und Initialisierung](#31-controller-einschalten-und-initialisierung)  
    2. [Funktionen des rechten Buttons](#32-funktionen-des-rechten-buttons)  
    3. [Ausschalten](#33-ausschalten)  
+   4. [USB-CLI (Konfiguration)](#34-usb-cli-konfiguration)  
 4. [Stromversorgung und Aufladen](#4-stromversorgung-und-aufladen)  
 5. [Wichtige Hinweise](#5-wichtige-hinweise)
 
@@ -36,7 +37,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 - **Ladestandsanzeige:**  
   Zeigt den aktuellen Akkustand direkt über das LED-Band an.
 - **Speicherfunktion:**  
-  Muster & Helligkeit werden automatisch im Speicher abgelegt und beim nächsten Start wiederhergestellt.
+  Muster, Helligkeit und Strip-Länge werden automatisch im Speicher abgelegt und beim nächsten Start wiederhergestellt.
 
 ---
 
@@ -54,7 +55,7 @@ Beim ersten Start: **Muster 1 „Regenbogen“**, **Helligkeit 95**.
 6. **LED-Lauflicht zweifarbig (reaktiv), Winkel-Farbe:** Wie (5), jedoch mit zweifarbigem Schweif; Tempo & Fade bewegungsabhängig.  
 7. **Heartbeat (Winkel-Farbe):** Pulsierende „Herzschlag“-Animation über das Band; Farbe = Winkel.  
 8. **Ping-Pong (bouncing) mit reaktivem Fade:** Punkt läuft vor / zurück; Fadeout hängt von Bewegung ab.  
-9. **Comet-Swarm (4 Kometen):** Vier Kometen jagen über alle 50 Pixel (beide Hälften gespiegelt). Farbe = Winkel.  
+9. **Comet-Swarm (4 Kometen):** Vier Kometen jagen über die aktuell konfigurierte Gesamtlänge (beide Hälften gespiegelt). Farbe = Winkel.  
 10. **Breath / Storm (adaptiv):**  
     - Ruhig: weiches „Atmen“ (Helligkeits-Sinus).  
     - Unruhig: „Sturm“ mit Funken, deren Anzahl mit der Bewegung zunimmt.  
@@ -71,7 +72,7 @@ Die NightKite Multi Beleuchtung besteht aus:
 - **Mikrocontroller:** Pimoroni Pico LiPo mit integriertem Akku-Management (USB-C)  
 - **Akku:** 500 mAh LiPo-Akku, direkt am Mikrocontroller  
 - **Sensor:** MPU6050 (Gyroskop / Beschleunigungsmesser) für Lage (Yaw / Pitch / Roll) und Bewegung  
-- **LED-Strips:** Zwei Stränge à 25 Pixel (= 50 Pixel gesamt), WS281x / „Fairy-String“, GRB-Reihenfolge
+- **LED-Strips:** Zwei symmetrische Stränge mit gleicher Länge (konfigurierbar per CLI, 10 bis 35 Pixel pro Strang), WS281x / „Fairy-String“, GRB-Reihenfolge
 
 ---
 
@@ -124,6 +125,27 @@ Der rechte Button ist ein **Multifunktions-Button**:
 
 ---
 
+### 3.4. USB-CLI (Konfiguration)
+
+Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
+
+- Prompt: `nk>`
+- Hilfe: `help`
+- Aktuelle Werte: `show`
+- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`
+- Einzelwert setzen:
+  - `set pattern <2..14>`
+  - `set brightness <95|127|159|191|223|255>`
+  - `set strip_length <10..35>`
+- Speichern/Laden:
+  - `save` (sofort in EEPROM schreiben)
+  - `load` (aus EEPROM laden)
+  - `defaults` (Standardwerte laden, noch nicht speichern)
+
+Hinweise:
+- `strip_length` gilt immer für beide Strips gleichzeitig (symmetrisch).
+- Beim nächsten Neustart werden die gespeicherten Werte automatisch geladen.
+
 ## 4. Stromversorgung und Aufladen
 
 Das System wird durch einen integrierten **500 mAh LiPo-Akku** versorgt.  
@@ -132,6 +154,7 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 - **Aufladen:** Über USB-C an PC oder Netzteil anschließen.  
 - **Lade-Anzeige:** Während des Ladens zeigt das Band den Füllstand als Balken;  
   eine rote LED blinkt während des aktiven Ladevorgangs.  
+- **USB-CLI aktiv:** Bei aktiver serieller Verbindung wird die Ladeanzeige unterdrückt, damit die CLI störungsfrei genutzt werden kann.  
 - **Voll geladen:** 5 blaue LEDs = voll (≥ 4.2 V); rote Lade-LED aus.  
 - **Automatischer Rückwechsel:** Nach dem Trennen vom USB kehrt das System zum letzten Muster zurück.  
 - **Laufzeit:** Je nach Muster und Helligkeit ca. 1 – 2,5 Stunden.
@@ -139,6 +162,7 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 **Speicherfunktion (automatisch):**
 
 - Muster und Helligkeit werden etwa alle 5 Minuten geprüft und bei Änderung gespeichert.  
+- Strip-Länge wird ebenfalls geprüft und bei Änderung gespeichert.  
 - Beim nächsten Start werden diese Werte automatisch wiederhergestellt.
 
 ---

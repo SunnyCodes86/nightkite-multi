@@ -102,15 +102,26 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
 #define LED_TYPE WS2811
 #define COLOR_ORDER GRB
 
-#define NUM_LEDS 25
-#define TOTAL_LEDS (NUM_LEDS * 2) // both strips length
-#define HALF_LEDS (TOTAL_LEDS / 2) // segment lenght
+#define MIN_LEDS_PER_STRIP 10
+#define MAX_LEDS_PER_STRIP 35
+#define MAX_TOTAL_LEDS (MAX_LEDS_PER_STRIP * 2)
+
+int ledsPerStrip = MAX_LEDS_PER_STRIP;
+int totalLeds = MAX_TOTAL_LEDS; // both strips length
+int halfLeds = (MAX_TOTAL_LEDS / 2); // segment length
+
+#define NUM_LEDS ledsPerStrip
+#define TOTAL_LEDS totalLeds
+#define HALF_LEDS halfLeds
 #define NUM_COMETS 4        // comet count
 #define NUM_COMETS2 2        // comet count2
 
 // CRGB Strip1[NUM_LEDS];
 // CRGB Strip2[NUM_LEDS];
-CRGB Strip[NUM_LEDS * 2];
+// Logical LED buffer used by all patterns (contiguous: strip1 then strip2).
+CRGB Strip[MAX_TOTAL_LEDS];
+// Physical LED buffer wired as two fixed hardware segments.
+CRGB PhysicalStrip[MAX_TOTAL_LEDS];
 
 int BRIGHTNESS = 95;
 #define MIN_BRIGHTNESS 95
@@ -128,20 +139,25 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 // We store value1 at address 0 and value2 directly after it.
 #define EEPROM_ADDR_VALUE1 0
 #define EEPROM_ADDR_VALUE2 sizeof(int) // Address for value2, directly after value1
+#define EEPROM_ADDR_VALUE3 (sizeof(int) * 2) // Address for strip length
+#define EEPROM_ADDR_MAGIC  (sizeof(int) * 3) // Layout marker
+const int EEPROM_MAGIC = 0x4E4B3335; // "NK35"
 
 // Size of emulated EEPROM.
 // has to big enough to store our variables
-// 2 * sizeof(int) = 8 Bytes.
-#define EEPROM_SIZE 16 // 16 Bytes should be plenty
+// 4 * sizeof(int) = 16 Bytes.
+#define EEPROM_SIZE 24 // 24 Bytes should be plenty
 
 // variables we want to store in EEPROM
 int currentPattern = 2;
 int currentBrightness = 95;
+int currentStripLength = MAX_LEDS_PER_STRIP;
 
 // copies of current values
 // needed to detect changes (to limit wear of flash memory)
 int lastSavedPattern = 2;
 int lastSavedBrightness = 95;
+int lastSavedStripLength = MAX_LEDS_PER_STRIP;
 
 // supported brightness levels for button + CLI
 const int BRIGHTNESS_LEVELS[] = {95, 127, 159, 191, 223, 255};
@@ -255,6 +271,10 @@ SimpleFSM fsm;
 // ============================================================================
 
 bool isValidBrightnessLevel(int value);
+bool isValidStripLength(int value);
+void applyConfiguredStripLength();
+void clearInactiveLeds();
+void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
 bool saveConfigToEEPROM(bool verbose);
 void loadConfigFromEEPROM(bool verbose);
@@ -314,6 +334,43 @@ bool isValidBrightnessLevel(int value)
   return false;
 }
 
+bool isValidStripLength(int value)
+{
+  return value >= MIN_LEDS_PER_STRIP && value <= MAX_LEDS_PER_STRIP;
+}
+
+void applyConfiguredStripLength()
+{
+  ledsPerStrip = currentStripLength;
+  totalLeds = ledsPerStrip * 2;
+  halfLeds = totalLeds / 2;
+}
+
+void clearInactiveLeds()
+{
+  for (int i = TOTAL_LEDS; i < MAX_TOTAL_LEDS; i++)
+  {
+    Strip[i] = CRGB::Black;
+  }
+}
+
+void syncLogicalToPhysicalLeds()
+{
+  fill_solid(PhysicalStrip, MAX_TOTAL_LEDS, CRGB::Black);
+
+  // Copy logical strip1 [0..NUM_LEDS-1] to physical strip1 base 0.
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    PhysicalStrip[i] = Strip[i];
+  }
+
+  // Copy logical strip2 [NUM_LEDS..2*NUM_LEDS-1] to physical strip2 base MAX_LEDS_PER_STRIP.
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    PhysicalStrip[MAX_LEDS_PER_STRIP + i] = Strip[NUM_LEDS + i];
+  }
+}
+
 void normalizePersistentConfig()
 {
   if (currentPattern < 2 || currentPattern > 14)
@@ -325,6 +382,11 @@ void normalizePersistentConfig()
   {
     currentBrightness = MIN_BRIGHTNESS;
   }
+
+  if (!isValidStripLength(currentStripLength))
+  {
+    currentStripLength = MAX_LEDS_PER_STRIP;
+  }
 }
 
 bool saveConfigToEEPROM(bool verbose)
@@ -332,6 +394,8 @@ bool saveConfigToEEPROM(bool verbose)
   normalizePersistentConfig();
   EEPROM.put(EEPROM_ADDR_VALUE1, currentPattern);
   EEPROM.put(EEPROM_ADDR_VALUE2, currentBrightness);
+  EEPROM.put(EEPROM_ADDR_VALUE3, currentStripLength);
+  EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
 
   if (verbose)
   {
@@ -339,12 +403,15 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.println(currentPattern);
     Serial.print("Brightness: ");
     Serial.println(currentBrightness);
+    Serial.print("Strip length per side: ");
+    Serial.println(currentStripLength);
   }
 
   if (EEPROM.commit())
   {
     lastSavedPattern = currentPattern;
     lastSavedBrightness = currentBrightness;
+    lastSavedStripLength = currentStripLength;
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -361,14 +428,31 @@ bool saveConfigToEEPROM(bool verbose)
 
 void loadConfigFromEEPROM(bool verbose)
 {
+  int magic = 0;
   EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
   EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
+  EEPROM.get(EEPROM_ADDR_MAGIC, magic);
+  if (magic == EEPROM_MAGIC)
+  {
+    EEPROM.get(EEPROM_ADDR_VALUE3, currentStripLength);
+  }
+  else
+  {
+    currentStripLength = MAX_LEDS_PER_STRIP;
+  }
   normalizePersistentConfig();
+  applyConfiguredStripLength();
 
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
   lastSavedPattern = currentPattern;
   lastSavedBrightness = currentBrightness;
+  lastSavedStripLength = currentStripLength;
+
+  if (magic != EEPROM_MAGIC)
+  {
+    saveConfigToEEPROM(false);
+  }
 
   if (verbose)
   {
@@ -377,6 +461,8 @@ void loadConfigFromEEPROM(bool verbose)
     Serial.println(currentPattern);
     Serial.print("Brightness: ");
     Serial.println(currentBrightness);
+    Serial.print("Strip length per side: ");
+    Serial.println(currentStripLength);
   }
 }
 
@@ -385,9 +471,11 @@ void printCliHelp()
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  show");
-  Serial.println("  get <pattern|brightness>");
+  Serial.println("  get <pattern|brightness|strip_length>");
   Serial.println("  set pattern <2..14>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
+  Serial.println("  get strip_length");
+  Serial.println("  set strip_length <10..35>");
   Serial.println("  save");
   Serial.println("  load");
   Serial.println("  defaults");
@@ -410,7 +498,9 @@ void onCliShow(cmd* cPtr)
   Serial.print("pattern=");
   Serial.print(currentPattern);
   Serial.print(" brightness=");
-  Serial.println(currentBrightness);
+  Serial.print(currentBrightness);
+  Serial.print(" strip_length=");
+  Serial.println(currentStripLength);
 }
 
 void onCliGet(cmd* cPtr)
@@ -429,6 +519,12 @@ void onCliGet(cmd* cPtr)
   {
     Serial.print("brightness=");
     Serial.println(currentBrightness);
+    return;
+  }
+  if (key == "strip_length")
+  {
+    Serial.print("strip_length=");
+    Serial.println(currentStripLength);
     return;
   }
 
@@ -472,6 +568,23 @@ void onCliSet(cmd* cPtr)
     Serial.println(currentBrightness);
     return;
   }
+  if (key == "strip_length")
+  {
+    if (!isValidStripLength(value))
+    {
+      Serial.print("ERR strip_length range ");
+      Serial.print(MIN_LEDS_PER_STRIP);
+      Serial.print("..");
+      Serial.println(MAX_LEDS_PER_STRIP);
+      return;
+    }
+
+    currentStripLength = value;
+    applyConfiguredStripLength();
+    Serial.print("OK strip_length=");
+    Serial.println(currentStripLength);
+    return;
+  }
 
   Serial.println("ERR unknown key");
 }
@@ -493,6 +606,8 @@ void onCliDefaults(cmd* cPtr)
   (void)cPtr;
   currentPattern = 2;
   currentBrightness = MIN_BRIGHTNESS;
+  currentStripLength = MAX_LEDS_PER_STRIP;
+  applyConfiguredStripLength();
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
   batteryViewLastInteractionMs = millis();
@@ -924,8 +1039,8 @@ float speed = ypr[0];
         initialized = true;
     }
 
-    // clear strip
-    FastLED.clear();
+    // clear logical strip
+    fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
 
     // draw comets
     for (int k = 0; k < NUM_COMETS; k++) {
@@ -1260,11 +1375,10 @@ void setup()
 
   /*Verify connection*/
   Serial.println(F("Testing MPU6050 connection..."));
-  if (mpu.testConnection() == false)
+  bool mpuConnected = (mpu.testConnection() == true);
+  if (!mpuConnected)
   {
-    Serial.println("MPU6050 connection failed");
-    while (true)
-      ;
+    Serial.println("MPU6050 connection failed - continuing without DMP.");
   }
   else
   {
@@ -1286,8 +1400,15 @@ void setup()
   // while (Serial.available() && Serial.read()); // Empty buffer again
 
   /* Initializate and configure the DMP*/
-  Serial.println(F("Initializing DMP..."));
-  devStatus = mpu.dmpInitialize();
+  if (mpuConnected)
+  {
+    Serial.println(F("Initializing DMP..."));
+    devStatus = mpu.dmpInitialize();
+  }
+  else
+  {
+    devStatus = 1;
+  }
 
   /* Supply your gyro offsets here, scaled for min sensitivity */
   mpu.setXGyroOffset(111);
@@ -1340,8 +1461,8 @@ void setup()
  // FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip1, NUM_LEDS).setCorrection(TypicalLEDStrip);
  // FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip2, NUM_LEDS).setCorrection(TypicalLEDStrip);
 
-  FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip, 0, NUM_LEDS).setCorrection(TypicalLEDStrip);
-  FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip, NUM_LEDS, NUM_LEDS).setCorrection(TypicalLEDStrip);
+  FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(PhysicalStrip, 0, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
+  FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(PhysicalStrip, MAX_LEDS_PER_STRIP, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
 
   // set master brightness control
   FastLED.setBrightness(BRIGHTNESS);
@@ -1375,11 +1496,8 @@ void setup()
 
 void loop()
 {
-  if (!DMPReady)
-    return; // Stop the program if DMP programming fails.
-
   /* Read a packet from FIFO */
-  if (mpu.dmpGetCurrentFIFOPacket(FIFOBuffer))
+  if (DMPReady && mpu.dmpGetCurrentFIFOPacket(FIFOBuffer))
   { // Get the Latest packet
 #ifdef OUTPUT_READABLE_YAWPITCHROLL
     /* Display Euler angles in degrees */
@@ -1490,7 +1608,7 @@ void loop()
         Serial.println("5 minute interval reached. Checking values for changes...");
 
         // Check if the current values differ from the last saved ones
-        if (currentPattern != lastSavedPattern || currentBrightness != lastSavedBrightness) {
+        if (currentPattern != lastSavedPattern || currentBrightness != lastSavedBrightness || currentStripLength != lastSavedStripLength) {
             // At least one value has changed
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);
@@ -1502,9 +1620,11 @@ void loop()
 
 
   // send the 'leds' array out to the actual LED strip
-  // FastLED.show();
+  clearInactiveLeds();
+  syncLogicalToPhysicalLeds();
+  FastLED.show();
   // insert a delay to keep the framerate modest
-  FastLED.delay(1000 / FRAMES_PER_SECOND);
+  delay(1000 / FRAMES_PER_SECOND);
 
   //FastLED.countFPS();
   // Serial.println(LEDS.getFPS());
@@ -1518,7 +1638,7 @@ void loop()
 
   // USB power state for charging logic and serial session detection for CLI.
   UsbPowerRaw = digitalRead(PIN_USB_SENSE);
-  SerialSessionActive = (UsbPowerRaw == 1) && ((bool)Serial) && Serial.dtr();
+  SerialSessionActive = ((bool)Serial) && Serial.dtr();
   // Disable charging view while a serial session is active.
   UsbConnected = (UsbPowerRaw == 1 && !SerialSessionActive) ? 1 : 0;
 

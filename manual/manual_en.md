@@ -17,6 +17,7 @@ This guide will help you get the most out of your LED lighting system.
    1. [Power On and Initialization](#31-power-on-and-initialization)  
    2. [Functions of the Right Button](#32-functions-of-the-right-button)  
    3. [Power Off](#33-power-off)  
+   4. [USB CLI (Configuration)](#34-usb-cli-configuration)  
 4. [Power Supply and Charging](#4-power-supply-and-charging)  
 5. [Important Notes](#5-important-notes)
 
@@ -36,7 +37,7 @@ The NightKite Multi lighting system offers the following core features:
 - **Battery Indicator:**  
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  
-  Pattern and brightness are automatically stored and restored at the next startup.
+  Pattern, brightness, and strip length are automatically stored and restored at the next startup.
 
 ---
 
@@ -54,7 +55,7 @@ On first startup: **Pattern 1 “Rainbow”**, **Brightness 95**.
 6. **LED Runner (dual-color, reactive), Angle-Color:** Like (5), but with a two-color trail; speed and fade depend on movement.  
 7. **Heartbeat (Angle-Color):** Pulsating heartbeat animation; color = angle.  
 8. **Ping-Pong (bouncing) with reactive fade:** Point moves back and forth; fadeout duration increases with motion.  
-9. **Comet Swarm (4 Comets):** Four short comets race across all 50 pixels (both halves mirrored). Color = angle.  
+9. **Comet Swarm (4 Comets):** Four short comets race across the currently configured total length (both halves mirrored). Color = angle.  
 10. **Breath / Storm (adaptive):**  
     - Calm: smooth “breathing” (brightness sinus).  
     - Turbulent: “storm” with sparks that increase with movement.  
@@ -71,7 +72,7 @@ The NightKite Multi lighting system consists of the following main components:
 - **Microcontroller:** Pimoroni Pico LiPo with integrated battery management (USB-C)  
 - **Battery:** 500 mAh LiPo battery connected directly to the microcontroller  
 - **Sensor:** MPU6050 (gyroscope/accelerometer) to detect orientation (Yaw/Pitch/Roll) and motion  
-- **LED Strips:** Two strings of 25 pixels each (50 total), WS281x / “fairy string”, GRB order
+- **LED Strips:** Two symmetric strings with equal length (configurable via CLI, 10 to 35 pixels per string), WS281x / “fairy string”, GRB order
 
 ---
 
@@ -124,6 +125,27 @@ The right button is a **multi-function control**:
 
 ---
 
+### 3.4. USB CLI (Configuration)
+
+As soon as an active USB serial connection exists, the CLI is available.
+
+- Prompt: `nk>`
+- Help: `help`
+- Show current values: `show`
+- Read single value: `get pattern`, `get brightness`, `get strip_length`
+- Set single value:
+  - `set pattern <2..14>`
+  - `set brightness <95|127|159|191|223|255>`
+  - `set strip_length <10..35>`
+- Save/load:
+  - `save` (write immediately to EEPROM)
+  - `load` (load from EEPROM)
+  - `defaults` (load defaults, not saved yet)
+
+Notes:
+- `strip_length` always applies to both strips together (symmetric).
+- Saved values are restored automatically after restart.
+
 ## 4. Power Supply and Charging
 
 The system is powered by an integrated **500 mAh LiPo battery**.  
@@ -132,6 +154,7 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 - **Charging:** Connect via USB-C to a PC or USB power adapter.  
 - **Charging Indicator:** While charging, the LED strip shows the charge level as a bar;  
   a red LED blinks during the active charging process.  
+- **USB CLI active:** While a serial session is active, the charging display is suppressed so CLI usage stays predictable.  
 - **Fully Charged:** When five blue LEDs are lit (≥ 4.2 V), the battery is full and the red LED turns off.  
 - **Automatic Return:** After disconnecting USB, the system automatically returns to the last active pattern.  
 - **Runtime:** Typically between 1 – 2.5 hours depending on brightness and pattern.
@@ -139,6 +162,7 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 **Automatic Memory Function:**
 
 - Pattern and brightness are checked roughly every 5 minutes and saved if changed.  
+- Strip length is also checked and saved if changed.  
 - On the next startup, the last saved values are automatically restored.
 
 ---
