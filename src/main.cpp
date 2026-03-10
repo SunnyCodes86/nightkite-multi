@@ -138,27 +138,45 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 // Memory addresses in the emulated EEPROM
 // An int on the Pico is 4 bytes.
 // We store value1 at address 0 and value2 directly after it.
-#define EEPROM_ADDR_VALUE1 0
-#define EEPROM_ADDR_VALUE2 sizeof(int) // Address for value2, directly after value1
-#define EEPROM_ADDR_VALUE3 (sizeof(int) * 2) // Address for strip length
-#define EEPROM_ADDR_MAGIC  (sizeof(int) * 3) // Layout marker
-const int EEPROM_MAGIC = 0x4E4B3335; // "NK35"
+#define EEPROM_ADDR_PATTERN         0
+#define EEPROM_ADDR_BRIGHTNESS      sizeof(int)
+#define EEPROM_ADDR_STRIP_LENGTH    (sizeof(int) * 2)
+#define EEPROM_ADDR_SMOOTHING_SIZE  (sizeof(int) * 3)
+#define EEPROM_ADDR_ACCEL_RANGE     (sizeof(int) * 4)
+#define EEPROM_ADDR_GYRO_RANGE      (sizeof(int) * 5)
+#define EEPROM_ADDR_MAGIC           (sizeof(int) * 6)
+const int EEPROM_MAGIC = 0x4E4B3338; // "NK38"
 
 // Size of emulated EEPROM.
 // has to big enough to store our variables
-// 4 * sizeof(int) = 16 Bytes.
-#define EEPROM_SIZE 24 // 24 Bytes should be plenty
+// 7 * sizeof(int) = 28 Bytes.
+#define EEPROM_SIZE 32 // 32 Bytes leaves a little headroom
 
 // variables we want to store in EEPROM
 int currentPattern = 2;
 int currentBrightness = 95;
 int currentStripLength = DEFAULT_LEDS_PER_STRIP;
+int currentMotionSmoothingSize = 100;
+int currentAccelRange = 2;
+int currentGyroRange = 2000;
 
 // copies of current values
 // needed to detect changes (to limit wear of flash memory)
 int lastSavedPattern = 2;
 int lastSavedBrightness = 95;
 int lastSavedStripLength = DEFAULT_LEDS_PER_STRIP;
+int lastSavedMotionSmoothingSize = 100;
+int lastSavedAccelRange = 2;
+int lastSavedGyroRange = 2000;
+
+const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
+const int MIN_MOTION_SMOOTHING_SIZE = 1;
+const int MAX_MOTION_SMOOTHING_SIZE = 512;
+
+const int DEFAULT_ACCEL_RANGE = 2;
+const int DEFAULT_GYRO_RANGE = 2000;
+
+int activeMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
 
 // supported brightness levels for button + CLI
 const int BRIGHTNESS_LEVELS[] = {95, 127, 159, 191, 223, 255};
@@ -180,6 +198,9 @@ String cliInputBuffer;
 bool cliPromptShown = false;
 unsigned long cliLastInputMs = 0;
 const unsigned long CLI_AUTOPARSE_TIMEOUT_MS = 200;
+bool cliSessionBannerPending = false;
+unsigned long cliSessionBecameActiveMs = 0;
+const unsigned long CLI_CONNECT_BANNER_DELAY_MS = 150;
 
 // ============================================================================
 //  MPU6050 & MOTION STATE
@@ -273,11 +294,24 @@ SimpleFSM fsm;
 
 bool isValidBrightnessLevel(int value);
 bool isValidStripLength(int value);
+bool isValidMotionSmoothingSize(int value);
+bool isValidAccelRange(int value);
+bool isValidGyroRange(int value);
+int accelRangeToRegisterValue(int value);
+int accelRegisterValueToRange(int value);
+int gyroRangeToRegisterValue(int value);
+int gyroRegisterValueToRange(int value);
 void applyConfiguredStripLength();
 void applyPersistentConfig();
+void applyConfiguredMotionSmoothing();
+void applyConfiguredSensorRanges();
 void clearInactiveLeds();
 void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
+int readBatteryRawValue();
+float convertBatteryRawToVoltage(int rawValue);
+void printBatteryStatus();
+void printSensorStatus();
 bool saveConfigToEEPROM(bool verbose);
 void readConfigFromEEPROM(bool verbose);
 void printCliHelp();
@@ -292,6 +326,9 @@ void onCliSet(cmd* cPtr);
 void onCliSave(cmd* cPtr);
 void onCliLoad(cmd* cPtr);
 void onCliDefaults(cmd* cPtr);
+void onCliBattery(cmd* cPtr);
+void onCliSensor(cmd* cPtr);
+void onCliReboot(cmd* cPtr);
 void onCliError(cmd_error* e);
 
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
@@ -341,6 +378,89 @@ bool isValidStripLength(int value)
   return value >= MIN_LEDS_PER_STRIP && value <= MAX_LEDS_PER_STRIP;
 }
 
+bool isValidMotionSmoothingSize(int value)
+{
+  return value >= MIN_MOTION_SMOOTHING_SIZE && value <= MAX_MOTION_SMOOTHING_SIZE;
+}
+
+bool isValidAccelRange(int value)
+{
+  return value == 2 || value == 4 || value == 8 || value == 16;
+}
+
+bool isValidGyroRange(int value)
+{
+  return value == 250 || value == 500 || value == 1000 || value == 2000;
+}
+
+int accelRangeToRegisterValue(int value)
+{
+  switch (value)
+  {
+    case 2:
+      return MPU6050_ACCEL_FS_2;
+    case 4:
+      return MPU6050_ACCEL_FS_4;
+    case 8:
+      return MPU6050_ACCEL_FS_8;
+    case 16:
+      return MPU6050_ACCEL_FS_16;
+    default:
+      return MPU6050_ACCEL_FS_2;
+  }
+}
+
+int accelRegisterValueToRange(int value)
+{
+  switch (value)
+  {
+    case MPU6050_ACCEL_FS_2:
+      return 2;
+    case MPU6050_ACCEL_FS_4:
+      return 4;
+    case MPU6050_ACCEL_FS_8:
+      return 8;
+    case MPU6050_ACCEL_FS_16:
+      return 16;
+    default:
+      return -1;
+  }
+}
+
+int gyroRangeToRegisterValue(int value)
+{
+  switch (value)
+  {
+    case 250:
+      return MPU6050_GYRO_FS_250;
+    case 500:
+      return MPU6050_GYRO_FS_500;
+    case 1000:
+      return MPU6050_GYRO_FS_1000;
+    case 2000:
+      return MPU6050_GYRO_FS_2000;
+    default:
+      return MPU6050_GYRO_FS_2000;
+  }
+}
+
+int gyroRegisterValueToRange(int value)
+{
+  switch (value)
+  {
+    case MPU6050_GYRO_FS_250:
+      return 250;
+    case MPU6050_GYRO_FS_500:
+      return 500;
+    case MPU6050_GYRO_FS_1000:
+      return 1000;
+    case MPU6050_GYRO_FS_2000:
+      return 2000;
+    default:
+      return -1;
+  }
+}
+
 void applyConfiguredStripLength()
 {
   ledsPerStrip = currentStripLength;
@@ -353,6 +473,19 @@ void applyPersistentConfig()
   applyConfiguredStripLength();
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
+}
+
+void applyConfiguredMotionSmoothing()
+{
+  activeMotionSmoothingSize = currentMotionSmoothingSize;
+  myAccel.begin(SMOOTHED_AVERAGE, activeMotionSmoothingSize);
+  myAccel.clear();
+}
+
+void applyConfiguredSensorRanges()
+{
+  mpu.setFullScaleAccelRange((uint8_t)accelRangeToRegisterValue(currentAccelRange));
+  mpu.setFullScaleGyroRange((uint8_t)gyroRangeToRegisterValue(currentGyroRange));
 }
 
 void clearInactiveLeds()
@@ -396,14 +529,93 @@ void normalizePersistentConfig()
   {
     currentStripLength = DEFAULT_LEDS_PER_STRIP;
   }
+
+  if (!isValidMotionSmoothingSize(currentMotionSmoothingSize))
+  {
+    currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
+  }
+
+  if (!isValidAccelRange(currentAccelRange))
+  {
+    currentAccelRange = DEFAULT_ACCEL_RANGE;
+  }
+
+  if (!isValidGyroRange(currentGyroRange))
+  {
+    currentGyroRange = DEFAULT_GYRO_RANGE;
+  }
+}
+
+int readBatteryRawValue()
+{
+  return analogRead(PIN_BATTERY_ADC);
+}
+
+float convertBatteryRawToVoltage(int rawValue)
+{
+  return rawValue * 3.0f * 3.3f / 4096.0f;
+}
+
+void printBatteryStatus()
+{
+  RawVoltage = readBatteryRawValue();
+  Voltage = convertBatteryRawToVoltage(RawVoltage);
+  const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
+
+  Serial.print("battery_raw=");
+  Serial.print(RawVoltage);
+  Serial.print(" battery_voltage=");
+  Serial.print(Voltage, 3);
+  Serial.print(" usb_power_raw=");
+  Serial.print(usbSenseRaw);
+  Serial.print(" serial_session_active=");
+  Serial.println(SerialSessionActive ? 1 : 0);
+}
+
+void printSensorStatus()
+{
+  const bool mpuConnected = (mpu.testConnection() == true);
+  const int activeAccelRange = accelRegisterValueToRange(mpu.getFullScaleAccelRange());
+  const int activeGyroRange = gyroRegisterValueToRange(mpu.getFullScaleGyroRange());
+  const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
+
+  Serial.print("mpu_connected=");
+  Serial.print(mpuConnected ? 1 : 0);
+  Serial.print(" dmp_ready=");
+  Serial.print(DMPReady ? 1 : 0);
+  Serial.print(" dev_status=");
+  Serial.print(devStatus);
+  Serial.print(" packet_size=");
+  Serial.print(packetSize);
+  Serial.print(" int_status=");
+  Serial.print(MPUIntStatus);
+  Serial.print(" smoothing_config=");
+  Serial.print(currentMotionSmoothingSize);
+  Serial.print(" smoothing_active=");
+  Serial.print(activeMotionSmoothingSize);
+  Serial.print(" accel_range_config=");
+  Serial.print(currentAccelRange);
+  Serial.print(" accel_range_active=");
+  Serial.print(activeAccelRange);
+  Serial.print(" gyro_range_config=");
+  Serial.print(currentGyroRange);
+  Serial.print(" gyro_range_active=");
+  Serial.print(activeGyroRange);
+  Serial.print(" usb_power_raw=");
+  Serial.print(usbSenseRaw);
+  Serial.print(" serial_session_active=");
+  Serial.println(SerialSessionActive ? 1 : 0);
 }
 
 bool saveConfigToEEPROM(bool verbose)
 {
   normalizePersistentConfig();
-  EEPROM.put(EEPROM_ADDR_VALUE1, currentPattern);
-  EEPROM.put(EEPROM_ADDR_VALUE2, currentBrightness);
-  EEPROM.put(EEPROM_ADDR_VALUE3, currentStripLength);
+  EEPROM.put(EEPROM_ADDR_PATTERN, currentPattern);
+  EEPROM.put(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
+  EEPROM.put(EEPROM_ADDR_STRIP_LENGTH, currentStripLength);
+  EEPROM.put(EEPROM_ADDR_SMOOTHING_SIZE, currentMotionSmoothingSize);
+  EEPROM.put(EEPROM_ADDR_ACCEL_RANGE, currentAccelRange);
+  EEPROM.put(EEPROM_ADDR_GYRO_RANGE, currentGyroRange);
   EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
 
   if (verbose)
@@ -414,6 +626,12 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.println(currentBrightness);
     Serial.print("Strip length per side: ");
     Serial.println(currentStripLength);
+    Serial.print("Motion smoothing: ");
+    Serial.println(currentMotionSmoothingSize);
+    Serial.print("Accel range (g): ");
+    Serial.println(currentAccelRange);
+    Serial.print("Gyro range (dps): ");
+    Serial.println(currentGyroRange);
   }
 
   if (EEPROM.commit())
@@ -421,6 +639,9 @@ bool saveConfigToEEPROM(bool verbose)
     lastSavedPattern = currentPattern;
     lastSavedBrightness = currentBrightness;
     lastSavedStripLength = currentStripLength;
+    lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
+    lastSavedAccelRange = currentAccelRange;
+    lastSavedGyroRange = currentGyroRange;
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -438,21 +659,30 @@ bool saveConfigToEEPROM(bool verbose)
 void readConfigFromEEPROM(bool verbose)
 {
   int magic = 0;
-  EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
-  EEPROM.get(EEPROM_ADDR_VALUE2, currentBrightness);
+  currentPattern = 2;
+  currentBrightness = MIN_BRIGHTNESS;
+  currentStripLength = DEFAULT_LEDS_PER_STRIP;
+  currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
+  currentAccelRange = DEFAULT_ACCEL_RANGE;
+  currentGyroRange = DEFAULT_GYRO_RANGE;
+
+  EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
+  EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
   EEPROM.get(EEPROM_ADDR_MAGIC, magic);
   if (magic == EEPROM_MAGIC)
   {
-    EEPROM.get(EEPROM_ADDR_VALUE3, currentStripLength);
-  }
-  else
-  {
-    currentStripLength = DEFAULT_LEDS_PER_STRIP;
+    EEPROM.get(EEPROM_ADDR_STRIP_LENGTH, currentStripLength);
+    EEPROM.get(EEPROM_ADDR_SMOOTHING_SIZE, currentMotionSmoothingSize);
+    EEPROM.get(EEPROM_ADDR_ACCEL_RANGE, currentAccelRange);
+    EEPROM.get(EEPROM_ADDR_GYRO_RANGE, currentGyroRange);
   }
   normalizePersistentConfig();
   lastSavedPattern = currentPattern;
   lastSavedBrightness = currentBrightness;
   lastSavedStripLength = currentStripLength;
+  lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
+  lastSavedAccelRange = currentAccelRange;
+  lastSavedGyroRange = currentGyroRange;
 
   if (magic != EEPROM_MAGIC)
   {
@@ -468,6 +698,12 @@ void readConfigFromEEPROM(bool verbose)
     Serial.println(currentBrightness);
     Serial.print("Strip length per side: ");
     Serial.println(currentStripLength);
+    Serial.print("Motion smoothing: ");
+    Serial.println(currentMotionSmoothingSize);
+    Serial.print("Accel range (g): ");
+    Serial.println(currentAccelRange);
+    Serial.print("Gyro range (dps): ");
+    Serial.println(currentGyroRange);
   }
 }
 
@@ -476,11 +712,16 @@ void printCliHelp()
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  show");
-  Serial.println("  get <pattern|brightness|strip_length>");
+  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range>");
   Serial.println("  set pattern <2..14>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
-  Serial.println("  get strip_length");
   Serial.println("  set strip_length <10..35>");
+  Serial.println("  set smoothing <1..512>           (takes effect after reboot)");
+  Serial.println("  set accel_range <2|4|8|16>       (takes effect after reboot)");
+  Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
+  Serial.println("  battery");
+  Serial.println("  sensor");
+  Serial.println("  reboot");
   Serial.println("  save");
   Serial.println("  load");
   Serial.println("  defaults");
@@ -505,7 +746,13 @@ void onCliShow(cmd* cPtr)
   Serial.print(" brightness=");
   Serial.print(currentBrightness);
   Serial.print(" strip_length=");
-  Serial.println(currentStripLength);
+  Serial.print(currentStripLength);
+  Serial.print(" smoothing=");
+  Serial.print(currentMotionSmoothingSize);
+  Serial.print(" accel_range=");
+  Serial.print(currentAccelRange);
+  Serial.print(" gyro_range=");
+  Serial.println(currentGyroRange);
 }
 
 void onCliGet(cmd* cPtr)
@@ -530,6 +777,24 @@ void onCliGet(cmd* cPtr)
   {
     Serial.print("strip_length=");
     Serial.println(currentStripLength);
+    return;
+  }
+  if (key == "smoothing")
+  {
+    Serial.print("smoothing=");
+    Serial.println(currentMotionSmoothingSize);
+    return;
+  }
+  if (key == "accel_range")
+  {
+    Serial.print("accel_range=");
+    Serial.println(currentAccelRange);
+    return;
+  }
+  if (key == "gyro_range")
+  {
+    Serial.print("gyro_range=");
+    Serial.println(currentGyroRange);
     return;
   }
 
@@ -590,6 +855,51 @@ void onCliSet(cmd* cPtr)
     Serial.println(currentStripLength);
     return;
   }
+  if (key == "smoothing")
+  {
+    if (!isValidMotionSmoothingSize(value))
+    {
+      Serial.print("ERR smoothing range ");
+      Serial.print(MIN_MOTION_SMOOTHING_SIZE);
+      Serial.print("..");
+      Serial.println(MAX_MOTION_SMOOTHING_SIZE);
+      return;
+    }
+
+    currentMotionSmoothingSize = value;
+    Serial.print("OK smoothing=");
+    Serial.print(currentMotionSmoothingSize);
+    Serial.println(" (applies after reboot)");
+    return;
+  }
+  if (key == "accel_range")
+  {
+    if (!isValidAccelRange(value))
+    {
+      Serial.println("ERR accel_range must be one of 2,4,8,16");
+      return;
+    }
+
+    currentAccelRange = value;
+    Serial.print("OK accel_range=");
+    Serial.print(currentAccelRange);
+    Serial.println(" (applies after reboot)");
+    return;
+  }
+  if (key == "gyro_range")
+  {
+    if (!isValidGyroRange(value))
+    {
+      Serial.println("ERR gyro_range must be one of 250,500,1000,2000");
+      return;
+    }
+
+    currentGyroRange = value;
+    Serial.print("OK gyro_range=");
+    Serial.print(currentGyroRange);
+    Serial.println(" (applies after reboot)");
+    return;
+  }
 
   Serial.println("ERR unknown key");
 }
@@ -613,9 +923,33 @@ void onCliDefaults(cmd* cPtr)
   currentPattern = 2;
   currentBrightness = MIN_BRIGHTNESS;
   currentStripLength = DEFAULT_LEDS_PER_STRIP;
+  currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
+  currentAccelRange = DEFAULT_ACCEL_RANGE;
+  currentGyroRange = DEFAULT_GYRO_RANGE;
   applyPersistentConfig();
   batteryViewLastInteractionMs = millis();
-  Serial.println("OK defaults loaded (not saved)");
+  Serial.println("OK defaults loaded (not saved, sensor changes apply after reboot)");
+}
+
+void onCliBattery(cmd* cPtr)
+{
+  (void)cPtr;
+  printBatteryStatus();
+}
+
+void onCliSensor(cmd* cPtr)
+{
+  (void)cPtr;
+  printSensorStatus();
+}
+
+void onCliReboot(cmd* cPtr)
+{
+  (void)cPtr;
+  Serial.println("OK rebooting");
+  Serial.flush();
+  delay(50);
+  rp2040.reboot();
 }
 
 void onCliError(cmd_error* e)
@@ -645,6 +979,14 @@ void setupCLI()
   (void)load;
   Command defaults = cli.addCommand("defaults", onCliDefaults);
   (void)defaults;
+  Command battery = cli.addCommand("battery", onCliBattery);
+  (void)battery;
+  Command sensor = cli.addCommand("sensor", onCliSensor);
+  (void)sensor;
+  Command reboot = cli.addCommand("reboot", onCliReboot);
+  (void)reboot;
+  Command restart = cli.addCommand("restart", onCliReboot);
+  (void)restart;
 
   cli.setOnError(onCliError);
 }
@@ -658,15 +1000,19 @@ void handleCLI()
     cliInputBuffer = "";
     cliPromptShown = false;
     cliLastInputMs = 0;
+    cliSessionBannerPending = false;
+    cliSessionBecameActiveMs = 0;
     return;
   }
 
-  if (!cliPromptShown)
+  if (!cliPromptShown && cliSessionBannerPending && (millis() - cliSessionBecameActiveMs >= CLI_CONNECT_BANNER_DELAY_MS))
   {
     Serial.println();
     Serial.println("[NightKite CLI] USB connected. Type 'help'.");
     printCliPrompt();
+    Serial.flush();
     cliPromptShown = true;
+    cliSessionBannerPending = false;
   }
 
   while (Serial.available() > 0)
@@ -1394,14 +1740,6 @@ void setup()
     Serial.println("MPU6050 connection successful");
   }
 
-  /* set ranges for accel and gyro */
-  mpu.setFullScaleAccelRange(2);
-  mpu.setFullScaleGyroRange(2);
-  Serial.print("Accelrange:");
-  Serial.println(mpu.getFullScaleAccelRange());
-  Serial.print("Gyrorange:");
-  Serial.println(mpu.getFullScaleGyroRange());
-
   /*Wait for Serial input*/
   // Serial.println(F("\nSend any character to begin: "));
   // while (Serial.available() && Serial.read()); // Empty buffer
@@ -1417,6 +1755,15 @@ void setup()
   else
   {
     devStatus = 1;
+  }
+
+  if (mpuConnected)
+  {
+    applyConfiguredSensorRanges();
+    Serial.print("Configured accel range (g): ");
+    Serial.println(accelRegisterValueToRange(mpu.getFullScaleAccelRange()));
+    Serial.print("Configured gyro range (dps): ");
+    Serial.println(gyroRegisterValueToRange(mpu.getFullScaleGyroRange()));
   }
 
   /* Supply your gyro offsets here, scaled for min sensitivity */
@@ -1479,10 +1826,7 @@ void setup()
   // FastLED.setMaxRefreshRate(120);
 
   //motion smoothing init
-  myAccel.begin(SMOOTHED_AVERAGE, 100);
-
-  // Although it is unnecessary here, the stored values can be cleared if needed.
-  myAccel.clear();
+  applyConfiguredMotionSmoothing();
 
   applyPersistentConfig();
   lastUpdateTime = millis();
@@ -1614,7 +1958,12 @@ void loop()
         Serial.println("5 minute interval reached. Checking values for changes...");
 
         // Check if the current values differ from the last saved ones
-        if (currentPattern != lastSavedPattern || currentBrightness != lastSavedBrightness || currentStripLength != lastSavedStripLength) {
+        if (currentPattern != lastSavedPattern ||
+            currentBrightness != lastSavedBrightness ||
+            currentStripLength != lastSavedStripLength ||
+            currentMotionSmoothingSize != lastSavedMotionSmoothingSize ||
+            currentAccelRange != lastSavedAccelRange ||
+            currentGyroRange != lastSavedGyroRange) {
             // At least one value has changed
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);
@@ -1644,7 +1993,16 @@ void loop()
 
   // USB power state for charging logic and serial session detection for CLI.
   UsbPowerRaw = digitalRead(PIN_USB_SENSE);
+  const bool previousSerialSessionActive = SerialSessionActive;
   SerialSessionActive = ((bool)Serial) && Serial.dtr();
+  if (SerialSessionActive && !previousSerialSessionActive)
+  {
+    cliSessionBecameActiveMs = millis();
+    cliSessionBannerPending = true;
+    cliPromptShown = false;
+    cliInputBuffer = "";
+    cliLastInputMs = 0;
+  }
   // Disable charging view while a serial session is active.
   UsbConnected = (UsbPowerRaw == 1 && !SerialSessionActive) ? 1 : 0;
 
