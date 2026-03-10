@@ -256,6 +256,13 @@ unsigned long currentMillis = 0;
 bool blinkState;
 bool blink;
 bool batteryViewActive = false;
+uint32_t lastLoopDurationUs = 0;
+uint32_t maxLoopDurationUs = 0;
+uint32_t lastWorkDurationUs = 0;
+uint32_t maxWorkDurationUs = 0;
+uint64_t totalLoopDurationUs = 0;
+uint64_t totalWorkDurationUs = 0;
+uint32_t loopTimingSamples = 0;
 
 // ============================================================================
 //  LED EFFECT PARAMETERS & SMOOTHING
@@ -312,6 +319,7 @@ int readBatteryRawValue();
 float convertBatteryRawToVoltage(int rawValue);
 void printBatteryStatus();
 void printSensorStatus();
+void printTimingStatus();
 bool saveConfigToEEPROM(bool verbose);
 void readConfigFromEEPROM(bool verbose);
 void printCliHelp();
@@ -328,6 +336,7 @@ void onCliLoad(cmd* cPtr);
 void onCliDefaults(cmd* cPtr);
 void onCliBattery(cmd* cPtr);
 void onCliSensor(cmd* cPtr);
+void onCliTiming(cmd* cPtr);
 void onCliReboot(cmd* cPtr);
 void onCliError(cmd_error* e);
 
@@ -607,6 +616,36 @@ void printSensorStatus()
   Serial.println(SerialSessionActive ? 1 : 0);
 }
 
+void printTimingStatus()
+{
+  uint32_t avgLoopDurationUs = 0;
+  uint32_t avgWorkDurationUs = 0;
+  if (loopTimingSamples > 0)
+  {
+    avgLoopDurationUs = (uint32_t)(totalLoopDurationUs / loopTimingSamples);
+    avgWorkDurationUs = (uint32_t)(totalWorkDurationUs / loopTimingSamples);
+  }
+
+  Serial.print("fps=");
+  Serial.print(FastLED.getFPS());
+  Serial.print(" last_loop_us=");
+  Serial.print(lastLoopDurationUs);
+  Serial.print(" avg_loop_us=");
+  Serial.print(avgLoopDurationUs);
+  Serial.print(" max_loop_us=");
+  Serial.print(maxLoopDurationUs);
+  Serial.print(" last_work_us=");
+  Serial.print(lastWorkDurationUs);
+  Serial.print(" avg_work_us=");
+  Serial.print(avgWorkDurationUs);
+  Serial.print(" max_work_us=");
+  Serial.print(maxWorkDurationUs);
+  Serial.print(" frame_budget_us=");
+  Serial.print(1000000UL / FRAMES_PER_SECOND);
+  Serial.print(" samples=");
+  Serial.println(loopTimingSamples);
+}
+
 bool saveConfigToEEPROM(bool verbose)
 {
   normalizePersistentConfig();
@@ -721,6 +760,7 @@ void printCliHelp()
   Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
   Serial.println("  battery");
   Serial.println("  sensor");
+  Serial.println("  timing");
   Serial.println("  reboot");
   Serial.println("  save");
   Serial.println("  load");
@@ -943,6 +983,12 @@ void onCliSensor(cmd* cPtr)
   printSensorStatus();
 }
 
+void onCliTiming(cmd* cPtr)
+{
+  (void)cPtr;
+  printTimingStatus();
+}
+
 void onCliReboot(cmd* cPtr)
 {
   (void)cPtr;
@@ -983,6 +1029,8 @@ void setupCLI()
   (void)battery;
   Command sensor = cli.addCommand("sensor", onCliSensor);
   (void)sensor;
+  Command timing = cli.addCommand("timing", onCliTiming);
+  (void)timing;
   Command reboot = cli.addCommand("reboot", onCliReboot);
   (void)reboot;
   Command restart = cli.addCommand("restart", onCliReboot);
@@ -1846,6 +1894,7 @@ void setup()
 
 void loop()
 {
+  const uint32_t loopStartUs = micros();
   /* Read a packet from FIFO */
   if (DMPReady && mpu.dmpGetCurrentFIFOPacket(FIFOBuffer))
   { // Get the Latest packet
@@ -1978,6 +2027,12 @@ void loop()
   clearInactiveLeds();
   syncLogicalToPhysicalLeds();
   FastLED.show();
+  lastWorkDurationUs = micros() - loopStartUs;
+  totalWorkDurationUs += lastWorkDurationUs;
+  if (lastWorkDurationUs > maxWorkDurationUs)
+  {
+    maxWorkDurationUs = lastWorkDurationUs;
+  }
   // insert a delay to keep the framerate modest
   delay(1000 / FRAMES_PER_SECOND);
 
@@ -2041,4 +2096,12 @@ void loop()
     currentBrightness = BRIGHTNESS;
     batteryViewLastInteractionMs = millis();
   }
+
+  lastLoopDurationUs = micros() - loopStartUs;
+  totalLoopDurationUs += lastLoopDurationUs;
+  if (lastLoopDurationUs > maxLoopDurationUs)
+  {
+    maxLoopDurationUs = lastLoopDurationUs;
+  }
+  loopTimingSamples++;
 }
