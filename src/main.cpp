@@ -144,13 +144,20 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_SMOOTHING_SIZE  (sizeof(int) * 3)
 #define EEPROM_ADDR_ACCEL_RANGE     (sizeof(int) * 4)
 #define EEPROM_ADDR_GYRO_RANGE      (sizeof(int) * 5)
-#define EEPROM_ADDR_MAGIC           (sizeof(int) * 6)
-const int EEPROM_MAGIC = 0x4E4B3338; // "NK38"
+#define EEPROM_ADDR_BOOT_CAL_MODE   (sizeof(int) * 6)
+#define EEPROM_ADDR_X_ACCEL_OFFSET  (sizeof(int) * 7)
+#define EEPROM_ADDR_Y_ACCEL_OFFSET  (sizeof(int) * 8)
+#define EEPROM_ADDR_Z_ACCEL_OFFSET  (sizeof(int) * 9)
+#define EEPROM_ADDR_X_GYRO_OFFSET   (sizeof(int) * 10)
+#define EEPROM_ADDR_Y_GYRO_OFFSET   (sizeof(int) * 11)
+#define EEPROM_ADDR_Z_GYRO_OFFSET   (sizeof(int) * 12)
+#define EEPROM_ADDR_MAGIC           (sizeof(int) * 13)
+const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 
 // Size of emulated EEPROM.
 // has to big enough to store our variables
-// 7 * sizeof(int) = 28 Bytes.
-#define EEPROM_SIZE 32 // 32 Bytes leaves a little headroom
+// 14 * sizeof(int) = 56 Bytes.
+#define EEPROM_SIZE 64 // 64 Bytes leaves a little headroom
 
 // variables we want to store in EEPROM
 int currentPattern = 2;
@@ -159,6 +166,13 @@ int currentStripLength = DEFAULT_LEDS_PER_STRIP;
 int currentMotionSmoothingSize = 100;
 int currentAccelRange = 2;
 int currentGyroRange = 2000;
+int currentBootCalibrationMode = 1;
+int currentXAccelOffset = -3137;
+int currentYAccelOffset = -7;
+int currentZAccelOffset = 3687;
+int currentXGyroOffset = 111;
+int currentYGyroOffset = -6;
+int currentZGyroOffset = 34;
 
 // copies of current values
 // needed to detect changes (to limit wear of flash memory)
@@ -168,6 +182,13 @@ int lastSavedStripLength = DEFAULT_LEDS_PER_STRIP;
 int lastSavedMotionSmoothingSize = 100;
 int lastSavedAccelRange = 2;
 int lastSavedGyroRange = 2000;
+int lastSavedBootCalibrationMode = 1;
+int lastSavedXAccelOffset = -3137;
+int lastSavedYAccelOffset = -7;
+int lastSavedZAccelOffset = 3687;
+int lastSavedXGyroOffset = 111;
+int lastSavedYGyroOffset = -6;
+int lastSavedZGyroOffset = 34;
 
 const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
 const int MIN_MOTION_SMOOTHING_SIZE = 1;
@@ -175,6 +196,17 @@ const int MAX_MOTION_SMOOTHING_SIZE = 512;
 
 const int DEFAULT_ACCEL_RANGE = 2;
 const int DEFAULT_GYRO_RANGE = 2000;
+const int DEFAULT_BOOT_CALIBRATION_MODE = 1;
+
+const int BOOT_CALIBRATION_MODE_OFF = 0;
+const int BOOT_CALIBRATION_MODE_QUICK = 1;
+
+const int DEFAULT_X_ACCEL_OFFSET = -3137;
+const int DEFAULT_Y_ACCEL_OFFSET = -7;
+const int DEFAULT_Z_ACCEL_OFFSET = 3687;
+const int DEFAULT_X_GYRO_OFFSET = 111;
+const int DEFAULT_Y_GYRO_OFFSET = -6;
+const int DEFAULT_Z_GYRO_OFFSET = 34;
 
 int activeMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
 
@@ -304,6 +336,9 @@ bool isValidStripLength(int value);
 bool isValidMotionSmoothingSize(int value);
 bool isValidAccelRange(int value);
 bool isValidGyroRange(int value);
+bool isValidBootCalibrationMode(int value);
+int parseBootCalibrationMode(String value);
+const char* bootCalibrationModeToString(int value);
 int accelRangeToRegisterValue(int value);
 int accelRegisterValueToRange(int value);
 int gyroRangeToRegisterValue(int value);
@@ -312,6 +347,13 @@ void applyConfiguredStripLength();
 void applyPersistentConfig();
 void applyConfiguredMotionSmoothing();
 void applyConfiguredSensorRanges();
+void applyConfiguredOffsets();
+void syncConfiguredOffsetsFromMPU();
+void printOffsets();
+bool beginCalibrationSession(bool verbose, bool* restartDMP);
+void endCalibrationSession(bool restartDMP);
+bool runQuickCalibration(bool verbose);
+bool runPreciseCalibration(bool verbose);
 void clearInactiveLeds();
 void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
@@ -337,6 +379,8 @@ void onCliDefaults(cmd* cPtr);
 void onCliBattery(cmd* cPtr);
 void onCliSensor(cmd* cPtr);
 void onCliTiming(cmd* cPtr);
+void onCliOffsets(cmd* cPtr);
+void onCliCalibrate(cmd* cPtr);
 void onCliReboot(cmd* cPtr);
 void onCliError(cmd_error* e);
 
@@ -400,6 +444,31 @@ bool isValidAccelRange(int value)
 bool isValidGyroRange(int value)
 {
   return value == 250 || value == 500 || value == 1000 || value == 2000;
+}
+
+bool isValidBootCalibrationMode(int value)
+{
+  return value == BOOT_CALIBRATION_MODE_OFF || value == BOOT_CALIBRATION_MODE_QUICK;
+}
+
+int parseBootCalibrationMode(String value)
+{
+  value.toLowerCase();
+  value.trim();
+  if (value == "off" || value == "0")
+  {
+    return BOOT_CALIBRATION_MODE_OFF;
+  }
+  if (value == "quick" || value == "1")
+  {
+    return BOOT_CALIBRATION_MODE_QUICK;
+  }
+  return -1;
+}
+
+const char* bootCalibrationModeToString(int value)
+{
+  return (value == BOOT_CALIBRATION_MODE_QUICK) ? "quick" : "off";
 }
 
 int accelRangeToRegisterValue(int value)
@@ -497,6 +566,363 @@ void applyConfiguredSensorRanges()
   mpu.setFullScaleGyroRange((uint8_t)gyroRangeToRegisterValue(currentGyroRange));
 }
 
+void applyConfiguredOffsets()
+{
+  mpu.setXAccelOffset(currentXAccelOffset);
+  mpu.setYAccelOffset(currentYAccelOffset);
+  mpu.setZAccelOffset(currentZAccelOffset);
+  mpu.setXGyroOffset(currentXGyroOffset);
+  mpu.setYGyroOffset(currentYGyroOffset);
+  mpu.setZGyroOffset(currentZGyroOffset);
+}
+
+void syncConfiguredOffsetsFromMPU()
+{
+  currentXAccelOffset = mpu.getXAccelOffset();
+  currentYAccelOffset = mpu.getYAccelOffset();
+  currentZAccelOffset = mpu.getZAccelOffset();
+  currentXGyroOffset = mpu.getXGyroOffset();
+  currentYGyroOffset = mpu.getYGyroOffset();
+  currentZGyroOffset = mpu.getZGyroOffset();
+}
+
+void printOffsets()
+{
+  Serial.print("x_accel_offset=");
+  Serial.print(currentXAccelOffset);
+  Serial.print(" y_accel_offset=");
+  Serial.print(currentYAccelOffset);
+  Serial.print(" z_accel_offset=");
+  Serial.print(currentZAccelOffset);
+  Serial.print(" x_gyro_offset=");
+  Serial.print(currentXGyroOffset);
+  Serial.print(" y_gyro_offset=");
+  Serial.print(currentYGyroOffset);
+  Serial.print(" z_gyro_offset=");
+  Serial.println(currentZGyroOffset);
+}
+
+bool beginCalibrationSession(bool verbose, bool* restartDMP)
+{
+  if (devStatus != 0)
+  {
+    if (verbose)
+    {
+      Serial.println("ERR calibration unavailable while DMP init failed");
+    }
+    return false;
+  }
+
+  *restartDMP = DMPReady;
+  if (*restartDMP)
+  {
+    if (verbose)
+    {
+      Serial.println("Pausing DMP for calibration...");
+    }
+    detachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN));
+    mpu.setDMPEnabled(false);
+    DMPReady = false;
+    delay(50);
+  }
+
+  return true;
+}
+
+void endCalibrationSession(bool restartDMP)
+{
+  if (restartDMP)
+  {
+    mpu.resetFIFO();
+    mpu.setDMPEnabled(true);
+    attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), DMPDataReady, RISING);
+    MPUIntStatus = mpu.getIntStatus();
+    DMPReady = true;
+  }
+}
+
+bool runQuickCalibration(bool verbose)
+{
+  bool restartDMP = false;
+  if (!beginCalibrationSession(verbose, &restartDMP))
+  {
+    return false;
+  }
+
+  if (verbose)
+  {
+    Serial.println("Starting quick calibration...");
+  }
+
+  mpu.CalibrateAccel(6);
+  mpu.CalibrateGyro(6);
+  syncConfiguredOffsetsFromMPU();
+
+  endCalibrationSession(restartDMP);
+
+  if (verbose)
+  {
+    Serial.println("These are the Active offsets: ");
+    mpu.PrintActiveOffsets();
+  }
+
+  return true;
+}
+
+bool runPreciseCalibration(bool verbose)
+{
+  const int axisCount = 6;
+  const int iAx = 0;
+  const int iAy = 1;
+  const int iAz = 2;
+  const int iGx = 3;
+  const int iGy = 4;
+  const int iGz = 5;
+  const int sampleDelayUs = 3150;
+  const int fastSamples = 1000;
+  const int slowSamples = 10000;
+  const int linesBetweenHeaders = 5;
+
+  bool restartDMP = false;
+  if (!beginCalibrationSession(verbose, &restartDMP))
+  {
+    return false;
+  }
+
+  if (verbose)
+  {
+    Serial.println("Starting precise calibration...");
+    Serial.println("Keep the device still on a flat, level surface.");
+  }
+
+  int lowValue[axisCount];
+  int highValue[axisCount];
+  int smoothed[axisCount];
+  int lowOffset[axisCount];
+  int highOffset[axisCount];
+  int target[axisCount];
+  int newOffset[axisCount];
+  long sums[axisCount];
+  int linesOut = 99;
+  int sampleCount = fastSamples;
+
+  auto forceHeader = [&]() {
+    linesOut = 99;
+  };
+
+  auto printHeaderIfNeeded = [&]() {
+    if (linesOut >= linesBetweenHeaders)
+    {
+      Serial.println("\t\tXAccel\t\t\tYAccel\t\t\t\tZAccel\t\t\tXGyro\t\t\tYGyro\t\t\tZGyro");
+      linesOut = 0;
+    }
+  };
+
+  auto showProgress = [&]() {
+    printHeaderIfNeeded();
+    Serial.print(' ');
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      Serial.print('[');
+      Serial.print(lowOffset[axis]);
+      Serial.print(',');
+      Serial.print(highOffset[axis]);
+      Serial.print("] --> [");
+      Serial.print(lowValue[axis]);
+      Serial.print(',');
+      Serial.print(highValue[axis]);
+      if (axis == axisCount - 1)
+      {
+        Serial.println("]");
+      }
+      else
+      {
+        Serial.print("]\t");
+      }
+    }
+    linesOut++;
+  };
+
+  auto setOffsets = [&](const int offsets[axisCount]) {
+    mpu.setXAccelOffset(offsets[iAx]);
+    mpu.setYAccelOffset(offsets[iAy]);
+    mpu.setZAccelOffset(offsets[iAz]);
+    mpu.setXGyroOffset(offsets[iGx]);
+    mpu.setYGyroOffset(offsets[iGy]);
+    mpu.setZGyroOffset(offsets[iGz]);
+  };
+
+  auto getSmoothed = [&]() {
+    int16_t rawValue[axisCount];
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      sums[axis] = 0;
+    }
+
+    for (int sample = 1; sample <= sampleCount; sample++)
+    {
+      mpu.getMotion6(&rawValue[iAx], &rawValue[iAy], &rawValue[iAz], &rawValue[iGx], &rawValue[iGy], &rawValue[iGz]);
+      delayMicroseconds(sampleDelayUs);
+      for (int axis = 0; axis < axisCount; axis++)
+      {
+        sums[axis] += rawValue[axis];
+      }
+    }
+
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      smoothed[axis] = (int)((sums[axis] + sampleCount / 2) / sampleCount);
+    }
+  };
+
+  for (int axis = 0; axis < axisCount; axis++)
+  {
+    target[axis] = 0;
+    lowOffset[axis] = 0;
+    highOffset[axis] = 0;
+  }
+  target[iAz] = 16384;
+
+  if (verbose)
+  {
+    Serial.print("Averaging ");
+    Serial.print(sampleCount);
+    Serial.println(" readings each time");
+    Serial.println("Expanding:");
+  }
+  forceHeader();
+
+  bool done = false;
+  while (!done)
+  {
+    done = true;
+    int nextLowOffset[axisCount];
+    int nextHighOffset[axisCount];
+
+    setOffsets(lowOffset);
+    getSmoothed();
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      lowValue[axis] = smoothed[axis];
+      if (lowValue[axis] >= target[axis])
+      {
+        done = false;
+        nextLowOffset[axis] = lowOffset[axis] - 1000;
+      }
+      else
+      {
+        nextLowOffset[axis] = lowOffset[axis];
+      }
+    }
+
+    setOffsets(highOffset);
+    getSmoothed();
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      highValue[axis] = smoothed[axis];
+      if (highValue[axis] <= target[axis])
+      {
+        done = false;
+        nextHighOffset[axis] = highOffset[axis] + 1000;
+      }
+      else
+      {
+        nextHighOffset[axis] = highOffset[axis];
+      }
+    }
+
+    if (verbose)
+    {
+      showProgress();
+    }
+
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      lowOffset[axis] = nextLowOffset[axis];
+      highOffset[axis] = nextHighOffset[axis];
+    }
+  }
+
+  if (verbose)
+  {
+    Serial.println();
+    Serial.println("Closing in:");
+  }
+  forceHeader();
+
+  bool allBracketsNarrow = false;
+  bool stillWorking = true;
+  while (stillWorking)
+  {
+    stillWorking = false;
+    if (allBracketsNarrow && sampleCount == fastSamples)
+    {
+      sampleCount = slowSamples;
+      if (verbose)
+      {
+        Serial.print("Averaging ");
+        Serial.print(sampleCount);
+        Serial.println(" readings each time");
+      }
+    }
+    else
+    {
+      allBracketsNarrow = true;
+    }
+
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      if (highOffset[axis] <= (lowOffset[axis] + 1))
+      {
+        newOffset[axis] = lowOffset[axis];
+      }
+      else
+      {
+        stillWorking = true;
+        newOffset[axis] = (lowOffset[axis] + highOffset[axis]) / 2;
+        if (highOffset[axis] > (lowOffset[axis] + 10))
+        {
+          allBracketsNarrow = false;
+        }
+      }
+    }
+
+    setOffsets(newOffset);
+    getSmoothed();
+    for (int axis = 0; axis < axisCount; axis++)
+    {
+      if (smoothed[axis] > target[axis])
+      {
+        highOffset[axis] = newOffset[axis];
+        highValue[axis] = smoothed[axis];
+      }
+      else
+      {
+        lowOffset[axis] = newOffset[axis];
+        lowValue[axis] = smoothed[axis];
+      }
+    }
+
+    if (verbose)
+    {
+      showProgress();
+    }
+  }
+
+  setOffsets(lowOffset);
+  syncConfiguredOffsetsFromMPU();
+  endCalibrationSession(restartDMP);
+
+  if (verbose)
+  {
+    Serial.println("-------------- DONE --------------");
+    Serial.println("Precise calibration offsets:");
+    printOffsets();
+  }
+
+  return true;
+}
+
 void clearInactiveLeds()
 {
   for (int i = TOTAL_LEDS; i < MAX_TOTAL_LEDS; i++)
@@ -552,6 +978,11 @@ void normalizePersistentConfig()
   if (!isValidGyroRange(currentGyroRange))
   {
     currentGyroRange = DEFAULT_GYRO_RANGE;
+  }
+
+  if (!isValidBootCalibrationMode(currentBootCalibrationMode))
+  {
+    currentBootCalibrationMode = DEFAULT_BOOT_CALIBRATION_MODE;
   }
 }
 
@@ -655,6 +1086,13 @@ bool saveConfigToEEPROM(bool verbose)
   EEPROM.put(EEPROM_ADDR_SMOOTHING_SIZE, currentMotionSmoothingSize);
   EEPROM.put(EEPROM_ADDR_ACCEL_RANGE, currentAccelRange);
   EEPROM.put(EEPROM_ADDR_GYRO_RANGE, currentGyroRange);
+  EEPROM.put(EEPROM_ADDR_BOOT_CAL_MODE, currentBootCalibrationMode);
+  EEPROM.put(EEPROM_ADDR_X_ACCEL_OFFSET, currentXAccelOffset);
+  EEPROM.put(EEPROM_ADDR_Y_ACCEL_OFFSET, currentYAccelOffset);
+  EEPROM.put(EEPROM_ADDR_Z_ACCEL_OFFSET, currentZAccelOffset);
+  EEPROM.put(EEPROM_ADDR_X_GYRO_OFFSET, currentXGyroOffset);
+  EEPROM.put(EEPROM_ADDR_Y_GYRO_OFFSET, currentYGyroOffset);
+  EEPROM.put(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
   EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
 
   if (verbose)
@@ -671,6 +1109,9 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.println(currentAccelRange);
     Serial.print("Gyro range (dps): ");
     Serial.println(currentGyroRange);
+    Serial.print("Boot calibration: ");
+    Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    printOffsets();
   }
 
   if (EEPROM.commit())
@@ -681,6 +1122,13 @@ bool saveConfigToEEPROM(bool verbose)
     lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
     lastSavedAccelRange = currentAccelRange;
     lastSavedGyroRange = currentGyroRange;
+    lastSavedBootCalibrationMode = currentBootCalibrationMode;
+    lastSavedXAccelOffset = currentXAccelOffset;
+    lastSavedYAccelOffset = currentYAccelOffset;
+    lastSavedZAccelOffset = currentZAccelOffset;
+    lastSavedXGyroOffset = currentXGyroOffset;
+    lastSavedYGyroOffset = currentYGyroOffset;
+    lastSavedZGyroOffset = currentZGyroOffset;
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -704,6 +1152,13 @@ void readConfigFromEEPROM(bool verbose)
   currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
   currentAccelRange = DEFAULT_ACCEL_RANGE;
   currentGyroRange = DEFAULT_GYRO_RANGE;
+  currentBootCalibrationMode = DEFAULT_BOOT_CALIBRATION_MODE;
+  currentXAccelOffset = DEFAULT_X_ACCEL_OFFSET;
+  currentYAccelOffset = DEFAULT_Y_ACCEL_OFFSET;
+  currentZAccelOffset = DEFAULT_Z_ACCEL_OFFSET;
+  currentXGyroOffset = DEFAULT_X_GYRO_OFFSET;
+  currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
+  currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
 
   EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
   EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
@@ -714,6 +1169,13 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_SMOOTHING_SIZE, currentMotionSmoothingSize);
     EEPROM.get(EEPROM_ADDR_ACCEL_RANGE, currentAccelRange);
     EEPROM.get(EEPROM_ADDR_GYRO_RANGE, currentGyroRange);
+    EEPROM.get(EEPROM_ADDR_BOOT_CAL_MODE, currentBootCalibrationMode);
+    EEPROM.get(EEPROM_ADDR_X_ACCEL_OFFSET, currentXAccelOffset);
+    EEPROM.get(EEPROM_ADDR_Y_ACCEL_OFFSET, currentYAccelOffset);
+    EEPROM.get(EEPROM_ADDR_Z_ACCEL_OFFSET, currentZAccelOffset);
+    EEPROM.get(EEPROM_ADDR_X_GYRO_OFFSET, currentXGyroOffset);
+    EEPROM.get(EEPROM_ADDR_Y_GYRO_OFFSET, currentYGyroOffset);
+    EEPROM.get(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
   }
   normalizePersistentConfig();
   lastSavedPattern = currentPattern;
@@ -722,6 +1184,13 @@ void readConfigFromEEPROM(bool verbose)
   lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
   lastSavedAccelRange = currentAccelRange;
   lastSavedGyroRange = currentGyroRange;
+  lastSavedBootCalibrationMode = currentBootCalibrationMode;
+  lastSavedXAccelOffset = currentXAccelOffset;
+  lastSavedYAccelOffset = currentYAccelOffset;
+  lastSavedZAccelOffset = currentZAccelOffset;
+  lastSavedXGyroOffset = currentXGyroOffset;
+  lastSavedYGyroOffset = currentYGyroOffset;
+  lastSavedZGyroOffset = currentZGyroOffset;
 
   if (magic != EEPROM_MAGIC)
   {
@@ -743,6 +1212,9 @@ void readConfigFromEEPROM(bool verbose)
     Serial.println(currentAccelRange);
     Serial.print("Gyro range (dps): ");
     Serial.println(currentGyroRange);
+    Serial.print("Boot calibration: ");
+    Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    printOffsets();
   }
 }
 
@@ -751,16 +1223,20 @@ void printCliHelp()
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  show");
-  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range>");
+  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>");
   Serial.println("  set pattern <2..14>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
   Serial.println("  set smoothing <1..512>           (takes effect after reboot)");
   Serial.println("  set accel_range <2|4|8|16>       (takes effect after reboot)");
   Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
+  Serial.println("  set boot_calibration <off|quick>");
   Serial.println("  battery");
   Serial.println("  sensor");
   Serial.println("  timing");
+  Serial.println("  offsets");
+  Serial.println("  calibrate quick");
+  Serial.println("  calibrate precise");
   Serial.println("  reboot");
   Serial.println("  save");
   Serial.println("  load");
@@ -792,7 +1268,9 @@ void onCliShow(cmd* cPtr)
   Serial.print(" accel_range=");
   Serial.print(currentAccelRange);
   Serial.print(" gyro_range=");
-  Serial.println(currentGyroRange);
+  Serial.print(currentGyroRange);
+  Serial.print(" boot_calibration=");
+  Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
 }
 
 void onCliGet(cmd* cPtr)
@@ -837,6 +1315,12 @@ void onCliGet(cmd* cPtr)
     Serial.println(currentGyroRange);
     return;
   }
+  if (key == "boot_calibration")
+  {
+    Serial.print("boot_calibration=");
+    Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    return;
+  }
 
   Serial.println("ERR unknown key");
 }
@@ -845,7 +1329,8 @@ void onCliSet(cmd* cPtr)
 {
   Command cmd(cPtr);
   String key = cmd.getArgument("key").getValue();
-  int value = cmd.getArgument("value").getValue().toInt();
+  String valueText = cmd.getArgument("value").getValue();
+  int value = valueText.toInt();
   key.toLowerCase();
 
   if (key == "pattern")
@@ -940,6 +1425,20 @@ void onCliSet(cmd* cPtr)
     Serial.println(" (applies after reboot)");
     return;
   }
+  if (key == "boot_calibration")
+  {
+    int mode = parseBootCalibrationMode(valueText);
+    if (!isValidBootCalibrationMode(mode))
+    {
+      Serial.println("ERR boot_calibration must be 'off' or 'quick'");
+      return;
+    }
+
+    currentBootCalibrationMode = mode;
+    Serial.print("OK boot_calibration=");
+    Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    return;
+  }
 
   Serial.println("ERR unknown key");
 }
@@ -966,6 +1465,13 @@ void onCliDefaults(cmd* cPtr)
   currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
   currentAccelRange = DEFAULT_ACCEL_RANGE;
   currentGyroRange = DEFAULT_GYRO_RANGE;
+  currentBootCalibrationMode = DEFAULT_BOOT_CALIBRATION_MODE;
+  currentXAccelOffset = DEFAULT_X_ACCEL_OFFSET;
+  currentYAccelOffset = DEFAULT_Y_ACCEL_OFFSET;
+  currentZAccelOffset = DEFAULT_Z_ACCEL_OFFSET;
+  currentXGyroOffset = DEFAULT_X_GYRO_OFFSET;
+  currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
+  currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
   applyPersistentConfig();
   batteryViewLastInteractionMs = millis();
   Serial.println("OK defaults loaded (not saved, sensor changes apply after reboot)");
@@ -987,6 +1493,49 @@ void onCliTiming(cmd* cPtr)
 {
   (void)cPtr;
   printTimingStatus();
+}
+
+void onCliOffsets(cmd* cPtr)
+{
+  (void)cPtr;
+  printOffsets();
+}
+
+void onCliCalibrate(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  String mode = cmd.getArgument("mode").getValue();
+  mode.toLowerCase();
+
+  if (mode == "quick")
+  {
+    if (!runQuickCalibration(true))
+    {
+      return;
+    }
+
+    saveConfigToEEPROM(true);
+    Serial.println("OK quick calibration finished and offsets saved");
+    return;
+  }
+
+  if (mode == "precise")
+  {
+    if (!runPreciseCalibration(true))
+    {
+      return;
+    }
+
+    saveConfigToEEPROM(true);
+    Serial.println("OK precise calibration finished and offsets saved");
+    return;
+  }
+
+  if (mode != "quick" && mode != "precise")
+  {
+    Serial.println("ERR calibrate mode must be 'quick' or 'precise'");
+    return;
+  }
 }
 
 void onCliReboot(cmd* cPtr)
@@ -1031,6 +1580,10 @@ void setupCLI()
   (void)sensor;
   Command timing = cli.addCommand("timing", onCliTiming);
   (void)timing;
+  Command offsets = cli.addCommand("offsets", onCliOffsets);
+  (void)offsets;
+  Command calibrate = cli.addCommand("calibrate", onCliCalibrate);
+  calibrate.addPositionalArgument("mode");
   Command reboot = cli.addCommand("reboot", onCliReboot);
   (void)reboot;
   Command restart = cli.addCommand("restart", onCliReboot);
@@ -1812,23 +2365,24 @@ void setup()
     Serial.println(accelRegisterValueToRange(mpu.getFullScaleAccelRange()));
     Serial.print("Configured gyro range (dps): ");
     Serial.println(gyroRegisterValueToRange(mpu.getFullScaleGyroRange()));
+    applyConfiguredOffsets();
+    Serial.print("Boot calibration mode: ");
+    Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
   }
-
-  /* Supply your gyro offsets here, scaled for min sensitivity */
-  mpu.setXGyroOffset(111);
-  mpu.setYGyroOffset(-6);
-  mpu.setZGyroOffset(34);
-  mpu.setXAccelOffset(-3137);
-  mpu.setYAccelOffset(-7);
-  mpu.setZAccelOffset(3687);
 
   /* Making sure it worked (returns 0 if so) */
   if (devStatus == 0)
   {
-    mpu.CalibrateAccel(6); // Calibration Time: generate offsets and calibrate our MPU6050
-    mpu.CalibrateGyro(6);
-    Serial.println("These are the Active offsets: ");
-    mpu.PrintActiveOffsets();
+    if (currentBootCalibrationMode == BOOT_CALIBRATION_MODE_QUICK)
+    {
+      runQuickCalibration(true);
+    }
+    else
+    {
+      Serial.println("Using stored offsets without boot calibration.");
+      printOffsets();
+    }
+
     Serial.println(F("Enabling DMP...")); // Turning ON DMP
     mpu.setDMPEnabled(true);
 
@@ -2012,7 +2566,14 @@ void loop()
             currentStripLength != lastSavedStripLength ||
             currentMotionSmoothingSize != lastSavedMotionSmoothingSize ||
             currentAccelRange != lastSavedAccelRange ||
-            currentGyroRange != lastSavedGyroRange) {
+            currentGyroRange != lastSavedGyroRange ||
+            currentBootCalibrationMode != lastSavedBootCalibrationMode ||
+            currentXAccelOffset != lastSavedXAccelOffset ||
+            currentYAccelOffset != lastSavedYAccelOffset ||
+            currentZAccelOffset != lastSavedZAccelOffset ||
+            currentXGyroOffset != lastSavedXGyroOffset ||
+            currentYGyroOffset != lastSavedYGyroOffset ||
+            currentZGyroOffset != lastSavedZGyroOffset) {
             // At least one value has changed
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);
