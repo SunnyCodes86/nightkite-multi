@@ -274,11 +274,12 @@ SimpleFSM fsm;
 bool isValidBrightnessLevel(int value);
 bool isValidStripLength(int value);
 void applyConfiguredStripLength();
+void applyPersistentConfig();
 void clearInactiveLeds();
 void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
 bool saveConfigToEEPROM(bool verbose);
-void loadConfigFromEEPROM(bool verbose);
+void readConfigFromEEPROM(bool verbose);
 void printCliHelp();
 void printCliPrompt();
 void setupCLI();
@@ -345,6 +346,13 @@ void applyConfiguredStripLength()
   ledsPerStrip = currentStripLength;
   totalLeds = ledsPerStrip * 2;
   halfLeds = totalLeds / 2;
+}
+
+void applyPersistentConfig()
+{
+  applyConfiguredStripLength();
+  BRIGHTNESS = currentBrightness;
+  FastLED.setBrightness(BRIGHTNESS);
 }
 
 void clearInactiveLeds()
@@ -427,7 +435,7 @@ bool saveConfigToEEPROM(bool verbose)
   return false;
 }
 
-void loadConfigFromEEPROM(bool verbose)
+void readConfigFromEEPROM(bool verbose)
 {
   int magic = 0;
   EEPROM.get(EEPROM_ADDR_VALUE1, currentPattern);
@@ -442,10 +450,6 @@ void loadConfigFromEEPROM(bool verbose)
     currentStripLength = DEFAULT_LEDS_PER_STRIP;
   }
   normalizePersistentConfig();
-  applyConfiguredStripLength();
-
-  BRIGHTNESS = currentBrightness;
-  FastLED.setBrightness(BRIGHTNESS);
   lastSavedPattern = currentPattern;
   lastSavedBrightness = currentBrightness;
   lastSavedStripLength = currentStripLength;
@@ -599,7 +603,8 @@ void onCliSave(cmd* cPtr)
 void onCliLoad(cmd* cPtr)
 {
   (void)cPtr;
-  loadConfigFromEEPROM(true);
+  readConfigFromEEPROM(true);
+  applyPersistentConfig();
 }
 
 void onCliDefaults(cmd* cPtr)
@@ -608,9 +613,7 @@ void onCliDefaults(cmd* cPtr)
   currentPattern = 2;
   currentBrightness = MIN_BRIGHTNESS;
   currentStripLength = DEFAULT_LEDS_PER_STRIP;
-  applyConfiguredStripLength();
-  BRIGHTNESS = currentBrightness;
-  FastLED.setBrightness(BRIGHTNESS);
+  applyPersistentConfig();
   batteryViewLastInteractionMs = millis();
   Serial.println("OK defaults loaded (not saved)");
 }
@@ -1369,6 +1372,11 @@ void setup()
   // while (!Serial);
   delay(1000); // 1 second delay for recovery
 
+  // Load persisted config early so subsequent setup can depend on it.
+  EEPROM.begin(EEPROM_SIZE);
+  Serial.println("EEPROM initialized.");
+  readConfigFromEEPROM(true);
+
   /*Initialize device*/
   Serial.println(F("Initializing I2C devices..."));
   mpu.initialize();
@@ -1476,10 +1484,7 @@ void setup()
   // Although it is unnecessary here, the stored values can be cleared if needed.
   myAccel.clear();
 
-// Init the emulated EEPROM
-  EEPROM.begin(EEPROM_SIZE);
-  Serial.println("EEPROM initialized.");
-  loadConfigFromEEPROM(true);
+  applyPersistentConfig();
   lastUpdateTime = millis();
 
 //state machine init
