@@ -1,6 +1,6 @@
 # Lenkdrachen LED Beleuchtung mit Bewegungsreaktion (Kite LED Lighting with Motion Response)
 
-## Deutsch *(Version 2.0)*
+## Deutsch *(Version 2.1)*
 
 Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die auf deren Bewegungen und Beschleunigungen reagiert. Die Farbe der LEDs wird durch den aktuellen Winkel des Drachens bestimmt, während die Geschwindigkeit der Animationsabläufe von der Bewegungsgeschwindigkeit des Drachens abhängt.
 
@@ -11,7 +11,8 @@ Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die 
 * Helligkeit in 6 Stufen (95 → 255 in Schritten von 32) einstellbar – beeinflusst die Akkulaufzeit
 * 13 reaktionsfreudige Patterns/Animationen, teilweise bewegungsabhängig
 * Ladestandsanzeige über das LED-Band inkl. Ladefortschritt während USB-Verbindung
-* Automatisches Speichern von Muster & Helligkeit (EEPROM) – Start mit den letzten Einstellungen
+* Persistente Konfiguration in EEPROM: Pattern, Helligkeit, Strip-Länge, Motion-Smoothing, Sensor-Range, Boot-Kalibrierung und MPU-Offsets
+* USB-CLI für Status, Diagnose, Timing und Kalibrierung
 
 ### Verwendete Technologien und Komponenten
 
@@ -69,7 +70,7 @@ Der Controller verfügt über zwei Tasten:
     * **Kurz drücken (Shortpress):** Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95).
     * **Gedrückt halten (Longpress):** Zeigt für 5 Sekunden den Akkuladestand an. Bis zu fünf LEDs dienen als Balkenanzeige; eine blaue Markierung blinkt während der Messung.
 
-**Initialisierung & Speicherfunktion:** Nach dem Einschalten führt der Controller eine kurze Kalibrierung des MPU6050 durch. Während dieser Kalibrierungsphase (einige Sekunden) muss der Controller ruhig gehalten werden. Sobald die Einmessung abgeschlossen ist, schalten sich die LEDs ein. Der zuletzt verwendete Modus und die Helligkeit werden automatisch aus dem Speicher geladen.
+**Initialisierung & Speicherfunktion:** Nach dem Einschalten lädt der Controller die gespeicherte Konfiguration und führt standardmäßig eine kurze MPU6050-Quick-Kalibrierung durch. Während dieser Phase (einige Sekunden) sollte der Controller ruhig gehalten werden. Die Boot-Kalibrierung kann über die CLI deaktiviert werden. Sobald die Initialisierung abgeschlossen ist, schalten sich die LEDs ein. Die zuletzt gespeicherten Werte werden automatisch geladen.
 
 ### Einfache Installation über .UF2-Datei
 
@@ -106,9 +107,64 @@ Wenn du die Software selbst kompilieren oder Anpassungen vornehmen möchtest, si
 
 6.  **Los geht's!** Sobald die Software hochgeladen ist (entweder über `.uf2` oder PlatformIO) und die Hardware korrekt verbunden ist, sollte die LED-Beleuchtung deines Lenkdrachens auf dessen Bewegungen reagieren.
 
-### Beispiele für die Nutzung
+### USB-CLI
 
-tbd
+Sobald eine aktive serielle USB-Verbindung besteht, meldet sich die CLI mit:
+
+```text
+[NightKite CLI] USB connected. Type 'help'.
+nk>
+```
+
+Verfügbare Kommandos:
+
+```text
+help
+show
+get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
+set pattern <2..14>
+set brightness <95|127|159|191|223|255>
+set strip_length <10..35>
+set smoothing <1..512>
+set accel_range <2|4|8|16>
+set gyro_range <250|500|1000|2000>
+set boot_calibration <off|quick>
+battery
+sensor
+timing
+offsets
+calibrate quick
+calibrate precise
+save
+load
+defaults
+reboot
+restart
+```
+
+Hinweise:
+
+* `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` werden persistent gespeichert, greifen aber erst nach einem Neustart.
+* `battery` zeigt den ADC-Rohwert, die berechnete Spannung sowie USB-/Serial-Status.
+* `sensor` zeigt MPU-/DMP-Status und die konfigurierten bzw. aktiven Sensor-Ranges.
+* `timing` zeigt `FastLED`-FPS sowie Loop-/Work-Zeiten in Mikrosekunden.
+* `offsets` zeigt die aktuell verwendeten MPU-Offsets.
+* `calibrate quick` führt die bisherige schnelle Kalibrierung aus und speichert die Offsets.
+* `calibrate precise` nutzt den langsameren `IMU_Zero`-basierten Kalibrierpfad und speichert die Offsets.
+
+### Hinweise zur Kalibrierung
+
+Es gibt zwei Kalibrierpfade:
+
+* **Quick Calibration:** Standard beim Boot, wenige Sekunden, ausreichend für den Alltag.
+* **Precise Calibration:** Nur manuell per CLI, dauert deutlich länger und sollte nur bei ruhigem, waagerecht abgelegtem Gerät durchgeführt werden.
+
+Empfehlung:
+
+1. Gerät vor einer präzisen Kalibrierung 5-10 Minuten thermisch stabilisieren.
+2. Controller absolut ruhig und waagerecht platzieren.
+3. `calibrate precise` ausführen.
+4. Danach optional `set boot_calibration off` und `save`, wenn künftig nur mit gespeicherten Offsets gestartet werden soll.
 
 ### Lizenz
 
@@ -116,7 +172,7 @@ Dieses Projekt ist unter der [MIT Lizenz](LICENSE.txt) lizenziert.
 
 ---
 
-## English *(Version 2.0)*
+## English *(Version 2.1)*
 
 This project implements dynamic LED lighting for kites that reacts to their movements and accelerations. The color of the LEDs is determined by the current angle of the kite, while the speed of the animation sequences depends on the kite's speed of motion.
 
@@ -127,7 +183,8 @@ This project implements dynamic LED lighting for kites that reacts to their move
 * Six brightness levels (95 → 255 in steps of 32) impact the battery runtime
 * 13 motion-reactive patterns/animations with mirrored dual-strip output
 * Battery level indicator on the LED strip including charging progress while on USB power
-* Automatic persistence of pattern & brightness in EEPROM for seamless restarts
+* Persistent EEPROM configuration for pattern, brightness, strip length, motion smoothing, sensor ranges, boot calibration, and MPU offsets
+* USB CLI for configuration, diagnostics, timing, and calibration
 
 ### Used Technologies and Components
 
@@ -185,7 +242,7 @@ The controller has two buttons:
     * **Short press:** Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95).
     * **Long press:** Shows the battery level for 5 seconds. Up to five LEDs form a bar indicator while a blue marker LED blinks during the readout.
 
-**Initialization & Persistence:** After powering on, the controller performs a short calibration of the MPU6050. Keep the controller still during this calibration phase (a few seconds). Once complete the LEDs will turn on, resuming the last used pattern and brightness from EEPROM.
+**Initialization & Persistence:** After power-on, the controller loads the stored configuration and by default performs a short MPU6050 quick calibration. Keep the controller still for a few seconds during this phase. Boot calibration can be disabled via the CLI. Once initialization is complete, the LEDs turn on and the stored configuration is restored automatically.
 
 ### Easy Installation via .UF2 File
 
@@ -222,9 +279,64 @@ If you want to compile the software yourself or make adjustments, the following 
 
 6.  **Let's Go!** Once the software is uploaded (either via `.uf2` or PlatformIO) and the hardware is correctly connected, the LED lighting of your kite should react to its movements.
 
-### Usage Examples
+### USB CLI
 
-tbd
+As soon as an active USB serial connection exists, the CLI announces itself with:
+
+```text
+[NightKite CLI] USB connected. Type 'help'.
+nk>
+```
+
+Available commands:
+
+```text
+help
+show
+get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
+set pattern <2..14>
+set brightness <95|127|159|191|223|255>
+set strip_length <10..35>
+set smoothing <1..512>
+set accel_range <2|4|8|16>
+set gyro_range <250|500|1000|2000>
+set boot_calibration <off|quick>
+battery
+sensor
+timing
+offsets
+calibrate quick
+calibrate precise
+save
+load
+defaults
+reboot
+restart
+```
+
+Notes:
+
+* `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` are stored persistently but only take effect after reboot.
+* `battery` reports raw ADC value, calculated voltage, and USB/serial status.
+* `sensor` reports MPU/DMP status and both configured and active sensor ranges.
+* `timing` reports `FastLED` FPS plus loop/work timings in microseconds.
+* `offsets` reports the currently active MPU offsets.
+* `calibrate quick` runs the fast calibration path and saves the resulting offsets.
+* `calibrate precise` runs the slower `IMU_Zero`-style calibration path and saves the resulting offsets.
+
+### Calibration Notes
+
+Two calibration modes are available:
+
+* **Quick Calibration:** Default during boot, takes only a few seconds, suitable for normal use.
+* **Precise Calibration:** Manual CLI-only maintenance command, takes much longer and should only be run with the device lying still on a flat surface.
+
+Recommended procedure:
+
+1. Let the device thermally stabilize for 5-10 minutes before precise calibration.
+2. Place the controller on a flat, level, motionless surface.
+3. Run `calibrate precise`.
+4. Optionally switch to stored offsets only via `set boot_calibration off` and `save`.
 
 ### License
 

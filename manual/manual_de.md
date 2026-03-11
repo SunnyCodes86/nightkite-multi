@@ -1,4 +1,4 @@
-# Bedienungsanleitung für die NightKite Multi LED-Drachenbeleuchtung (v2.0)
+# Bedienungsanleitung für die NightKite Multi LED-Drachenbeleuchtung (v2.1)
 
 Willkommen bei deiner **NightKite Multi LED-Drachenbeleuchtung**!  
 Dieses System bringt deinen Lenkdrachen im Dunkeln zum Leuchten, indem es dynamische LED-Effekte erzeugt, die auf die Bewegungen und Beschleunigungen deines Drachens reagieren.  
@@ -37,15 +37,17 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 - **Ladestandsanzeige:**  
   Zeigt den aktuellen Akkustand direkt über das LED-Band an.
 - **Speicherfunktion:**  
-  Muster, Helligkeit und Strip-Länge werden automatisch im Speicher abgelegt und beim nächsten Start wiederhergestellt.
+  Muster, Helligkeit, Strip-Länge, Motion-Smoothing, Sensor-Ranges, Boot-Kalibrierung und MPU-Offsets werden persistent gespeichert.
+- **USB-CLI:**  
+  USB-Serielles Interface für Konfiguration, Diagnose, Timing und Kalibrierung.
 
 ---
 
 ### 1.1. Animations-Muster im Detail
 
-Die NightKite Multi (v2.0) verfügt über 12 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
+Die NightKite Multi (v2.1) verfügt über 13 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
 Nach dem Einschalten (und der Kalibrierung) startet der Controller mit dem zuletzt verwendeten Muster und der zuletzt gewählten Helligkeit.  
-Beim ersten Start: **Muster 1 „Regenbogen“**, **Helligkeit 95**.
+Beim ersten Start: **Pattern-ID 2**, **Helligkeit 95**.
 
 1. **Regenbogen-Muster:** Sanfter, kontinuierlicher Rainbow-Durchlauf über das gesamte Band. Nicht bewegungsreaktiv.  
 2. **Voller String, Winkel-Farbe:** Gesamter LED-String leuchtet in einer Farbe entsprechend dem aktuellen Winkel (Yaw).  
@@ -83,11 +85,11 @@ Die NightKite Multi Beleuchtung besteht aus:
 Der Controller besitzt zwei Tasten: **links** und **rechts**.
 
 1. **Einschalten:** Linken Button drücken.  
-2. **Initialisierung:** Nach dem Einschalten erfolgt eine kurze Kalibrierung.  
+2. **Initialisierung:** Nach dem Einschalten wird die gespeicherte Konfiguration geladen. Standardmäßig erfolgt anschließend eine kurze Quick-Kalibrierung des MPU6050.  
    Halte den Controller ruhig, um saubere Sensor-Offsets zu ermitteln.  
 3. **Bereitschaft:** Nach Abschluss der Kalibrierung schalten sich die LEDs ein.  
    Das System startet mit zuletzt verwendetem Muster und Helligkeit  
-   *(bei Erstbetrieb: Muster 1, Helligkeit 95)*.
+   *(bei Erstbetrieb: Pattern-ID 2, Helligkeit 95)*.
 
 ---
 
@@ -96,7 +98,7 @@ Der Controller besitzt zwei Tasten: **links** und **rechts**.
 Der rechte Button ist ein **Multifunktions-Button**:
 
 - **Muster / Animation wechseln (Doppelklick):**  
-  → Zyklischer Wechsel zum nächsten der 12 Muster.
+  → Zyklischer Wechsel zum nächsten der 13 Muster.
 - **Helligkeitsstufe ändern (kurz drücken):**  
   → Nur während die Akkuanzeige aktiv ist.  
     Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.
@@ -132,18 +134,36 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 - Prompt: `nk>`
 - Hilfe: `help`
 - Aktuelle Werte: `show`
-- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`
+- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
 - Einzelwert setzen:
   - `set pattern <2..14>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
+  - `set smoothing <1..512>`
+  - `set accel_range <2|4|8|16>`
+  - `set gyro_range <250|500|1000|2000>`
+  - `set boot_calibration <off|quick>`
+- Diagnose:
+  - `battery`
+  - `sensor`
+  - `timing`
+  - `offsets`
+- Kalibrierung:
+  - `calibrate quick`
+  - `calibrate precise`
 - Speichern/Laden:
   - `save` (sofort in EEPROM schreiben)
   - `load` (aus EEPROM laden)
   - `defaults` (Standardwerte laden, noch nicht speichern)
+  - `reboot` / `restart`
 
 Hinweise:
 - `strip_length` gilt immer für beide Strips gleichzeitig (symmetrisch).
+- `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart.
+- `timing` zeigt `FastLED`-FPS sowie `loop`-/`work`-Zeiten in Mikrosekunden.
+- `offsets` zeigt die aktuell verwendeten MPU-Offsets.
+- `calibrate quick` ist die schnelle Alltags-Kalibrierung und speichert die gefundenen Offsets.
+- `calibrate precise` nutzt den deutlich langsameren `IMU_Zero`-basierten Präzisionspfad und speichert die gefundenen Offsets.
 - Beim nächsten Neustart werden die gespeicherten Werte automatisch geladen.
 
 ## 4. Stromversorgung und Aufladen
@@ -163,6 +183,7 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 
 - Muster und Helligkeit werden etwa alle 5 Minuten geprüft und bei Änderung gespeichert.  
 - Strip-Länge wird ebenfalls geprüft und bei Änderung gespeichert.  
+- Motion-Smoothing, Sensor-Ranges, Boot-Kalibrierung und MPU-Offsets werden ebenfalls überwacht und bei Änderung gespeichert.
 - Beim nächsten Start werden diese Werte automatisch wiederhergestellt.
 
 ---
@@ -170,6 +191,7 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 ## 5. Wichtige Hinweise
 
 - **Ruhige Initialisierung:** Nach dem Einschalten ruhig halten, bis LEDs aktiv sind.  
+- **Präzise Kalibrierung:** Für `calibrate precise` den Controller auf eine absolut ruhige, waagerechte Fläche legen und wenn möglich vorher 5-10 Minuten thermisch stabilisieren.  
 - **Wetterbedingungen:** Elektronik vor Feuchtigkeit schützen (kein Regen / Nebel).  
 - **Sicherheit:** Bei Nachtflügen ausreichenden Abstand halten und freie Fläche wählen.  
 - **Akku-Pflege:** Nur geeignete USB-Netzteile verwenden.  

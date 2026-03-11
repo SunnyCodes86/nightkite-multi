@@ -1,4 +1,4 @@
-# User Manual for the NightKite Multi LED Kite Lighting (v2.0)
+# User Manual for the NightKite Multi LED Kite Lighting (v2.1)
 
 Welcome to your **NightKite Multi LED Kite Lighting System**!  
 This system brings your stunt kite to life at night by generating dynamic LED effects that respond to the kite’s movement and acceleration.  
@@ -37,15 +37,17 @@ The NightKite Multi lighting system offers the following core features:
 - **Battery Indicator:**  
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  
-  Pattern, brightness, and strip length are automatically stored and restored at the next startup.
+  Pattern, brightness, strip length, motion smoothing, sensor ranges, boot calibration, and MPU offsets are stored persistently.
+- **USB CLI:**  
+  USB serial interface for configuration, diagnostics, timing, and calibration.
 
 ---
 
 ### 1.1. Animation Patterns in Detail
 
-The NightKite Multi (v2.0) includes 12 predefined animation patterns that can be changed with a double-click.  
+The NightKite Multi (v2.1) includes 13 predefined animation patterns that can be changed with a double-click.  
 After powering on and calibration, the controller starts with the last used pattern and brightness level.  
-On first startup: **Pattern 1 “Rainbow”**, **Brightness 95**.
+On first startup: **Pattern ID 2**, **Brightness 95**.
 
 1. **Rainbow Pattern:** Smooth, continuous rainbow cycle across the strip. Not motion-reactive.  
 2. **Full String, Angle-Color:** Entire LED strip glows in a color determined by the current yaw angle.  
@@ -83,11 +85,11 @@ The NightKite Multi lighting system consists of the following main components:
 The controller has two buttons: **left** and **right**.
 
 1. **Power On:** Press the left button.  
-2. **Initialization (Calibration):** After powering on, a short calibration starts automatically.  
+2. **Initialization (Calibration):** After power-on, the stored configuration is loaded. By default, a short MPU6050 quick calibration then starts automatically.  
    Hold the controller still for a few seconds to ensure accurate sensor offsets.  
 3. **Ready:** After calibration, the LEDs turn on.  
    The system starts with the last used pattern and brightness  
-   *(on first use: Pattern 1, Brightness 95)*.
+   *(on first use: Pattern ID 2, Brightness 95)*.
 
 ---
 
@@ -96,7 +98,7 @@ The controller has two buttons: **left** and **right**.
 The right button is a **multi-function control**:
 
 - **Change Pattern / Animation (double-click):**  
-  → Cycles through the 12 available animation patterns.
+  → Cycles through the 13 available animation patterns.
 - **Change Brightness (short press):**  
   → Only while the battery display is active.  
     Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
@@ -132,18 +134,36 @@ As soon as an active USB serial connection exists, the CLI is available.
 - Prompt: `nk>`
 - Help: `help`
 - Show current values: `show`
-- Read single value: `get pattern`, `get brightness`, `get strip_length`
+- Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
 - Set single value:
   - `set pattern <2..14>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
+  - `set smoothing <1..512>`
+  - `set accel_range <2|4|8|16>`
+  - `set gyro_range <250|500|1000|2000>`
+  - `set boot_calibration <off|quick>`
+- Diagnostics:
+  - `battery`
+  - `sensor`
+  - `timing`
+  - `offsets`
+- Calibration:
+  - `calibrate quick`
+  - `calibrate precise`
 - Save/load:
   - `save` (write immediately to EEPROM)
   - `load` (load from EEPROM)
   - `defaults` (load defaults, not saved yet)
+  - `reboot` / `restart`
 
 Notes:
 - `strip_length` always applies to both strips together (symmetric).
+- `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` only take effect after reboot.
+- `timing` reports `FastLED` FPS and `loop`/`work` times in microseconds.
+- `offsets` reports the currently active MPU offsets.
+- `calibrate quick` is the fast everyday calibration path and saves the resulting offsets.
+- `calibrate precise` uses the much slower `IMU_Zero`-style precision path and saves the resulting offsets.
 - Saved values are restored automatically after restart.
 
 ## 4. Power Supply and Charging
@@ -163,6 +183,7 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 
 - Pattern and brightness are checked roughly every 5 minutes and saved if changed.  
 - Strip length is also checked and saved if changed.  
+- Motion smoothing, sensor ranges, boot calibration, and MPU offsets are also tracked and saved when changed.
 - On the next startup, the last saved values are automatically restored.
 
 ---
@@ -170,6 +191,7 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 ## 5. Important Notes
 
 - **Keep Still During Initialization:** After powering on, keep the controller still until the LEDs activate.  
+- **Precise Calibration:** For `calibrate precise`, place the controller on a perfectly still, level surface and ideally let it thermally stabilize for 5-10 minutes beforehand.  
 - **Weather Conditions:** Designed for use on stunt kites; protect electronics from moisture (no rain or fog).  
 - **Safety:** Night flights require extra attention. Keep a safe distance from people, trees, power lines, and roads.  
 - **Battery Care:** Charge only with suitable USB power supplies.  
