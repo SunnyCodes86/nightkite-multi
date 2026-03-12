@@ -350,6 +350,8 @@ void applyConfiguredSensorRanges();
 void applyConfiguredOffsets();
 void syncConfiguredOffsetsFromMPU();
 void printOffsets();
+void printOffsetsWithPrefix(const char* prefix);
+void printConfigSummaryWithPrefix(const char* prefix);
 bool beginCalibrationSession(bool verbose, bool* restartDMP);
 void endCalibrationSession(bool restartDMP);
 bool runQuickCalibration(bool verbose);
@@ -588,6 +590,12 @@ void syncConfiguredOffsetsFromMPU()
 
 void printOffsets()
 {
+  printOffsetsWithPrefix("");
+}
+
+void printOffsetsWithPrefix(const char* prefix)
+{
+  Serial.print(prefix);
   Serial.print("x_accel_offset=");
   Serial.print(currentXAccelOffset);
   Serial.print(" y_accel_offset=");
@@ -600,6 +608,25 @@ void printOffsets()
   Serial.print(currentYGyroOffset);
   Serial.print(" z_gyro_offset=");
   Serial.println(currentZGyroOffset);
+}
+
+void printConfigSummaryWithPrefix(const char* prefix)
+{
+  Serial.print(prefix);
+  Serial.print("pattern=");
+  Serial.print(currentPattern);
+  Serial.print(" brightness=");
+  Serial.print(currentBrightness);
+  Serial.print(" strip_length=");
+  Serial.print(currentStripLength);
+  Serial.print(" smoothing=");
+  Serial.print(currentMotionSmoothingSize);
+  Serial.print(" accel_range=");
+  Serial.print(currentAccelRange);
+  Serial.print(" gyro_range=");
+  Serial.print(currentGyroRange);
+  Serial.print(" boot_calibration=");
+  Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
 }
 
 bool beginCalibrationSession(bool verbose, bool* restartDMP)
@@ -618,7 +645,7 @@ bool beginCalibrationSession(bool verbose, bool* restartDMP)
   {
     if (verbose)
     {
-      Serial.println("Pausing DMP for calibration...");
+      Serial.println("INFO calibration pausing_dmp=1");
     }
     detachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN));
     mpu.setDMPEnabled(false);
@@ -651,7 +678,7 @@ bool runQuickCalibration(bool verbose)
 
   if (verbose)
   {
-    Serial.println("Starting quick calibration...");
+    Serial.println("INFO calibration mode=quick phase=start");
   }
 
   mpu.CalibrateAccel(6);
@@ -662,7 +689,7 @@ bool runQuickCalibration(bool verbose)
 
   if (verbose)
   {
-    Serial.println("These are the Active offsets: ");
+    Serial.println("INFO calibration mode=quick phase=offsets");
     mpu.PrintActiveOffsets();
   }
 
@@ -691,8 +718,8 @@ bool runPreciseCalibration(bool verbose)
 
   if (verbose)
   {
-    Serial.println("Starting precise calibration...");
-    Serial.println("Keep the device still on a flat, level surface.");
+    Serial.println("INFO calibration mode=precise phase=start");
+    Serial.println("INFO calibration instruction=\"Keep the device still on a flat, level surface.\"");
   }
 
   int lowValue[axisCount];
@@ -785,10 +812,9 @@ bool runPreciseCalibration(bool verbose)
 
   if (verbose)
   {
-    Serial.print("Averaging ");
+    Serial.print("INFO calibration averaging_samples=");
     Serial.print(sampleCount);
-    Serial.println(" readings each time");
-    Serial.println("Expanding:");
+    Serial.println(" phase=expanding");
   }
   forceHeader();
 
@@ -846,7 +872,7 @@ bool runPreciseCalibration(bool verbose)
   if (verbose)
   {
     Serial.println();
-    Serial.println("Closing in:");
+    Serial.println("INFO calibration phase=closing_in");
   }
   forceHeader();
 
@@ -860,9 +886,9 @@ bool runPreciseCalibration(bool verbose)
       sampleCount = slowSamples;
       if (verbose)
       {
-        Serial.print("Averaging ");
+        Serial.print("INFO calibration averaging_samples=");
         Serial.print(sampleCount);
-        Serial.println(" readings each time");
+        Serial.println(" phase=closing_in");
       }
     }
     else
@@ -915,9 +941,8 @@ bool runPreciseCalibration(bool verbose)
 
   if (verbose)
   {
-    Serial.println("-------------- DONE --------------");
-    Serial.println("Precise calibration offsets:");
-    printOffsets();
+    Serial.println("INFO calibration mode=precise phase=done");
+    printOffsetsWithPrefix("INFO ");
   }
 
   return true;
@@ -1002,7 +1027,7 @@ void printBatteryStatus()
   Voltage = convertBatteryRawToVoltage(RawVoltage);
   const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
 
-  Serial.print("battery_raw=");
+  Serial.print("OK battery_raw=");
   Serial.print(RawVoltage);
   Serial.print(" battery_voltage=");
   Serial.print(Voltage, 3);
@@ -1019,7 +1044,7 @@ void printSensorStatus()
   const int activeGyroRange = gyroRegisterValueToRange(mpu.getFullScaleGyroRange());
   const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
 
-  Serial.print("mpu_connected=");
+  Serial.print("OK mpu_connected=");
   Serial.print(mpuConnected ? 1 : 0);
   Serial.print(" dmp_ready=");
   Serial.print(DMPReady ? 1 : 0);
@@ -1057,7 +1082,7 @@ void printTimingStatus()
     avgWorkDurationUs = (uint32_t)(totalWorkDurationUs / loopTimingSamples);
   }
 
-  Serial.print("fps=");
+  Serial.print("OK fps=");
   Serial.print(FastLED.getFPS());
   Serial.print(" last_loop_us=");
   Serial.print(lastLoopDurationUs);
@@ -1257,20 +1282,7 @@ void onCliHelp(cmd* cPtr)
 void onCliShow(cmd* cPtr)
 {
   (void)cPtr;
-  Serial.print("pattern=");
-  Serial.print(currentPattern);
-  Serial.print(" brightness=");
-  Serial.print(currentBrightness);
-  Serial.print(" strip_length=");
-  Serial.print(currentStripLength);
-  Serial.print(" smoothing=");
-  Serial.print(currentMotionSmoothingSize);
-  Serial.print(" accel_range=");
-  Serial.print(currentAccelRange);
-  Serial.print(" gyro_range=");
-  Serial.print(currentGyroRange);
-  Serial.print(" boot_calibration=");
-  Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+  printConfigSummaryWithPrefix("OK ");
 }
 
 void onCliGet(cmd* cPtr)
@@ -1281,43 +1293,43 @@ void onCliGet(cmd* cPtr)
 
   if (key == "pattern")
   {
-    Serial.print("pattern=");
+    Serial.print("OK pattern=");
     Serial.println(currentPattern);
     return;
   }
   if (key == "brightness")
   {
-    Serial.print("brightness=");
+    Serial.print("OK brightness=");
     Serial.println(currentBrightness);
     return;
   }
   if (key == "strip_length")
   {
-    Serial.print("strip_length=");
+    Serial.print("OK strip_length=");
     Serial.println(currentStripLength);
     return;
   }
   if (key == "smoothing")
   {
-    Serial.print("smoothing=");
+    Serial.print("OK smoothing=");
     Serial.println(currentMotionSmoothingSize);
     return;
   }
   if (key == "accel_range")
   {
-    Serial.print("accel_range=");
+    Serial.print("OK accel_range=");
     Serial.println(currentAccelRange);
     return;
   }
   if (key == "gyro_range")
   {
-    Serial.print("gyro_range=");
+    Serial.print("OK gyro_range=");
     Serial.println(currentGyroRange);
     return;
   }
   if (key == "boot_calibration")
   {
-    Serial.print("boot_calibration=");
+    Serial.print("OK boot_calibration=");
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
     return;
   }
@@ -1446,14 +1458,20 @@ void onCliSet(cmd* cPtr)
 void onCliSave(cmd* cPtr)
 {
   (void)cPtr;
-  saveConfigToEEPROM(true);
+  if (!saveConfigToEEPROM(false))
+  {
+    Serial.println("ERR save failed");
+    return;
+  }
+  printConfigSummaryWithPrefix("OK saved=1 ");
 }
 
 void onCliLoad(cmd* cPtr)
 {
   (void)cPtr;
-  readConfigFromEEPROM(true);
+  readConfigFromEEPROM(false);
   applyPersistentConfig();
+  printConfigSummaryWithPrefix("OK loaded=1 ");
 }
 
 void onCliDefaults(cmd* cPtr)
@@ -1474,7 +1492,7 @@ void onCliDefaults(cmd* cPtr)
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
   applyPersistentConfig();
   batteryViewLastInteractionMs = millis();
-  Serial.println("OK defaults loaded (not saved, sensor changes apply after reboot)");
+  printConfigSummaryWithPrefix("OK defaults=1 saved=0 reboot_required=1 ");
 }
 
 void onCliBattery(cmd* cPtr)
@@ -1498,7 +1516,7 @@ void onCliTiming(cmd* cPtr)
 void onCliOffsets(cmd* cPtr)
 {
   (void)cPtr;
-  printOffsets();
+  printOffsetsWithPrefix("OK ");
 }
 
 void onCliCalibrate(cmd* cPtr)
@@ -1509,25 +1527,37 @@ void onCliCalibrate(cmd* cPtr)
 
   if (mode == "quick")
   {
+    Serial.println("OK calibrate_started=1 mode=quick");
     if (!runQuickCalibration(true))
     {
       return;
     }
 
-    saveConfigToEEPROM(true);
-    Serial.println("OK quick calibration finished and offsets saved");
+    if (!saveConfigToEEPROM(false))
+    {
+      Serial.println("ERR calibrate save failed");
+      return;
+    }
+    Serial.println("OK calibrate_finished=1 mode=quick saved=1");
+    printOffsetsWithPrefix("OK ");
     return;
   }
 
   if (mode == "precise")
   {
+    Serial.println("OK calibrate_started=1 mode=precise");
     if (!runPreciseCalibration(true))
     {
       return;
     }
 
-    saveConfigToEEPROM(true);
-    Serial.println("OK precise calibration finished and offsets saved");
+    if (!saveConfigToEEPROM(false))
+    {
+      Serial.println("ERR calibrate save failed");
+      return;
+    }
+    Serial.println("OK calibrate_finished=1 mode=precise saved=1");
+    printOffsetsWithPrefix("OK ");
     return;
   }
 
