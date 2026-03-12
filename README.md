@@ -144,6 +144,11 @@ restart
 
 Hinweise:
 
+* Daten-/Konfigurationskommandos antworten konsistent mit `OK ...` oder `ERR ...`, zum Beispiel `OK pattern=14`.
+* `show` liefert alle relevanten Konfigurationswerte als kompakte `key=value`-Zeile.
+* `set pattern` schaltet das aktive Muster sofort um.
+* `set brightness` wirkt sofort.
+* `set strip_length` wirkt sofort auf beide Strips.
 * `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` werden persistent gespeichert, greifen aber erst nach einem Neustart.
 * `battery` zeigt den ADC-Rohwert, die berechnete Spannung sowie USB-/Serial-Status.
 * `sensor` zeigt MPU-/DMP-Status und die konfigurierten bzw. aktiven Sensor-Ranges.
@@ -151,6 +156,8 @@ Hinweise:
 * `offsets` zeigt die aktuell verwendeten MPU-Offsets.
 * `calibrate quick` führt die bisherige schnelle Kalibrierung aus und speichert die Offsets.
 * `calibrate precise` nutzt den langsameren `IMU_Zero`-basierten Kalibrierpfad und speichert die Offsets.
+* `calibrate quick` und `calibrate precise` starten mit `OK calibrate_started=1 ...` und enden mit `OK calibrate_finished=1 ...` plus finaler Offset-Zeile.
+* `defaults` lädt nur Standardwerte in den Arbeitsspeicher. Für persistente Speicherung ist danach `save` nötig.
 
 ### Hinweise zur Kalibrierung
 
@@ -316,6 +323,11 @@ restart
 
 Notes:
 
+* Data/config commands reply consistently with `OK ...` or `ERR ...`, for example `OK pattern=14`.
+* `show` returns all relevant configuration values as a compact `key=value` line.
+* `set pattern` switches the active pattern immediately.
+* `set brightness` takes effect immediately.
+* `set strip_length` applies immediately to both strips.
 * `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` are stored persistently but only take effect after reboot.
 * `battery` reports raw ADC value, calculated voltage, and USB/serial status.
 * `sensor` reports MPU/DMP status and both configured and active sensor ranges.
@@ -323,6 +335,8 @@ Notes:
 * `offsets` reports the currently active MPU offsets.
 * `calibrate quick` runs the fast calibration path and saves the resulting offsets.
 * `calibrate precise` runs the slower `IMU_Zero`-style calibration path and saves the resulting offsets.
+* `calibrate quick` and `calibrate precise` start with `OK calibrate_started=1 ...` and finish with `OK calibrate_finished=1 ...` plus a final offsets line.
+* `defaults` only loads factory defaults into working memory. Run `save` afterwards if you want to keep them permanently.
 
 ### Calibration Notes
 

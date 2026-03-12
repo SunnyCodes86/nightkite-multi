@@ -158,12 +158,19 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `reboot` / `restart`
 
 Hinweise:
+- Daten-Kommandos antworten konsistent mit `OK ...` oder `ERR ...`. Beispiel: `OK pattern=14`.
+- `show` liefert alle relevanten Konfigurationswerte als kompakte `key=value`-Zeile.
 - `strip_length` gilt immer für beide Strips gleichzeitig (symmetrisch).
-- `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart.
+- `set pattern` schaltet das aktive Muster sofort um.
+- `set brightness` wirkt sofort.
+- `set strip_length` wirkt sofort auf beide Strips.
+- `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart. Die CLI kennzeichnet das in der Antwort mit `(applies after reboot)`.
 - `timing` zeigt `FastLED`-FPS sowie `loop`-/`work`-Zeiten in Mikrosekunden.
 - `offsets` zeigt die aktuell verwendeten MPU-Offsets.
 - `calibrate quick` ist die schnelle Alltags-Kalibrierung und speichert die gefundenen Offsets.
 - `calibrate precise` nutzt den deutlich langsameren `IMU_Zero`-basierten Präzisionspfad und speichert die gefundenen Offsets.
+- `calibrate quick` und `calibrate precise` starten mit `OK calibrate_started=1 ...` und enden mit `OK calibrate_finished=1 ...` plus einer finalen Offset-Zeile.
+- `defaults` lädt die Standardwerte nur in den Arbeitsspeicher. Für dauerhafte Speicherung ist anschließend `save` nötig.
 - Beim nächsten Neustart werden die gespeicherten Werte automatisch geladen.
 
 ## 4. Stromversorgung und Aufladen
