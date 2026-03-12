@@ -326,6 +326,7 @@ int fade;
 // ============================================================================
 // FSM instance init
 SimpleFSM fsm;
+extern State s[];
 
 // ============================================================================
 //  HELPERS
@@ -1353,6 +1354,9 @@ void onCliSet(cmd* cPtr)
       return;
     }
     currentPattern = value;
+    batteryViewLastInteractionMs = millis();
+    fsm.setInitialState(&s[currentPattern]);
+    fsm.reset();
     Serial.print("OK pattern=");
     Serial.println(currentPattern);
     return;
@@ -2462,7 +2466,7 @@ void setup()
 
   applyPersistentConfig();
   lastUpdateTime = millis();
-
+	
 //state machine init
   fsm.add(timedTransitions, num_timed);
   fsm.add(transitions, num_transitions);
