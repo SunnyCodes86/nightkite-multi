@@ -47,7 +47,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 
 Die NightKite Multi (v2.1) verfügt über 13 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
 Nach dem Einschalten (und der Kalibrierung) startet der Controller mit dem zuletzt verwendeten Muster und der zuletzt gewählten Helligkeit.  
-Beim ersten Start: **Pattern-ID 2**, **Helligkeit 95**.
+Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
 
 1. **Regenbogen-Muster:** Sanfter, kontinuierlicher Rainbow-Durchlauf über das gesamte Band. Nicht bewegungsreaktiv.  
 2. **Voller String, Winkel-Farbe:** Gesamter LED-String leuchtet in einer Farbe entsprechend dem aktuellen Winkel (Yaw).  
@@ -89,7 +89,7 @@ Der Controller besitzt zwei Tasten: **links** und **rechts**.
    Halte den Controller ruhig, um saubere Sensor-Offsets zu ermitteln.  
 3. **Bereitschaft:** Nach Abschluss der Kalibrierung schalten sich die LEDs ein.  
    Das System startet mit zuletzt verwendetem Muster und Helligkeit  
-   *(bei Erstbetrieb: Pattern-ID 2, Helligkeit 95)*.
+   *(bei Erstbetrieb: Pattern-ID 1, Helligkeit 95)*.
 
 ---
 
@@ -136,13 +136,17 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 - Aktuelle Werte: `show`
 - Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
 - Einzelwert setzen:
-  - `set pattern <2..14>`
+  - `set pattern <1..13>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
   - `set smoothing <1..512>`
   - `set accel_range <2|4|8|16>`
   - `set gyro_range <250|500|1000|2000>`
   - `set boot_calibration <off|quick>`
+- Pattern-Auswahl:
+  - `patterns`
+  - `enable_pattern <1..13[,id...]>`
+  - `disable_pattern <1..13[,id...]>`
 - Diagnose:
   - `battery`
   - `sensor`
@@ -158,12 +162,17 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `reboot` / `restart`
 
 Hinweise:
-- Daten-Kommandos antworten konsistent mit `OK ...` oder `ERR ...`. Beispiel: `OK pattern=14`.
+- Daten-Kommandos antworten konsistent mit `OK ...` oder `ERR ...`. Beispiel: `OK pattern=1`.
 - `show` liefert alle relevanten Konfigurationswerte als kompakte `key=value`-Zeile.
+- `patterns` zeigt alle Pattern mit Status `on` oder `off`.
 - `strip_length` gilt immer für beide Strips gleichzeitig (symmetrisch).
 - `set pattern` schaltet das aktive Muster sofort um.
+- `set pattern` darf auch deaktivierte Pattern direkt anwählen.
 - `set brightness` wirkt sofort.
 - `set strip_length` wirkt sofort auf beide Strips.
+- `enable_pattern` und `disable_pattern` steuern, welche Pattern per Doppelklick durchgeschaltet werden.
+- Beide Befehle akzeptieren auch mehrere Pattern gleichzeitig als kommagetrennte Liste, z. B. `disable_pattern 3,5,7`.
+- Es muss immer mindestens ein Pattern aktiv bleiben.
 - `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart. Die CLI kennzeichnet das in der Antwort mit `(applies after reboot)`.
 - `timing` zeigt `FastLED`-FPS sowie `loop`-/`work`-Zeiten in Mikrosekunden.
 - `offsets` zeigt die aktuell verwendeten MPU-Offsets.

@@ -152,6 +152,7 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_Y_GYRO_OFFSET   (sizeof(int) * 11)
 #define EEPROM_ADDR_Z_GYRO_OFFSET   (sizeof(int) * 12)
 #define EEPROM_ADDR_MAGIC           (sizeof(int) * 13)
+#define EEPROM_ADDR_ENABLED_PATTERNS (sizeof(int) * 14)
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 
 // Size of emulated EEPROM.
@@ -160,7 +161,7 @@ const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 #define EEPROM_SIZE 64 // 64 Bytes leaves a little headroom
 
 // variables we want to store in EEPROM
-int currentPattern = 2;
+int currentPattern = 1;
 int currentBrightness = 95;
 int currentStripLength = DEFAULT_LEDS_PER_STRIP;
 int currentMotionSmoothingSize = 100;
@@ -173,10 +174,11 @@ int currentZAccelOffset = 3687;
 int currentXGyroOffset = 111;
 int currentYGyroOffset = -6;
 int currentZGyroOffset = 34;
+uint16_t currentEnabledPatternMask = 0;
 
 // copies of current values
 // needed to detect changes (to limit wear of flash memory)
-int lastSavedPattern = 2;
+int lastSavedPattern = 1;
 int lastSavedBrightness = 95;
 int lastSavedStripLength = DEFAULT_LEDS_PER_STRIP;
 int lastSavedMotionSmoothingSize = 100;
@@ -189,6 +191,7 @@ int lastSavedZAccelOffset = 3687;
 int lastSavedXGyroOffset = 111;
 int lastSavedYGyroOffset = -6;
 int lastSavedZGyroOffset = 34;
+uint16_t lastSavedEnabledPatternMask = 0;
 
 const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
 const int MIN_MOTION_SMOOTHING_SIZE = 1;
@@ -207,6 +210,10 @@ const int DEFAULT_Z_ACCEL_OFFSET = 3687;
 const int DEFAULT_X_GYRO_OFFSET = 111;
 const int DEFAULT_Y_GYRO_OFFSET = -6;
 const int DEFAULT_Z_GYRO_OFFSET = 34;
+const uint8_t FIRST_PATTERN_ID = 1;
+const uint8_t LAST_PATTERN_ID = 13;
+const uint8_t PATTERN_COUNT = LAST_PATTERN_ID - FIRST_PATTERN_ID + 1;
+const uint16_t ALL_ENABLED_PATTERN_MASK = (1u << PATTERN_COUNT) - 1u;
 
 int activeMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
 
@@ -328,6 +335,17 @@ int fade;
 SimpleFSM fsm;
 extern State s[];
 
+typedef void (*PatternCallback)();
+
+struct PatternDefinition
+{
+  uint8_t id;
+  const char* name;
+  PatternCallback entry;
+  PatternCallback run;
+  PatternCallback exit;
+};
+
 // ============================================================================
 //  HELPERS
 // ============================================================================
@@ -353,6 +371,8 @@ void syncConfiguredOffsetsFromMPU();
 void printOffsets();
 void printOffsetsWithPrefix(const char* prefix);
 void printConfigSummaryWithPrefix(const char* prefix);
+void printEnabledPatternsList();
+void printPatternStates();
 bool beginCalibrationSession(bool verbose, bool* restartDMP);
 void endCalibrationSession(bool restartDMP);
 bool runQuickCalibration(bool verbose);
@@ -360,6 +380,20 @@ bool runPreciseCalibration(bool verbose);
 void clearInactiveLeds();
 void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
+bool isValidPatternId(int value);
+uint16_t sanitizeEnabledPatternMask(uint16_t mask);
+bool isPatternEnabled(uint8_t patternId);
+bool setPatternEnabled(uint8_t patternId, bool enabled);
+bool parsePatternListMask(String valueText, uint16_t* maskOut);
+bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled);
+uint8_t getNextEnabledPattern(uint8_t currentId);
+const PatternDefinition* getPatternDefinition(uint8_t patternId);
+void runPatternEntry(uint8_t patternId);
+void runPatternFrame(uint8_t patternId);
+void runPatternExit(uint8_t patternId);
+void switchToPattern(uint8_t patternId, bool activatePatternState);
+bool batteryViewTimedOut();
+bool chargingUsbDisconnected();
 int readBatteryRawValue();
 float convertBatteryRawToVoltage(int rawValue);
 void printBatteryStatus();
@@ -385,6 +419,9 @@ void onCliTiming(cmd* cPtr);
 void onCliOffsets(cmd* cPtr);
 void onCliCalibrate(cmd* cPtr);
 void onCliReboot(cmd* cPtr);
+void onCliPatterns(cmd* cPtr);
+void onCliEnablePattern(cmd* cPtr);
+void onCliDisablePattern(cmd* cPtr);
 void onCliError(cmd_error* e);
 
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
@@ -611,6 +648,25 @@ void printOffsetsWithPrefix(const char* prefix)
   Serial.println(currentZGyroOffset);
 }
 
+void printEnabledPatternsList()
+{
+  bool first = true;
+  for (uint8_t patternId = FIRST_PATTERN_ID; patternId <= LAST_PATTERN_ID; patternId++)
+  {
+    if (!isPatternEnabled(patternId))
+    {
+      continue;
+    }
+
+    if (!first)
+    {
+      Serial.print(",");
+    }
+    Serial.print(patternId);
+    first = false;
+  }
+}
+
 void printConfigSummaryWithPrefix(const char* prefix)
 {
   Serial.print(prefix);
@@ -627,7 +683,36 @@ void printConfigSummaryWithPrefix(const char* prefix)
   Serial.print(" gyro_range=");
   Serial.print(currentGyroRange);
   Serial.print(" boot_calibration=");
-  Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+  Serial.print(bootCalibrationModeToString(currentBootCalibrationMode));
+  Serial.print(" enabled_patterns=");
+  printEnabledPatternsList();
+  Serial.println();
+}
+
+void printPatternStates()
+{
+  Serial.print("OK patterns=");
+  for (uint8_t patternId = FIRST_PATTERN_ID; patternId <= LAST_PATTERN_ID; patternId++)
+  {
+    const PatternDefinition* pattern = getPatternDefinition(patternId);
+    if (patternId > FIRST_PATTERN_ID)
+    {
+      Serial.print(",");
+    }
+    Serial.print(patternId);
+    Serial.print(":");
+    if (pattern != NULL && pattern->name != NULL)
+    {
+      Serial.print(pattern->name);
+    }
+    else
+    {
+      Serial.print("pattern");
+    }
+    Serial.print(":");
+    Serial.print(isPatternEnabled(patternId) ? "on" : "off");
+  }
+  Serial.println();
 }
 
 bool beginCalibrationSession(bool verbose, bool* restartDMP)
@@ -976,10 +1061,12 @@ void syncLogicalToPhysicalLeds()
 
 void normalizePersistentConfig()
 {
-  if (currentPattern < 2 || currentPattern > 14)
+  if (!isValidPatternId(currentPattern))
   {
-    currentPattern = 2;
+    currentPattern = FIRST_PATTERN_ID;
   }
+
+  currentEnabledPatternMask = sanitizeEnabledPatternMask(currentEnabledPatternMask);
 
   if (!isValidBrightnessLevel(currentBrightness))
   {
@@ -1010,6 +1097,150 @@ void normalizePersistentConfig()
   {
     currentBootCalibrationMode = DEFAULT_BOOT_CALIBRATION_MODE;
   }
+}
+
+bool isValidPatternId(int value)
+{
+  return value >= FIRST_PATTERN_ID && value <= LAST_PATTERN_ID;
+}
+
+uint16_t sanitizeEnabledPatternMask(uint16_t mask)
+{
+  mask &= ALL_ENABLED_PATTERN_MASK;
+  if (mask == 0)
+  {
+    return ALL_ENABLED_PATTERN_MASK;
+  }
+  return mask;
+}
+
+bool isPatternEnabled(uint8_t patternId)
+{
+  if (!isValidPatternId(patternId))
+  {
+    return false;
+  }
+  const uint8_t bitIndex = (uint8_t)(patternId - FIRST_PATTERN_ID);
+  return (currentEnabledPatternMask & (1u << bitIndex)) != 0;
+}
+
+bool setPatternEnabled(uint8_t patternId, bool enabled)
+{
+  if (!isValidPatternId(patternId))
+  {
+    return false;
+  }
+
+  const uint16_t bit = (uint16_t)(1u << (patternId - FIRST_PATTERN_ID));
+  uint16_t nextMask = currentEnabledPatternMask;
+  if (enabled)
+  {
+    nextMask |= bit;
+  }
+  else
+  {
+    nextMask &= (uint16_t)~bit;
+    if (nextMask == 0)
+    {
+      return false;
+    }
+  }
+
+  currentEnabledPatternMask = sanitizeEnabledPatternMask(nextMask);
+  return true;
+}
+
+bool parsePatternListMask(String valueText, uint16_t* maskOut)
+{
+  if (maskOut == NULL)
+  {
+    return false;
+  }
+
+  valueText.trim();
+  if (valueText.length() == 0)
+  {
+    return false;
+  }
+
+  uint16_t mask = 0;
+  int start = 0;
+  while (start < valueText.length())
+  {
+    int comma = valueText.indexOf(',', start);
+    String token = (comma >= 0) ? valueText.substring(start, comma) : valueText.substring(start);
+    token.trim();
+    if (token.length() == 0)
+    {
+      return false;
+    }
+
+    int patternId = token.toInt();
+    if (!isValidPatternId(patternId))
+    {
+      return false;
+    }
+
+    mask |= (uint16_t)(1u << (patternId - FIRST_PATTERN_ID));
+    if (comma < 0)
+    {
+      break;
+    }
+    start = comma + 1;
+  }
+
+  *maskOut = mask;
+  return mask != 0;
+}
+
+bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled)
+{
+  mask &= ALL_ENABLED_PATTERN_MASK;
+  if (mask == 0)
+  {
+    return false;
+  }
+
+  uint16_t nextMask = currentEnabledPatternMask;
+  if (enabled)
+  {
+    nextMask |= mask;
+  }
+  else
+  {
+    nextMask &= (uint16_t)~mask;
+    if (nextMask == 0)
+    {
+      return false;
+    }
+  }
+
+  currentEnabledPatternMask = sanitizeEnabledPatternMask(nextMask);
+  return true;
+}
+
+uint8_t getNextEnabledPattern(uint8_t currentId)
+{
+  const uint8_t startId = isValidPatternId(currentId) ? currentId : FIRST_PATTERN_ID;
+  for (uint8_t offset = 1; offset <= PATTERN_COUNT; offset++)
+  {
+    uint8_t candidate = (uint8_t)(FIRST_PATTERN_ID + ((startId - FIRST_PATTERN_ID + offset) % PATTERN_COUNT));
+    if (isPatternEnabled(candidate))
+    {
+      return candidate;
+    }
+  }
+  return startId;
+}
+
+bool batteryViewTimedOut()
+{
+  return batteryViewActive && !UsbConnected && (millis() - batteryViewLastInteractionMs >= BATTERY_VIEW_TIMEOUT_MS);
+}
+
+bool chargingUsbDisconnected()
+{
+  return !UsbConnected;
 }
 
 int readBatteryRawValue()
@@ -1120,6 +1351,7 @@ bool saveConfigToEEPROM(bool verbose)
   EEPROM.put(EEPROM_ADDR_Y_GYRO_OFFSET, currentYGyroOffset);
   EEPROM.put(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
   EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
+  EEPROM.put(EEPROM_ADDR_ENABLED_PATTERNS, currentEnabledPatternMask);
 
   if (verbose)
   {
@@ -1137,6 +1369,9 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.println(currentGyroRange);
     Serial.print("Boot calibration: ");
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    Serial.print("Enabled patterns: ");
+    printEnabledPatternsList();
+    Serial.println();
     printOffsets();
   }
 
@@ -1155,6 +1390,7 @@ bool saveConfigToEEPROM(bool verbose)
     lastSavedXGyroOffset = currentXGyroOffset;
     lastSavedYGyroOffset = currentYGyroOffset;
     lastSavedZGyroOffset = currentZGyroOffset;
+    lastSavedEnabledPatternMask = currentEnabledPatternMask;
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -1172,7 +1408,7 @@ bool saveConfigToEEPROM(bool verbose)
 void readConfigFromEEPROM(bool verbose)
 {
   int magic = 0;
-  currentPattern = 2;
+  currentPattern = FIRST_PATTERN_ID;
   currentBrightness = MIN_BRIGHTNESS;
   currentStripLength = DEFAULT_LEDS_PER_STRIP;
   currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
@@ -1185,6 +1421,7 @@ void readConfigFromEEPROM(bool verbose)
   currentXGyroOffset = DEFAULT_X_GYRO_OFFSET;
   currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
+  currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
 
   EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
   EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
@@ -1202,6 +1439,7 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_X_GYRO_OFFSET, currentXGyroOffset);
     EEPROM.get(EEPROM_ADDR_Y_GYRO_OFFSET, currentYGyroOffset);
     EEPROM.get(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
+    EEPROM.get(EEPROM_ADDR_ENABLED_PATTERNS, currentEnabledPatternMask);
   }
   normalizePersistentConfig();
   lastSavedPattern = currentPattern;
@@ -1217,6 +1455,7 @@ void readConfigFromEEPROM(bool verbose)
   lastSavedXGyroOffset = currentXGyroOffset;
   lastSavedYGyroOffset = currentYGyroOffset;
   lastSavedZGyroOffset = currentZGyroOffset;
+  lastSavedEnabledPatternMask = currentEnabledPatternMask;
 
   if (magic != EEPROM_MAGIC)
   {
@@ -1240,6 +1479,9 @@ void readConfigFromEEPROM(bool verbose)
     Serial.println(currentGyroRange);
     Serial.print("Boot calibration: ");
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    Serial.print("Enabled patterns: ");
+    printEnabledPatternsList();
+    Serial.println();
     printOffsets();
   }
 }
@@ -1249,14 +1491,17 @@ void printCliHelp()
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  show");
-  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>");
-  Serial.println("  set pattern <2..14>");
+  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|enabled_patterns>");
+  Serial.println("  set pattern <1..13>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
   Serial.println("  set smoothing <1..512>           (takes effect after reboot)");
   Serial.println("  set accel_range <2|4|8|16>       (takes effect after reboot)");
   Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
   Serial.println("  set boot_calibration <off|quick>");
+  Serial.println("  patterns");
+  Serial.println("  enable_pattern <1..13[,id...]>");
+  Serial.println("  disable_pattern <1..13[,id...]>");
   Serial.println("  battery");
   Serial.println("  sensor");
   Serial.println("  timing");
@@ -1334,6 +1579,13 @@ void onCliGet(cmd* cPtr)
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
     return;
   }
+  if (key == "enabled_patterns")
+  {
+    Serial.print("OK enabled_patterns=");
+    printEnabledPatternsList();
+    Serial.println();
+    return;
+  }
 
   Serial.println("ERR unknown key");
 }
@@ -1348,15 +1600,12 @@ void onCliSet(cmd* cPtr)
 
   if (key == "pattern")
   {
-    if (value < 2 || value > 14)
+    if (!isValidPatternId(value))
     {
-      Serial.println("ERR pattern range 2..14");
+      Serial.println("ERR pattern range 1..13");
       return;
     }
-    currentPattern = value;
-    batteryViewLastInteractionMs = millis();
-    fsm.setInitialState(&s[currentPattern]);
-    fsm.reset();
+    switchToPattern((uint8_t)value, true);
     Serial.print("OK pattern=");
     Serial.println(currentPattern);
     return;
@@ -1481,7 +1730,7 @@ void onCliLoad(cmd* cPtr)
 void onCliDefaults(cmd* cPtr)
 {
   (void)cPtr;
-  currentPattern = 2;
+  currentPattern = FIRST_PATTERN_ID;
   currentBrightness = MIN_BRIGHTNESS;
   currentStripLength = DEFAULT_LEDS_PER_STRIP;
   currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
@@ -1494,6 +1743,7 @@ void onCliDefaults(cmd* cPtr)
   currentXGyroOffset = DEFAULT_X_GYRO_OFFSET;
   currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
+  currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
   applyPersistentConfig();
   batteryViewLastInteractionMs = millis();
   printConfigSummaryWithPrefix("OK defaults=1 saved=0 reboot_required=1 ");
@@ -1581,6 +1831,49 @@ void onCliReboot(cmd* cPtr)
   rp2040.reboot();
 }
 
+void onCliPatterns(cmd* cPtr)
+{
+  (void)cPtr;
+  printPatternStates();
+}
+
+void onCliEnablePattern(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  uint16_t mask = 0;
+  if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
+  {
+    Serial.println("ERR pattern list must contain IDs in range 1..13");
+    return;
+  }
+
+  updateEnabledPatternsFromMask(mask, true);
+  Serial.print("OK enabled_patterns=");
+  printEnabledPatternsList();
+  Serial.println();
+}
+
+void onCliDisablePattern(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  uint16_t mask = 0;
+  if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
+  {
+    Serial.println("ERR pattern list must contain IDs in range 1..13");
+    return;
+  }
+
+  if (!updateEnabledPatternsFromMask(mask, false))
+  {
+    Serial.println("ERR at least one pattern must remain enabled");
+    return;
+  }
+
+  Serial.print("OK enabled_patterns=");
+  printEnabledPatternsList();
+  Serial.println();
+}
+
 void onCliError(cmd_error* e)
 {
   CommandError cmdError(e);
@@ -1608,6 +1901,12 @@ void setupCLI()
   (void)load;
   Command defaults = cli.addCommand("defaults", onCliDefaults);
   (void)defaults;
+  Command patterns = cli.addCommand("patterns", onCliPatterns);
+  (void)patterns;
+  Command enablePattern = cli.addCommand("enable_pattern", onCliEnablePattern);
+  enablePattern.addPositionalArgument("pattern");
+  Command disablePattern = cli.addCommand("disable_pattern", onCliDisablePattern);
+  disablePattern.addPositionalArgument("pattern");
   Command battery = cli.addCommand("battery", onCliBattery);
   (void)battery;
   Command sensor = cli.addCommand("sensor", onCliSensor);
@@ -1817,7 +2116,7 @@ else                      {/* leave empty = very empty */}
 void RunEntry()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 2;
+  currentPattern = 1;
   batteryViewActive = false;
 }
 
@@ -1829,7 +2128,7 @@ void running()
 void RunEntry2()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 3;
+  currentPattern = 2;
   batteryViewActive = false;
 }
 
@@ -1843,7 +2142,7 @@ void RunEntry3()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(30);
-  currentPattern = 4;
+  currentPattern = 3;
   batteryViewActive = false;
 }
 
@@ -1868,7 +2167,7 @@ void RunExit3()
 void RunEntry4()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 5;
+  currentPattern = 4;
   batteryViewActive = false;
 }
 
@@ -1885,7 +2184,7 @@ void running4()
 void RunEntry5()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 6;
+  currentPattern = 5;
   batteryViewActive = false;
 }
 
@@ -1918,7 +2217,7 @@ void running5()
 void RunEntry6()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 7;
+  currentPattern = 6;
   batteryViewActive = false;
 }
 
@@ -1956,7 +2255,7 @@ void running6()
 void RunEntry7()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 8;
+  currentPattern = 7;
   batteryViewActive = false;
 }
 
@@ -1976,7 +2275,7 @@ void running7()
 void RunEntry8()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 9;
+  currentPattern = 8;
   batteryViewActive = false;
 }
 
@@ -1998,7 +2297,7 @@ void running8()
 void RunEntry9()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 10;
+  currentPattern = 9;
   batteryViewActive = false;
 }
 
@@ -2073,7 +2372,7 @@ float speed = ypr[0];
 void RunEntry10()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 11;
+  currentPattern = 10;
   batteryViewActive = false;
 }
 
@@ -2100,7 +2399,7 @@ void running10()
 void RunEntry11()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 12;
+  currentPattern = 11;
   batteryViewActive = false;
 }
 
@@ -2143,7 +2442,7 @@ void running11()
 void RunEntry12()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 13;
+  currentPattern = 12;
   batteryViewActive = false;
 }
 
@@ -2189,7 +2488,7 @@ void running12()
 void RunEntry13()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 14;
+  currentPattern = 13;
   batteryViewActive = false;
 }
 
@@ -2224,6 +2523,113 @@ void running13()
   }
 }
 
+const PatternDefinition patternDefinitions[] = {
+    {1, "rainbow", RunEntry, running, NULL},
+    {2, "full_color", RunEntry2, running2, NULL},
+    {3, "motion_brightness", RunEntry3, running3, RunExit3},
+    {4, "runner_fixed", RunEntry4, running4, NULL},
+    {5, "runner_reactive", RunEntry5, running5, NULL},
+    {6, "runner_dual", RunEntry6, running6, NULL},
+    {7, "heartbeat", RunEntry7, running7, NULL},
+    {8, "ping_pong", RunEntry8, running8, NULL},
+    {9, "comet_swarm", RunEntry9, running9, NULL},
+    {10, "breath_storm", RunEntry10, running10, NULL},
+    {11, "jerk_wave", RunEntry11, running11, NULL},
+    {12, "yaw_spinner", RunEntry12, running12, NULL},
+    {13, "runner_dual_inverted", RunEntry13, running13, NULL},
+};
+
+const PatternDefinition* getPatternDefinition(uint8_t patternId)
+{
+  for (size_t i = 0; i < (sizeof(patternDefinitions) / sizeof(patternDefinitions[0])); i++)
+  {
+    if (patternDefinitions[i].id == patternId)
+    {
+      return &patternDefinitions[i];
+    }
+  }
+  return NULL;
+}
+
+void runPatternEntry(uint8_t patternId)
+{
+  const PatternDefinition* pattern = getPatternDefinition(patternId);
+  if (pattern != NULL && pattern->entry != NULL)
+  {
+    pattern->entry();
+  }
+}
+
+void runPatternFrame(uint8_t patternId)
+{
+  const PatternDefinition* pattern = getPatternDefinition(patternId);
+  if (pattern != NULL && pattern->run != NULL)
+  {
+    pattern->run();
+  }
+}
+
+void runPatternExit(uint8_t patternId)
+{
+  const PatternDefinition* pattern = getPatternDefinition(patternId);
+  if (pattern != NULL && pattern->exit != NULL)
+  {
+    pattern->exit();
+  }
+}
+
+void switchToPattern(uint8_t patternId, bool activatePatternState)
+{
+  if (!isValidPatternId(patternId))
+  {
+    return;
+  }
+
+  const bool patternCurrentlyActive = !batteryViewActive && !UsbConnected;
+  const uint8_t previousPattern = (uint8_t)currentPattern;
+
+  if (patternCurrentlyActive && previousPattern == patternId && !activatePatternState)
+  {
+    batteryViewLastInteractionMs = millis();
+    return;
+  }
+
+  if (patternCurrentlyActive)
+  {
+    runPatternExit(previousPattern);
+  }
+
+  currentPattern = patternId;
+  batteryViewLastInteractionMs = millis();
+
+  if (activatePatternState)
+  {
+    fsm.setInitialState(&s[2]);
+    fsm.reset();
+    return;
+  }
+
+  if (patternCurrentlyActive)
+  {
+    runPatternEntry((uint8_t)currentPattern);
+  }
+}
+
+void PatternStateEntry()
+{
+  runPatternEntry((uint8_t)currentPattern);
+}
+
+void PatternStateRunning()
+{
+  runPatternFrame((uint8_t)currentPattern);
+}
+
+void PatternStateExit()
+{
+  runPatternExit((uint8_t)currentPattern);
+}
+
 // ============================================================================
 //  FSM TABLES & TRIGGERS
 // ============================================================================
@@ -2231,19 +2637,7 @@ void running13()
 State s[] = {
     State("battery", BatteryEntry, BatteryRunning),
     State("charging", ChargingEntry, ChargingRunning, ChargingExit),
-    State("running", RunEntry, running),
-    State("running2", RunEntry2, running2),
-    State("running3", RunEntry3, running3, RunExit3),
-    State("running4", RunEntry4, running4),
-    State("running5", RunEntry5, running5),
-    State("running6", RunEntry6, running6),
-    State("running7", RunEntry7, running7),
-    State("running8", RunEntry8, running8),
-    State("running9", RunEntry9, running9),
-    State("running10", RunEntry10, running10),
-    State("running11", RunEntry11, running11),
-    State("running12", RunEntry12, running12),
-    State("running13", RunEntry13, running13)};
+    State("pattern", PatternStateEntry, PatternStateRunning, PatternStateExit)};
 
 enum triggers
 {
@@ -2252,85 +2646,14 @@ enum triggers
   usbpower
 };
 
-template<int N>
-static inline bool BatteryTimeoutPatternIs() {
-  return currentPattern == N && (millis() - batteryViewLastInteractionMs >= BATTERY_VIEW_TIMEOUT_MS);
-}
-
-template<int N>
-static inline bool unplugged() {
-  return !UsbConnected && (currentPattern == N);
-}
-
 Transition transitions[] = {
     Transition(&s[2], &s[0], longpress),
-    Transition(&s[3], &s[0], longpress),
-    Transition(&s[4], &s[0], longpress),
-    Transition(&s[5], &s[0], longpress),
-    Transition(&s[6], &s[0], longpress),
-    Transition(&s[7], &s[0], longpress),
-    Transition(&s[8], &s[0], longpress),
-    Transition(&s[9], &s[0], longpress),
-    Transition(&s[10], &s[0], longpress),
-    Transition(&s[11], &s[0], longpress),
-    Transition(&s[12], &s[0], longpress),
-    Transition(&s[13], &s[0], longpress),
-    Transition(&s[14], &s[0], longpress),
-    Transition(&s[2], &s[3], doubleClick),
-    Transition(&s[3], &s[4], doubleClick),
-    Transition(&s[4], &s[5], doubleClick),
-    Transition(&s[5], &s[6], doubleClick),
-    Transition(&s[6], &s[7], doubleClick),
-    Transition(&s[7], &s[8], doubleClick),
-    Transition(&s[8], &s[9], doubleClick),
-    Transition(&s[9], &s[10], doubleClick),
-    Transition(&s[10], &s[11], doubleClick),
-    Transition(&s[11], &s[12], doubleClick),
-    Transition(&s[12], &s[13], doubleClick),
-    Transition(&s[13], &s[14], doubleClick),
-    Transition(&s[14], &s[2], doubleClick),
     Transition(&s[0], &s[1], usbpower),
-    Transition(&s[2], &s[1], usbpower),
-    Transition(&s[3], &s[1], usbpower),
-    Transition(&s[4], &s[1], usbpower),
-    Transition(&s[5], &s[1], usbpower),
-    Transition(&s[6], &s[1], usbpower),
-    Transition(&s[7], &s[1], usbpower),
-    Transition(&s[8], &s[1], usbpower),
-    Transition(&s[9], &s[1], usbpower),
-    Transition(&s[10], &s[1], usbpower),
-    Transition(&s[11], &s[1], usbpower),
-    Transition(&s[12], &s[1], usbpower),
-    Transition(&s[13], &s[1], usbpower),
-    Transition(&s[14], &s[1], usbpower)};
+    Transition(&s[2], &s[1], usbpower)};
 
 TimedTransition timedTransitions[] = {
-    TimedTransition(&s[0], &s[2], 5000, NULL, "", BatteryTimeoutPatternIs<2>),
-    TimedTransition(&s[0], &s[3], 5000, NULL, "", BatteryTimeoutPatternIs<3>),
-    TimedTransition(&s[0], &s[4], 5000, NULL, "", BatteryTimeoutPatternIs<4>),
-    TimedTransition(&s[0], &s[5], 5000, NULL, "", BatteryTimeoutPatternIs<5>),
-    TimedTransition(&s[0], &s[6], 5000, NULL, "", BatteryTimeoutPatternIs<6>),
-    TimedTransition(&s[0], &s[7], 5000, NULL, "", BatteryTimeoutPatternIs<7>),
-    TimedTransition(&s[0], &s[8], 5000, NULL, "", BatteryTimeoutPatternIs<8>),
-    TimedTransition(&s[0], &s[9], 5000, NULL, "", BatteryTimeoutPatternIs<9>),
-    TimedTransition(&s[0], &s[10], 5000, NULL, "", BatteryTimeoutPatternIs<10>),
-    TimedTransition(&s[0], &s[11], 5000, NULL, "", BatteryTimeoutPatternIs<11>),
-    TimedTransition(&s[0], &s[12], 5000, NULL, "", BatteryTimeoutPatternIs<12>),
-    TimedTransition(&s[0], &s[13], 5000, NULL, "", BatteryTimeoutPatternIs<13>),
-    TimedTransition(&s[0], &s[14], 5000, NULL, "", BatteryTimeoutPatternIs<14>),
-    TimedTransition(&s[1], &s[2], 2000, NULL, "", unplugged<2>),
-    TimedTransition(&s[1], &s[3], 2000, NULL, "", unplugged<3>),
-    TimedTransition(&s[1], &s[4], 2000, NULL, "", unplugged<4>),
-    TimedTransition(&s[1], &s[5], 2000, NULL, "", unplugged<5>),
-    TimedTransition(&s[1], &s[6], 2000, NULL, "", unplugged<6>),
-    TimedTransition(&s[1], &s[7], 2000, NULL, "", unplugged<7>),
-    TimedTransition(&s[1], &s[8], 2000, NULL, "", unplugged<8>),
-    TimedTransition(&s[1], &s[9], 2000, NULL, "", unplugged<9>),
-    TimedTransition(&s[1], &s[10], 2000, NULL, "", unplugged<10>),
-    TimedTransition(&s[1], &s[11], 2000, NULL, "", unplugged<11>),
-    TimedTransition(&s[1], &s[12], 2000, NULL, "", unplugged<12>),
-    TimedTransition(&s[1], &s[13], 2000, NULL, "", unplugged<13>),
-    TimedTransition(&s[1], &s[14], 2000, NULL, "", unplugged<14>)};
+    TimedTransition(&s[0], &s[2], 5000, NULL, "", batteryViewTimedOut),
+    TimedTransition(&s[1], &s[2], 2000, NULL, "", chargingUsbDisconnected)};
 
 int num_transitions = sizeof(transitions) / sizeof(Transition);
 int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
@@ -2473,7 +2796,7 @@ void setup()
   setupCLI();
 
   // initialState on Powerup
-  fsm.setInitialState(&s[currentPattern]);
+  fsm.setInitialState(&s[2]);
 }
 
 // ============================================================================
@@ -2607,7 +2930,8 @@ void loop()
             currentZAccelOffset != lastSavedZAccelOffset ||
             currentXGyroOffset != lastSavedXGyroOffset ||
             currentYGyroOffset != lastSavedYGyroOffset ||
-            currentZGyroOffset != lastSavedZGyroOffset) {
+            currentZGyroOffset != lastSavedZGyroOffset ||
+            currentEnabledPatternMask != lastSavedEnabledPatternMask) {
             // At least one value has changed
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);
@@ -2667,7 +2991,10 @@ void loop()
 
   if (multiresponseButton.doubleClick())
   {
-    fsm.trigger(doubleClick);
+    if (!batteryViewActive && !UsbConnected)
+    {
+      switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
+    }
     // Serial.println("singleclick");
   }
 

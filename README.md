@@ -122,13 +122,16 @@ Verfügbare Kommandos:
 help
 show
 get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
-set pattern <2..14>
+set pattern <1..13>
 set brightness <95|127|159|191|223|255>
 set strip_length <10..35>
 set smoothing <1..512>
 set accel_range <2|4|8|16>
 set gyro_range <250|500|1000|2000>
 set boot_calibration <off|quick>
+patterns
+enable_pattern <1..13[,id...]>
+disable_pattern <1..13[,id...]>
 battery
 sensor
 timing
@@ -144,11 +147,16 @@ restart
 
 Hinweise:
 
-* Daten-/Konfigurationskommandos antworten konsistent mit `OK ...` oder `ERR ...`, zum Beispiel `OK pattern=14`.
+* Daten-/Konfigurationskommandos antworten konsistent mit `OK ...` oder `ERR ...`, zum Beispiel `OK pattern=1`.
 * `show` liefert alle relevanten Konfigurationswerte als kompakte `key=value`-Zeile.
+* `patterns` zeigt alle Pattern mit Status `on` oder `off`.
 * `set pattern` schaltet das aktive Muster sofort um.
+* `set pattern` darf auch deaktivierte Pattern direkt anwählen.
 * `set brightness` wirkt sofort.
 * `set strip_length` wirkt sofort auf beide Strips.
+* `enable_pattern` und `disable_pattern` steuern, welche Pattern per Doppelklick durchgeschaltet werden.
+* Beide Befehle akzeptieren auch mehrere Pattern gleichzeitig als kommagetrennte Liste, z. B. `disable_pattern 3,5,7`.
+* Es muss immer mindestens ein Pattern aktiv bleiben.
 * `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` werden persistent gespeichert, greifen aber erst nach einem Neustart.
 * `battery` zeigt den ADC-Rohwert, die berechnete Spannung sowie USB-/Serial-Status.
 * `sensor` zeigt MPU-/DMP-Status und die konfigurierten bzw. aktiven Sensor-Ranges.
@@ -301,13 +309,16 @@ Available commands:
 help
 show
 get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
-set pattern <2..14>
+set pattern <1..13>
 set brightness <95|127|159|191|223|255>
 set strip_length <10..35>
 set smoothing <1..512>
 set accel_range <2|4|8|16>
 set gyro_range <250|500|1000|2000>
 set boot_calibration <off|quick>
+patterns
+enable_pattern <1..13[,id...]>
+disable_pattern <1..13[,id...]>
 battery
 sensor
 timing
@@ -323,11 +334,16 @@ restart
 
 Notes:
 
-* Data/config commands reply consistently with `OK ...` or `ERR ...`, for example `OK pattern=14`.
+* Data/config commands reply consistently with `OK ...` or `ERR ...`, for example `OK pattern=1`.
 * `show` returns all relevant configuration values as a compact `key=value` line.
+* `patterns` lists all patterns with `on` or `off` state.
 * `set pattern` switches the active pattern immediately.
+* `set pattern` can also select patterns that are currently disabled for button cycling.
 * `set brightness` takes effect immediately.
 * `set strip_length` applies immediately to both strips.
+* `enable_pattern` and `disable_pattern` control which patterns are included when cycling with the button.
+* Both commands also accept multiple pattern IDs as a comma-separated list, for example `disable_pattern 3,5,7`.
+* At least one pattern must always remain enabled.
 * `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` are stored persistently but only take effect after reboot.
 * `battery` reports raw ADC value, calculated voltage, and USB/serial status.
 * `sensor` reports MPU/DMP status and both configured and active sensor ranges.
