@@ -31,7 +31,7 @@
 // ============================================================================
 
 #include <Arduino.h> //Arduino.h
-#include "MPU6050_6Axis_MotionApps612.h" // mpu5060 library
+#include "MPU6050_6Axis_MotionApps612.h" // MPU6050 DMP library
 #include <FastLED.h> // FastLED
 #include "SimpleFSM.h" // State Machine
 #include <SimpleCLI.h> // Serial command-line interface
@@ -94,7 +94,7 @@ reference frame. Yaw is relative if there is no magnetometer present.
 #define PIN_USB_SENSE 24
 #endif
 
-int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
+int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // MPU interrupt input pin
 
 #define PinStrip1 PIN_LED_STRIP_1
 #define PinStrip2 PIN_LED_STRIP_2
@@ -108,8 +108,8 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // Define the interruption #0 pin
 #define MAX_TOTAL_LEDS (MAX_LEDS_PER_STRIP * 2)
 
 int ledsPerStrip = DEFAULT_LEDS_PER_STRIP;
-int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // both strips length
-int halfLeds = DEFAULT_LEDS_PER_STRIP; // segment length
+int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // total logical LEDs across both strips
+int halfLeds = DEFAULT_LEDS_PER_STRIP; // LEDs per strip
 
 #define NUM_LEDS ledsPerStrip
 #define TOTAL_LEDS totalLeds
@@ -135,9 +135,8 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 //  EEPROM LAYOUT
 // ============================================================================
 
-// Memory addresses in the emulated EEPROM
-// An int on the Pico is 4 bytes.
-// We store value1 at address 0 and value2 directly after it.
+// Memory layout in emulated EEPROM.
+// On Pico-class MCUs an int is 4 bytes, so values are packed sequentially.
 #define EEPROM_ADDR_PATTERN         0
 #define EEPROM_ADDR_BRIGHTNESS      sizeof(int)
 #define EEPROM_ADDR_STRIP_LENGTH    (sizeof(int) * 2)
@@ -156,11 +155,11 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 
 // Size of emulated EEPROM.
-// has to big enough to store our variables
-// 14 * sizeof(int) = 56 Bytes.
+// Must cover all persisted ints plus the enabled-pattern bitmask.
+// Current layout uses 15 * sizeof(int) + 2 bytes for the mask.
 #define EEPROM_SIZE 64 // 64 Bytes leaves a little headroom
 
-// variables we want to store in EEPROM
+// Persisted configuration values.
 int currentPattern = 1;
 int currentBrightness = 95;
 int currentStripLength = DEFAULT_LEDS_PER_STRIP;
@@ -176,8 +175,8 @@ int currentYGyroOffset = -6;
 int currentZGyroOffset = 34;
 uint16_t currentEnabledPatternMask = 0;
 
-// copies of current values
-// needed to detect changes (to limit wear of flash memory)
+// Last values written to EEPROM.
+// Used to avoid unnecessary flash writes.
 int lastSavedPattern = 1;
 int lastSavedBrightness = 95;
 int lastSavedStripLength = DEFAULT_LEDS_PER_STRIP;
@@ -279,11 +278,11 @@ void DMPDataReady(){
 //  BUTTON, BATTERY, TIMING
 // ============================================================================
 
-// Button config
+// Button handling.
 const byte multiresponseButtonpin = PIN_BUTTON_MULTI;
 Switch multiresponseButton = Switch(multiresponseButtonpin, INPUT);
 
-// Battery variables
+// Battery, charging, and serial-session state.
 int UsbConnected = 0;
 int UsbPowerRaw = 0;
 bool SerialSessionActive = false;
@@ -320,7 +319,7 @@ uint8_t baseBrightness = 0;  // Brightness of LEDs when not pulsing. Set to 0 fo
 int ledeffect;
 int ledeffect2;
 
-// variables for mpu to led mapping
+// Shared scratch variables used by multiple motion-reactive patterns.
 int color;
 int color2;
 int accel;
@@ -331,12 +330,14 @@ int fade;
 // ============================================================================
 //  FSM INSTANCE
 // ============================================================================
-// FSM instance init
+// FSM is only used for high-level modes: battery view, charging view, and pattern playback.
 SimpleFSM fsm;
 extern State s[];
 
+// Generic callback type used by pattern entry/run/exit functions.
 typedef void (*PatternCallback)();
 
+// Dispatch table entry for one user-selectable LED pattern.
 struct PatternDefinition
 {
   uint8_t id;
@@ -424,6 +425,7 @@ void onCliEnablePattern(cmd* cPtr);
 void onCliDisablePattern(cmd* cPtr);
 void onCliError(cmd_error* e);
 
+// Simple triangular pulse used by the heartbeat-style pattern.
 uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 {
   uint16_t T = ms % cycleLength;
@@ -449,6 +451,7 @@ int sumPulse(int time_shift)
 }
 
 inline uint32_t smoothedMotion() {
+  // The smoothing window is configurable and reused by many patterns.
   uint32_t s = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
   myAccel.add(s);
   return myAccel.get();
@@ -650,6 +653,7 @@ void printOffsetsWithPrefix(const char* prefix)
 
 void printEnabledPatternsList()
 {
+  // Output only the enabled IDs as a compact comma-separated list for CLI parsing.
   bool first = true;
   for (uint8_t patternId = FIRST_PATTERN_ID; patternId <= LAST_PATTERN_ID; patternId++)
   {
@@ -669,6 +673,7 @@ void printEnabledPatternsList()
 
 void printConfigSummaryWithPrefix(const char* prefix)
 {
+  // Shared one-line config summary used by show/save/load/defaults replies.
   Serial.print(prefix);
   Serial.print("pattern=");
   Serial.print(currentPattern);
@@ -691,6 +696,7 @@ void printConfigSummaryWithPrefix(const char* prefix)
 
 void printPatternStates()
 {
+  // Human-readable overview of all patterns and whether button cycling includes them.
   Serial.print("OK patterns=");
   for (uint8_t patternId = FIRST_PATTERN_ID; patternId <= LAST_PATTERN_ID; patternId++)
   {
@@ -1104,6 +1110,7 @@ bool isValidPatternId(int value)
   return value >= FIRST_PATTERN_ID && value <= LAST_PATTERN_ID;
 }
 
+// Clamp the bitmask to the known pattern range and guarantee at least one enabled pattern.
 uint16_t sanitizeEnabledPatternMask(uint16_t mask)
 {
   mask &= ALL_ENABLED_PATTERN_MASK;
@@ -1150,6 +1157,7 @@ bool setPatternEnabled(uint8_t patternId, bool enabled)
   return true;
 }
 
+// Parse a comma-separated pattern list like "1,3,7" into a bitmask.
 bool parsePatternListMask(String valueText, uint16_t* maskOut)
 {
   if (maskOut == NULL)
@@ -1219,6 +1227,7 @@ bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled)
   return true;
 }
 
+// Find the next enabled pattern used for button-based cycling.
 uint8_t getNextEnabledPattern(uint8_t currentId)
 {
   const uint8_t startId = isValidPatternId(currentId) ? currentId : FIRST_PATTERN_ID;
@@ -1235,11 +1244,13 @@ uint8_t getNextEnabledPattern(uint8_t currentId)
 
 bool batteryViewTimedOut()
 {
+  // Battery view times out only while running on battery, not while USB charging is active.
   return batteryViewActive && !UsbConnected && (millis() - batteryViewLastInteractionMs >= BATTERY_VIEW_TIMEOUT_MS);
 }
 
 bool chargingUsbDisconnected()
 {
+  // Charging view ends as soon as USB-only power disappears.
   return !UsbConnected;
 }
 
@@ -1834,6 +1845,7 @@ void onCliReboot(cmd* cPtr)
 void onCliPatterns(cmd* cPtr)
 {
   (void)cPtr;
+  // Show all patterns with their current on/off state for button cycling.
   printPatternStates();
 }
 
@@ -1847,6 +1859,7 @@ void onCliEnablePattern(cmd* cPtr)
     return;
   }
 
+  // Accept single IDs and comma-separated lists in one command.
   updateEnabledPatternsFromMask(mask, true);
   Serial.print("OK enabled_patterns=");
   printEnabledPatternsList();
@@ -1863,6 +1876,7 @@ void onCliDisablePattern(cmd* cPtr)
     return;
   }
 
+  // Reject requests that would leave button cycling with zero available patterns.
   if (!updateEnabledPatternsFromMask(mask, false))
   {
     Serial.println("ERR at least one pattern must remain enabled");
@@ -1996,7 +2010,7 @@ void handleCLI()
 }
 
 // ============================================================================
-//  FSM STATES — ENTRY/RUN/EXIT
+//  STATE HANDLERS
 // ============================================================================
 
 void ChargingEntry()
@@ -2015,9 +2029,9 @@ void ChargingRunning()
 
   if (currentMillis - previousMillis >= 500)
   {
-    // save the last time you blinked the LED
+    // Save the timestamp for the next blink toggle.
     previousMillis = currentMillis;
-    // if the LED is off turn it on and vice-versa:
+    // Toggle the status LED state.
     if (blink == 0){
       blink = 1;
     }
@@ -2026,7 +2040,7 @@ void ChargingRunning()
     }
   }
 
-//hysteresis for voltage measurement
+// Hysteresis for voltage measurement.
   static float vLast = 0;
 const float HYS = 0.03;  // 30 mV
 if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
@@ -2070,9 +2084,9 @@ void BatteryRunning()
 
   if (currentMillis - previousMillis >= 500)
   {
-    // save the last time you blinked the LED
+    // Save the timestamp for the next blink toggle.
     previousMillis = currentMillis;
-    // if the LED is off turn it on and vice-versa:
+    // Toggle the status LED state.
     if (blink == 0){
       blink = 1;
     }
@@ -2081,7 +2095,7 @@ void BatteryRunning()
     }
   }
 
-  //hysteresis for voltage measurement
+  // Hysteresis for voltage measurement.
   static float vLast = 0;
 const float HYS = 0.03;  // 30 mV
 if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
@@ -2309,13 +2323,13 @@ float speed = ypr[0];
     static float headPos[NUM_COMETS];
     static bool initialized = false;
     
-    const uint8_t tailLength = 3;          // tail lenght
-    const uint8_t maxBrightness = 255;      // Max brightness of comet (global brightness control still applies)
+    const uint8_t tailLength = 3;          // Tail length in LEDs.
+    const uint8_t maxBrightness = 255;      // Peak comet brightness before global brightness scaling.
 
     color = map(color, -180, 180, 0, 255);
-    const CRGB cometColor = CHSV(color, 200, 255); //comet color
+    const CRGB cometColor = CHSV(color, 200, 255); // Comet color from yaw.
 
-    // init once
+    // Initialize persistent comet positions once.
     if (!initialized) {
         for (int i = 0; i < NUM_COMETS; i++) {
             headPos[i] = (float)(i * TOTAL_LEDS / NUM_COMETS);
@@ -2323,10 +2337,10 @@ float speed = ypr[0];
         initialized = true;
     }
 
-    // clear logical strip
+    // Clear the logical strip before drawing the new frame.
     fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
 
-    // draw comets
+    // Draw all comets onto the logical strip.
     for (int k = 0; k < NUM_COMETS; k++) {
         headPos[k] += (speed * 0.5);
 
@@ -2382,11 +2396,11 @@ void running10()
   uint8_t hue = map((int)(ypr[0]*180.0f/M_PI), -180, 180, 0, 255);
 
   if (m < 3500) {
-    // calm  „Breathing“
+    // Calm mode: soft breathing.
     uint8_t breath = beatsin8(10, 40, 180);
     fill_solid(Strip, TOTAL_LEDS, CHSV(hue, 255, breath));
   } else {
-    // Storm: Sparcs propotional to Movement.
+    // Storm mode: spark count grows with movement.
     fadeToBlackBy(Strip, TOTAL_LEDS, 40);
     uint8_t sparks = constrain(map((int)m, 3500, 20000, 1, 8), 1, 12);
     for (uint8_t s=0; s<sparks; s++) {
@@ -2405,7 +2419,7 @@ void RunEntry11()
 
 void running11()
 {
-  // simple Magnitude-Trigger (|x|+|y|+|z|)
+  // Simple motion trigger based on world-frame acceleration magnitude.
   uint32_t mag = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y) + (uint32_t)abs(aaWorld.z);
 
   static uint16_t phase = 10000;
@@ -2424,11 +2438,11 @@ void running11()
     phase += 20 + map((int)smoothedMotion(), 2000, 20000, 0, 20);
     uint8_t hue = map((int)(ypr[0]*180.0f/M_PI), -180, 180, 0, 255);
 
-    // wave from middle to the ends - identical on both strips
+    // Wave from the center towards the ends on both strips.
     int center = NUM_LEDS / 2;
     for (int i = 0; i < NUM_LEDS; i++) {
       int16_t d = abs(i - center);
-      int16_t k = (int16_t)d * 24 - (int16_t)phase;   // 24 = Wave distance
+      int16_t k = (int16_t)d * 24 - (int16_t)phase;   // 24 = wave spacing
       k = abs(k);
       if (k < 24) {
         uint8_t bri = map(k, 0, 24, 255, 0);
@@ -2454,13 +2468,13 @@ void running12()
 
   float yaw = ypr[0];
   float dy  = yaw - prevYaw;
-  // Wrap um ±PI
+  // Wrap around at +/-PI.
   if (dy >  M_PI) dy -= 2*M_PI;
   if (dy < -M_PI) dy += 2*M_PI;
   prevYaw = yaw;
 
-  // Rate -> LED-Speed
-  float speed = dy * (TOTAL_LEDS * 0.5f);  // Skala nach Geschmack
+  // Convert yaw rate to LED speed.
+  float speed = dy * (TOTAL_LEDS * 0.5f);  // Tuned scale factor.
 
   // Direction with dead band (prevents flickering around 0)
   const float DEAD_BAND = 0.02f;           // ~adjustable
@@ -2539,6 +2553,7 @@ const PatternDefinition patternDefinitions[] = {
     {13, "runner_dual_inverted", RunEntry13, running13, NULL},
 };
 
+// Look up the callbacks and display name for a pattern ID.
 const PatternDefinition* getPatternDefinition(uint8_t patternId)
 {
   for (size_t i = 0; i < (sizeof(patternDefinitions) / sizeof(patternDefinitions[0])); i++)
@@ -2553,6 +2568,7 @@ const PatternDefinition* getPatternDefinition(uint8_t patternId)
 
 void runPatternEntry(uint8_t patternId)
 {
+  // Dispatch into the selected pattern's entry function, if it has one.
   const PatternDefinition* pattern = getPatternDefinition(patternId);
   if (pattern != NULL && pattern->entry != NULL)
   {
@@ -2562,6 +2578,7 @@ void runPatternEntry(uint8_t patternId)
 
 void runPatternFrame(uint8_t patternId)
 {
+  // Dispatch one animation frame of the selected pattern.
   const PatternDefinition* pattern = getPatternDefinition(patternId);
   if (pattern != NULL && pattern->run != NULL)
   {
@@ -2571,6 +2588,7 @@ void runPatternFrame(uint8_t patternId)
 
 void runPatternExit(uint8_t patternId)
 {
+  // Dispatch the selected pattern's exit function, if one is defined.
   const PatternDefinition* pattern = getPatternDefinition(patternId);
   if (pattern != NULL && pattern->exit != NULL)
   {
@@ -2585,11 +2603,13 @@ void switchToPattern(uint8_t patternId, bool activatePatternState)
     return;
   }
 
+  // Pattern cycling is only "live" while we are not inside battery or charging view.
   const bool patternCurrentlyActive = !batteryViewActive && !UsbConnected;
   const uint8_t previousPattern = (uint8_t)currentPattern;
 
   if (patternCurrentlyActive && previousPattern == patternId && !activatePatternState)
   {
+    // Avoid needless reinitialization when only one enabled pattern exists.
     batteryViewLastInteractionMs = millis();
     return;
   }
@@ -2604,6 +2624,7 @@ void switchToPattern(uint8_t patternId, bool activatePatternState)
 
   if (activatePatternState)
   {
+    // Used by CLI "set pattern" to force a clean re-entry through the state machine.
     fsm.setInitialState(&s[2]);
     fsm.reset();
     return;
@@ -2617,22 +2638,27 @@ void switchToPattern(uint8_t patternId, bool activatePatternState)
 
 void PatternStateEntry()
 {
+  // Enter whichever user pattern is currently selected.
   runPatternEntry((uint8_t)currentPattern);
 }
 
 void PatternStateRunning()
 {
+  // Render whichever user pattern is currently selected.
   runPatternFrame((uint8_t)currentPattern);
 }
 
 void PatternStateExit()
 {
+  // Give the active pattern a chance to restore temporary state such as brightness overrides.
   runPatternExit((uint8_t)currentPattern);
 }
 
 // ============================================================================
 //  FSM TABLES & TRIGGERS
 // ============================================================================
+// The FSM handles only high-level modes.
+// Individual LED patterns are dispatched dynamically inside the pattern state.
 
 State s[] = {
     State("battery", BatteryEntry, BatteryRunning),
@@ -2674,19 +2700,19 @@ void setup()
   Serial.begin(115200); // 115200 is required for Teapot Demo output
   Serial.setTimeout(5);
   // while (!Serial);
-  delay(1000); // 1 second delay for recovery
+  delay(1000); // Short startup delay for recovery / serial attach.
 
-  // Load persisted config early so subsequent setup can depend on it.
+  // Load persisted config early so the remaining setup can use stored values.
   EEPROM.begin(EEPROM_SIZE);
   Serial.println("EEPROM initialized.");
   readConfigFromEEPROM(true);
 
-  /*Initialize device*/
+  /* Initialize device */
   Serial.println(F("Initializing I2C devices..."));
   mpu.initialize();
   pinMode(INTERRUPT_PIN, INPUT);
 
-  /*Verify connection*/
+  /* Verify connection */
   Serial.println(F("Testing MPU6050 connection..."));
   bool mpuConnected = (mpu.testConnection() == true);
   if (!mpuConnected)
@@ -2698,13 +2724,13 @@ void setup()
     Serial.println("MPU6050 connection successful");
   }
 
-  /*Wait for Serial input*/
+  /* Wait for Serial input (debug helper, normally unused) */
   // Serial.println(F("\nSend any character to begin: "));
   // while (Serial.available() && Serial.read()); // Empty buffer
   // while (!Serial.available());                 // Wait for data
   // while (Serial.available() && Serial.read()); // Empty buffer again
 
-  /* Initializate and configure the DMP*/
+  /* Initialize and configure the DMP */
   if (mpuConnected)
   {
     Serial.println(F("Initializing DMP..."));
@@ -2743,7 +2769,7 @@ void setup()
     Serial.println(F("Enabling DMP...")); // Turning ON DMP
     mpu.setDMPEnabled(true);
 
-    /*Enable Arduino interrupt detection*/
+    /* Enable interrupt detection */
     Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
     Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
     Serial.println(F(")..."));
@@ -2765,37 +2791,37 @@ void setup()
   }
   pinMode(LED_BUILTIN, OUTPUT);
 
-  // Battery stuff
+  // Battery / USB sense setup.
   pinMode(PIN_BATTERY_ADC, INPUT);
   pinMode(PIN_USB_SENSE, INPUT);
   analogReadResolution(12);
 
-  delay(1000); // 1 second delay for recovery
+  delay(1000); // Give the power rail and USB state a moment to settle.
 
-  // tell FastLED about the LED strip configuration
+  // Register both physical LED segments with FastLED.
  // FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip1, NUM_LEDS).setCorrection(TypicalLEDStrip);
  // FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip2, NUM_LEDS).setCorrection(TypicalLEDStrip);
 
   FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(PhysicalStrip, 0, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
   FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(PhysicalStrip, MAX_LEDS_PER_STRIP, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
 
-  // set master brightness control
+  // Apply persisted global brightness.
   FastLED.setBrightness(BRIGHTNESS);
 
   // FastLED.setMaxRefreshRate(120);
 
-  //motion smoothing init
+  // Initialize motion smoothing with the configured window size.
   applyConfiguredMotionSmoothing();
 
   applyPersistentConfig();
   lastUpdateTime = millis();
 	
-//state machine init
+// State machine init.
   fsm.add(timedTransitions, num_timed);
   fsm.add(transitions, num_transitions);
   setupCLI();
 
-  // initialState on Powerup
+  // Start in the generic pattern state; the active pattern comes from currentPattern.
   fsm.setInitialState(&s[2]);
 }
 
@@ -2909,15 +2935,15 @@ void loop()
     digitalWrite(LED_BUILTIN, blinkState);
   }
 
-  // Check if 5 minutes has passed
+  // Periodically persist changed configuration values.
     unsigned long currentTime = millis();
     if (currentTime - lastUpdateTime >= UPDATE_INTERVAL) {
-        // Set timestamp for next check
+        // Set timestamp for the next check.
         lastUpdateTime = currentTime;
 
         Serial.println("5 minute interval reached. Checking values for changes...");
 
-        // Check if the current values differ from the last saved ones
+        // Save only when something actually changed.
         if (currentPattern != lastSavedPattern ||
             currentBrightness != lastSavedBrightness ||
             currentStripLength != lastSavedStripLength ||
@@ -2932,17 +2958,17 @@ void loop()
             currentYGyroOffset != lastSavedYGyroOffset ||
             currentZGyroOffset != lastSavedZGyroOffset ||
             currentEnabledPatternMask != lastSavedEnabledPatternMask) {
-            // At least one value has changed
+            // At least one value changed.
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);
         } else {
-            // No change
+            // No change.
             Serial.println("Values are unchanged. No EEPROM update needed.");
         }
     }
 
 
-  // send the 'leds' array out to the actual LED strip
+  // Copy the logical LEDs into the fixed physical strip layout and show them.
   clearInactiveLeds();
   syncLogicalToPhysicalLeds();
   FastLED.show();
@@ -2952,7 +2978,7 @@ void loop()
   {
     maxWorkDurationUs = lastWorkDurationUs;
   }
-  // insert a delay to keep the framerate modest
+  // Keep the framerate bounded and deterministic.
   delay(1000 / FRAMES_PER_SECOND);
 
   //FastLED.countFPS();
@@ -2962,10 +2988,10 @@ void loop()
   // Serial.println(fsm.getDotDefinition());
   // Serial.println(State3());
 
-  // do some periodic updates
-  EVERY_N_MILLISECONDS(20) { gHue++; } // slowly cycle the "base color" through the rainbow
+  // Periodic shared hue update used by several patterns.
+  EVERY_N_MILLISECONDS(20) { gHue++; } // Slowly cycle the shared base hue.
 
-  // USB power state for charging logic and serial session detection for CLI.
+  // USB power state for charging behavior and CLI session detection.
   UsbPowerRaw = digitalRead(PIN_USB_SENSE);
   const bool previousSerialSessionActive = SerialSessionActive;
   SerialSessionActive = ((bool)Serial) && Serial.dtr();
@@ -2977,7 +3003,7 @@ void loop()
     cliInputBuffer = "";
     cliLastInputMs = 0;
   }
-  // Disable charging view while a serial session is active.
+  // Disable the charging view while a serial session is active.
   UsbConnected = (UsbPowerRaw == 1 && !SerialSessionActive) ? 1 : 0;
 
   fsm.run(0);
@@ -2995,10 +3021,10 @@ void loop()
     {
       switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
     }
-    // Serial.println("singleclick");
+    // Serial.println("doubleclick");
   }
 
-  //UsbConnected = 0;
+  // Legacy debug helper left intentionally disabled.
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
@@ -3008,10 +3034,10 @@ void loop()
 
   if (multiresponseButton.singleClick() && batteryViewActive)
   {
-    BRIGHTNESS += 32; // brightness = 95-255, so steps of 32
+    BRIGHTNESS += 32; // Brightness range is 95..255 in steps of 32.
     if (BRIGHTNESS > MAX_BRIGHTNESS)
     {
-      BRIGHTNESS = MIN_BRIGHTNESS; // we roll over to minimum bright
+      BRIGHTNESS = MIN_BRIGHTNESS; // Wrap around to the minimum brightness.
     }
     // Serial.println(BRIGHTNESS);
     FastLED.setBrightness(BRIGHTNESS);
