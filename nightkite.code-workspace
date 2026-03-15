@@ -6,7 +6,7 @@
     },
     {
       "name": "nightkite-configurator",
-      "path": "nightkite-configurator"
+      "path": "../nightkite-configurator"
     }
   ]
 }
