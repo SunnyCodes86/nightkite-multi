@@ -1,0 +1,12 @@
+{
+  "folders": [
+    {
+      "name": "nightkite-multi",
+      "path": "."
+    },
+    {
+      "name": "nightkite-configurator",
+      "path": "nightkite-configurator"
+    }
+  ]
+}
