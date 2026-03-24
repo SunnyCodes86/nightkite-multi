@@ -2978,8 +2978,13 @@ void loop()
   {
     maxWorkDurationUs = lastWorkDurationUs;
   }
-  // Keep the framerate bounded and deterministic.
-  delay(1000 / FRAMES_PER_SECOND);
+  // Keep the framerate bounded by the configured frame budget, not by
+  // adding a full extra delay on top of the actual render work.
+  const uint32_t frameBudgetUs = 1000000UL / FRAMES_PER_SECOND;
+  if (lastWorkDurationUs < frameBudgetUs)
+  {
+    delayMicroseconds(frameBudgetUs - lastWorkDurationUs);
+  }
 
   //FastLED.countFPS();
   // Serial.println(LEDS.getFPS());
