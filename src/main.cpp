@@ -152,11 +152,11 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_Z_GYRO_OFFSET   (sizeof(int) * 12)
 #define EEPROM_ADDR_MAGIC           (sizeof(int) * 13)
 #define EEPROM_ADDR_ENABLED_PATTERNS (sizeof(int) * 14)
+#define EEPROM_ADDR_INVERTED_PATTERNS (sizeof(int) * 15)
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 
 // Size of emulated EEPROM.
-// Must cover all persisted ints plus the enabled-pattern bitmask.
-// Current layout uses 15 * sizeof(int) + 2 bytes for the mask.
+// Must cover all persisted ints plus the enabled/inverted pattern bitmasks.
 #define EEPROM_SIZE 64 // 64 Bytes leaves a little headroom
 
 // Persisted configuration values.
@@ -174,6 +174,7 @@ int currentXGyroOffset = 111;
 int currentYGyroOffset = -6;
 int currentZGyroOffset = 34;
 uint16_t currentEnabledPatternMask = 0;
+uint16_t currentInvertedPatternMask = 0;
 
 // Last values written to EEPROM.
 // Used to avoid unnecessary flash writes.
@@ -191,6 +192,7 @@ int lastSavedXGyroOffset = 111;
 int lastSavedYGyroOffset = -6;
 int lastSavedZGyroOffset = 34;
 uint16_t lastSavedEnabledPatternMask = 0;
+uint16_t lastSavedInvertedPatternMask = 0;
 
 const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
 const int MIN_MOTION_SMOOTHING_SIZE = 1;
@@ -213,6 +215,7 @@ const uint8_t FIRST_PATTERN_ID = 1;
 const uint8_t LAST_PATTERN_ID = 14;
 const uint8_t PATTERN_COUNT = LAST_PATTERN_ID - FIRST_PATTERN_ID + 1;
 const uint16_t ALL_ENABLED_PATTERN_MASK = (1u << PATTERN_COUNT) - 1u;
+const uint16_t ALL_INVERTED_PATTERN_MASK = (1u << PATTERN_COUNT) - 1u;
 
 int activeMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
 
@@ -373,6 +376,7 @@ void printOffsets();
 void printOffsetsWithPrefix(const char* prefix);
 void printConfigSummaryWithPrefix(const char* prefix);
 void printEnabledPatternsList();
+void printInvertedPatternsList();
 void printPatternStates();
 bool beginCalibrationSession(bool verbose, bool* restartDMP);
 void endCalibrationSession(bool restartDMP);
@@ -383,10 +387,14 @@ void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
 bool isValidPatternId(int value);
 uint16_t sanitizeEnabledPatternMask(uint16_t mask);
+uint16_t sanitizeInvertedPatternMask(uint16_t mask);
 bool isPatternEnabled(uint8_t patternId);
+bool isPatternInverted(uint8_t patternId);
+int getPatternDirectionFactor(uint8_t patternId);
 bool setPatternEnabled(uint8_t patternId, bool enabled);
 bool parsePatternListMask(String valueText, uint16_t* maskOut);
 bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled);
+bool updateInvertedPatternsFromMask(uint16_t mask, bool inverted);
 uint8_t getNextEnabledPattern(uint8_t currentId);
 const PatternDefinition* getPatternDefinition(uint8_t patternId);
 void runPatternEntry(uint8_t patternId);
@@ -423,6 +431,8 @@ void onCliReboot(cmd* cPtr);
 void onCliPatterns(cmd* cPtr);
 void onCliEnablePattern(cmd* cPtr);
 void onCliDisablePattern(cmd* cPtr);
+void onCliInvertPattern(cmd* cPtr);
+void onCliNormalPattern(cmd* cPtr);
 void onCliError(cmd_error* e);
 
 // Simple triangular pulse used by the heartbeat-style pattern.
@@ -671,6 +681,25 @@ void printEnabledPatternsList()
   }
 }
 
+void printInvertedPatternsList()
+{
+  bool first = true;
+  for (uint8_t patternId = FIRST_PATTERN_ID; patternId <= LAST_PATTERN_ID; patternId++)
+  {
+    if (!isPatternInverted(patternId))
+    {
+      continue;
+    }
+
+    if (!first)
+    {
+      Serial.print(",");
+    }
+    Serial.print(patternId);
+    first = false;
+  }
+}
+
 void printConfigSummaryWithPrefix(const char* prefix)
 {
   // Shared one-line config summary used by show/save/load/defaults replies.
@@ -691,6 +720,8 @@ void printConfigSummaryWithPrefix(const char* prefix)
   Serial.print(bootCalibrationModeToString(currentBootCalibrationMode));
   Serial.print(" enabled_patterns=");
   printEnabledPatternsList();
+  Serial.print(" inverted_patterns=");
+  printInvertedPatternsList();
   Serial.println();
 }
 
@@ -1073,6 +1104,7 @@ void normalizePersistentConfig()
   }
 
   currentEnabledPatternMask = sanitizeEnabledPatternMask(currentEnabledPatternMask);
+  currentInvertedPatternMask = sanitizeInvertedPatternMask(currentInvertedPatternMask);
 
   if (!isValidBrightnessLevel(currentBrightness))
   {
@@ -1121,6 +1153,11 @@ uint16_t sanitizeEnabledPatternMask(uint16_t mask)
   return mask;
 }
 
+uint16_t sanitizeInvertedPatternMask(uint16_t mask)
+{
+  return mask & ALL_INVERTED_PATTERN_MASK;
+}
+
 bool isPatternEnabled(uint8_t patternId)
 {
   if (!isValidPatternId(patternId))
@@ -1129,6 +1166,21 @@ bool isPatternEnabled(uint8_t patternId)
   }
   const uint8_t bitIndex = (uint8_t)(patternId - FIRST_PATTERN_ID);
   return (currentEnabledPatternMask & (1u << bitIndex)) != 0;
+}
+
+bool isPatternInverted(uint8_t patternId)
+{
+  if (!isValidPatternId(patternId))
+  {
+    return false;
+  }
+  const uint8_t bitIndex = (uint8_t)(patternId - FIRST_PATTERN_ID);
+  return (currentInvertedPatternMask & (1u << bitIndex)) != 0;
+}
+
+int getPatternDirectionFactor(uint8_t patternId)
+{
+  return isPatternInverted(patternId) ? -1 : 1;
 }
 
 bool setPatternEnabled(uint8_t patternId, bool enabled)
@@ -1224,6 +1276,27 @@ bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled)
   }
 
   currentEnabledPatternMask = sanitizeEnabledPatternMask(nextMask);
+  return true;
+}
+
+bool updateInvertedPatternsFromMask(uint16_t mask, bool inverted)
+{
+  mask &= ALL_INVERTED_PATTERN_MASK;
+  if (mask == 0)
+  {
+    return false;
+  }
+
+  if (inverted)
+  {
+    currentInvertedPatternMask |= mask;
+  }
+  else
+  {
+    currentInvertedPatternMask &= (uint16_t)~mask;
+  }
+
+  currentInvertedPatternMask = sanitizeInvertedPatternMask(currentInvertedPatternMask);
   return true;
 }
 
@@ -1363,6 +1436,7 @@ bool saveConfigToEEPROM(bool verbose)
   EEPROM.put(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
   EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
   EEPROM.put(EEPROM_ADDR_ENABLED_PATTERNS, currentEnabledPatternMask);
+  EEPROM.put(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
 
   if (verbose)
   {
@@ -1383,6 +1457,9 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.print("Enabled patterns: ");
     printEnabledPatternsList();
     Serial.println();
+    Serial.print("Inverted patterns: ");
+    printInvertedPatternsList();
+    Serial.println();
     printOffsets();
   }
 
@@ -1402,6 +1479,7 @@ bool saveConfigToEEPROM(bool verbose)
     lastSavedYGyroOffset = currentYGyroOffset;
     lastSavedZGyroOffset = currentZGyroOffset;
     lastSavedEnabledPatternMask = currentEnabledPatternMask;
+    lastSavedInvertedPatternMask = currentInvertedPatternMask;
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -1433,6 +1511,7 @@ void readConfigFromEEPROM(bool verbose)
   currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
   currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
+  currentInvertedPatternMask = 0;
 
   EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
   EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
@@ -1451,6 +1530,7 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_Y_GYRO_OFFSET, currentYGyroOffset);
     EEPROM.get(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
     EEPROM.get(EEPROM_ADDR_ENABLED_PATTERNS, currentEnabledPatternMask);
+    EEPROM.get(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
   }
   normalizePersistentConfig();
   lastSavedPattern = currentPattern;
@@ -1467,6 +1547,7 @@ void readConfigFromEEPROM(bool verbose)
   lastSavedYGyroOffset = currentYGyroOffset;
   lastSavedZGyroOffset = currentZGyroOffset;
   lastSavedEnabledPatternMask = currentEnabledPatternMask;
+  lastSavedInvertedPatternMask = currentInvertedPatternMask;
 
   if (magic != EEPROM_MAGIC)
   {
@@ -1493,6 +1574,9 @@ void readConfigFromEEPROM(bool verbose)
     Serial.print("Enabled patterns: ");
     printEnabledPatternsList();
     Serial.println();
+    Serial.print("Inverted patterns: ");
+    printInvertedPatternsList();
+    Serial.println();
     printOffsets();
   }
 }
@@ -1502,7 +1586,7 @@ void printCliHelp()
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  show");
-  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|enabled_patterns>");
+  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|enabled_patterns|inverted_patterns>");
   Serial.println("  set pattern <1..14>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
@@ -1513,6 +1597,8 @@ void printCliHelp()
   Serial.println("  patterns");
   Serial.println("  enable_pattern <1..14[,id...]>");
   Serial.println("  disable_pattern <1..14[,id...]>");
+  Serial.println("  invert_pattern <1..14[,id...]>");
+  Serial.println("  normal_pattern <1..14[,id...]>");
   Serial.println("  battery");
   Serial.println("  sensor");
   Serial.println("  timing");
@@ -1594,6 +1680,13 @@ void onCliGet(cmd* cPtr)
   {
     Serial.print("OK enabled_patterns=");
     printEnabledPatternsList();
+    Serial.println();
+    return;
+  }
+  if (key == "inverted_patterns")
+  {
+    Serial.print("OK inverted_patterns=");
+    printInvertedPatternsList();
     Serial.println();
     return;
   }
@@ -1755,6 +1848,7 @@ void onCliDefaults(cmd* cPtr)
   currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
   currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
+  currentInvertedPatternMask = 0;
   applyPersistentConfig();
   batteryViewLastInteractionMs = millis();
   printConfigSummaryWithPrefix("OK defaults=1 saved=0 reboot_required=1 ");
@@ -1888,6 +1982,38 @@ void onCliDisablePattern(cmd* cPtr)
   Serial.println();
 }
 
+void onCliInvertPattern(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  uint16_t mask = 0;
+  if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
+  {
+    Serial.println("ERR pattern list must contain IDs in range 1..14");
+    return;
+  }
+
+  updateInvertedPatternsFromMask(mask, true);
+  Serial.print("OK inverted_patterns=");
+  printInvertedPatternsList();
+  Serial.println();
+}
+
+void onCliNormalPattern(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  uint16_t mask = 0;
+  if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
+  {
+    Serial.println("ERR pattern list must contain IDs in range 1..14");
+    return;
+  }
+
+  updateInvertedPatternsFromMask(mask, false);
+  Serial.print("OK inverted_patterns=");
+  printInvertedPatternsList();
+  Serial.println();
+}
+
 void onCliError(cmd_error* e)
 {
   CommandError cmdError(e);
@@ -1921,6 +2047,10 @@ void setupCLI()
   enablePattern.addPositionalArgument("pattern");
   Command disablePattern = cli.addCommand("disable_pattern", onCliDisablePattern);
   disablePattern.addPositionalArgument("pattern");
+  Command invertPattern = cli.addCommand("invert_pattern", onCliInvertPattern);
+  invertPattern.addPositionalArgument("pattern");
+  Command normalPattern = cli.addCommand("normal_pattern", onCliNormalPattern);
+  normalPattern.addPositionalArgument("pattern");
   Command battery = cli.addCommand("battery", onCliBattery);
   (void)battery;
   Command sensor = cli.addCommand("sensor", onCliSensor);
@@ -2189,6 +2319,10 @@ void running4()
 {
   color = map(color, -180, 180, 0, 255);
   uint8_t pos = map(beat16(40, 0), 0, 65535, 0, NUM_LEDS - 1);
+  if (getPatternDirectionFactor(4) < 0)
+  {
+    pos = (uint8_t)((NUM_LEDS - 1) - pos);
+  }
   Strip[pos] = CHSV(color, 200, 255);
   Strip[pos + NUM_LEDS] = CHSV(color, 200, 255);
 
@@ -2204,6 +2338,7 @@ void RunEntry5()
 
 void running5()
 {
+  const int direction = getPatternDirectionFactor(5);
   color = map(color, -180, 180, 0, 255);
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
   fade = map(accel, 20, 160, 60, 12);
@@ -2214,7 +2349,7 @@ void running5()
 
     if (ledeffect < 0 || ledeffect >= NUM_LEDS)
     {
-      ledeffect = 0;
+      ledeffect = (direction > 0) ? 0 : (NUM_LEDS - 1);
     }
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
@@ -2222,7 +2357,7 @@ void running5()
     Strip[ledeffect] = CHSV(color, 255, 255);
     Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
 
-    ledeffect = ledeffect + 1;
+    ledeffect += direction;
 
     timingObj.setPeriod(accel);
   }
@@ -2237,6 +2372,7 @@ void RunEntry6()
 
 void running6()
 {
+  const int direction = getPatternDirectionFactor(6);
   color = map(color, -180, 180, 0, 255);
   color2 = map(color2, 180, -180, 0, 255);
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
@@ -2248,8 +2384,8 @@ void running6()
 
     if (ledeffect < 0 || ledeffect >= NUM_LEDS || ledeffect2 < 0 || ledeffect2 >= NUM_LEDS)
     {
-      ledeffect = 0;
-      ledeffect2 = 0;
+      ledeffect = (direction > 0) ? 0 : (NUM_LEDS - 1);
+      ledeffect2 = ledeffect;
     }
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
@@ -2260,7 +2396,7 @@ void running6()
     Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
 
     ledeffect2 = ledeffect;
-    ledeffect = ledeffect + 1;
+    ledeffect += direction;
 
     timingObj.setPeriod(accel);
   }
@@ -2277,10 +2413,11 @@ void running7()
 {
   color = map(color, -180, 180, 0, 255);
   bloodHue = color; // Blood color [hue from 0-255]
+  const int flow = flowDirection * getPatternDirectionFactor(7);
 
   for (int i = 0; i < NUM_LEDS; i++)
   {
-    uint8_t bloodVal = sumPulse((5 / NUM_LEDS / 2) + (NUM_LEDS / 2) * i * flowDirection);
+    uint8_t bloodVal = sumPulse((5 / NUM_LEDS / 2) + (NUM_LEDS / 2) * i * flow);
     Strip[i] = CHSV(bloodHue, bloodSat, bloodVal);
     Strip[i + NUM_LEDS] = CHSV(bloodHue, bloodSat, bloodVal);
   }
@@ -2301,6 +2438,10 @@ void running8()
   fade = constrain(fade, 6, 48);
 
   uint8_t pos = map(beatsin16(80, 0), 0, 65535, 0, NUM_LEDS - 1);
+  if (getPatternDirectionFactor(8) < 0)
+  {
+    pos = (uint8_t)((NUM_LEDS - 1) - pos);
+  }
 
   Strip[pos] = CHSV(color, 200, 255);
   Strip[pos + NUM_LEDS] = CHSV(color, 200, 255);
@@ -2317,8 +2458,7 @@ void RunEntry9()
 
 void running9()
 {
-
-float speed = ypr[0];
+float speed = ypr[0] * getPatternDirectionFactor(9);
  
     static float headPos[NUM_COMETS];
     static bool initialized = false;
@@ -2474,7 +2614,7 @@ void running12()
   prevYaw = yaw;
 
   // Convert yaw rate to LED speed.
-  float speed = dy * (TOTAL_LEDS * 0.5f);  // Tuned scale factor.
+  float speed = dy * (TOTAL_LEDS * 0.5f) * getPatternDirectionFactor(12);  // Tuned scale factor.
 
   // Direction with dead band (prevents flickering around 0)
   const float DEAD_BAND = 0.02f;           // ~adjustable
@@ -2519,7 +2659,7 @@ void running13()
   if (dy < -M_PI) dy += 2 * M_PI;
   prevYaw = yaw;
 
-  float speed = dy * (TOTAL_LEDS * 0.5f);
+  float speed = dy * (TOTAL_LEDS * 0.5f) * getPatternDirectionFactor(13);
   const float DEAD_BAND = 0.02f;
   if (speed > DEAD_BAND) dir = +1;
   if (speed < -DEAD_BAND) dir = -1;
@@ -2561,6 +2701,7 @@ void RunEntry14()
 
 void running14()
 {
+  const int direction = getPatternDirectionFactor(14);
   color = map(color, -180, 180, 0, 255);
   color2 = map(color2, 180, -180, 0, 255);
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
@@ -2572,8 +2713,8 @@ void running14()
 
     if (ledeffect <= 0 || ledeffect > (NUM_LEDS - 1))
     {
-      ledeffect = NUM_LEDS - 1;
-      ledeffect2 = NUM_LEDS - 1;
+      ledeffect = (direction > 0) ? (NUM_LEDS - 1) : 0;
+      ledeffect2 = ledeffect;
     }
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
@@ -2584,7 +2725,7 @@ void running14()
     Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
 
     ledeffect2 = ledeffect;
-    ledeffect = ledeffect - 1;
+    ledeffect -= direction;
 
     timingObj.setPeriod(accel);
   }
@@ -3011,7 +3152,8 @@ void loop()
             currentXGyroOffset != lastSavedXGyroOffset ||
             currentYGyroOffset != lastSavedYGyroOffset ||
             currentZGyroOffset != lastSavedZGyroOffset ||
-            currentEnabledPatternMask != lastSavedEnabledPatternMask) {
+            currentEnabledPatternMask != lastSavedEnabledPatternMask ||
+            currentInvertedPatternMask != lastSavedInvertedPatternMask) {
             // At least one value changed.
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);

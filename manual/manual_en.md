@@ -135,7 +135,7 @@ As soon as an active USB serial connection exists, the CLI is available.
 - Prompt: `nk>`
 - Help: `help`
 - Show current values: `show`
-- Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
+- Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`
 - Set single value:
   - `set pattern <1..14>`
   - `set brightness <95|127|159|191|223|255>`
@@ -148,6 +148,8 @@ As soon as an active USB serial connection exists, the CLI is available.
   - `patterns`
   - `enable_pattern <1..14[,id...]>`
   - `disable_pattern <1..14[,id...]>`
+  - `invert_pattern <1..14[,id...]>`
+  - `normal_pattern <1..14[,id...]>`
 - Diagnostics:
   - `battery`
   - `sensor`
@@ -173,6 +175,9 @@ Notes:
 - `set strip_length` applies immediately to both strips.
 - `enable_pattern` and `disable_pattern` control which patterns are included when cycling with the button.
 - Both commands also accept multiple pattern IDs as a comma-separated list, for example `disable_pattern 3,5,7`.
+- `invert_pattern` and `normal_pattern` control the animation direction per pattern and store that setting persistently.
+- These commands also accept multiple pattern IDs as a comma-separated list, for example `invert_pattern 4,12,13`.
+- Not every pattern has a visually meaningful direction. On supported patterns, this option reverses the animation movement.
 - At least one pattern must always remain enabled.
 - `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` only take effect after reboot. The CLI marks this in the reply with `(applies after reboot)`.
 - `timing` reports `FastLED` FPS and `loop`/`work` times in microseconds.

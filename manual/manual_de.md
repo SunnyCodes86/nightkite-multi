@@ -135,7 +135,7 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 - Prompt: `nk>`
 - Hilfe: `help`
 - Aktuelle Werte: `show`
-- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
+- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`
 - Einzelwert setzen:
   - `set pattern <1..14>`
   - `set brightness <95|127|159|191|223|255>`
@@ -148,6 +148,8 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `patterns`
   - `enable_pattern <1..14[,id...]>`
   - `disable_pattern <1..14[,id...]>`
+  - `invert_pattern <1..14[,id...]>`
+  - `normal_pattern <1..14[,id...]>`
 - Diagnose:
   - `battery`
   - `sensor`
@@ -173,6 +175,9 @@ Hinweise:
 - `set strip_length` wirkt sofort auf beide Strips.
 - `enable_pattern` und `disable_pattern` steuern, welche Pattern per Doppelklick durchgeschaltet werden.
 - Beide Befehle akzeptieren auch mehrere Pattern gleichzeitig als kommagetrennte Liste, z. B. `disable_pattern 3,5,7`.
+- `invert_pattern` und `normal_pattern` steuern die Laufrichtung pro Pattern und speichern diese Einstellung persistent.
+- Auch diese beiden Befehle akzeptieren mehrere Pattern gleichzeitig als kommagetrennte Liste, z. B. `invert_pattern 4,12,13`.
+- Nicht jedes Pattern besitzt eine sichtbare Laufrichtung. Bei unterstützten Patterns kehrt die Option die Bewegungsrichtung um.
 - Es muss immer mindestens ein Pattern aktiv bleiben.
 - `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart. Die CLI kennzeichnet das in der Antwort mit `(applies after reboot)`.
 - `timing` zeigt `FastLED`-FPS sowie `loop`-/`work`-Zeiten in Mikrosekunden.
