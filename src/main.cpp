@@ -2458,69 +2458,73 @@ void RunEntry9()
 
 void running9()
 {
-float speed = ypr[0] * getPatternDirectionFactor(9);
- 
-    static float headPos[NUM_COMETS];
-    static bool initialized = false;
-    
-    const uint8_t tailLength = 3;          // Tail length in LEDs.
-    const uint8_t maxBrightness = 255;      // Peak comet brightness before global brightness scaling.
+  float speed = ypr[0] * getPatternDirectionFactor(9);
+  static float headPos[NUM_COMETS];
+  static bool initialized = false;
 
-    color = map(color, -180, 180, 0, 255);
-    const CRGB cometColor = CHSV(color, 200, 255); // Comet color from yaw.
+  const uint8_t tailLength = 3;           // Symmetric glow radius around each comet head.
+  const uint8_t maxBrightness = 255;
 
-    // Initialize persistent comet positions once.
-    if (!initialized) {
-        for (int i = 0; i < NUM_COMETS; i++) {
-            headPos[i] = (float)(i * TOTAL_LEDS / NUM_COMETS);
-        }
-        initialized = true;
+  color = map(color, -180, 180, 0, 255);
+  const CRGB cometColor = CHSV(color, 200, 255);
+
+  auto ringToLogicalIndex = [](int ringIndex) {
+    if (ringIndex < NUM_LEDS)
+    {
+      return ringIndex;
+    }
+    return NUM_LEDS + (TOTAL_LEDS - 1 - ringIndex);
+  };
+
+  if (!initialized)
+  {
+    for (int i = 0; i < NUM_COMETS; i++)
+    {
+      headPos[i] = (float)(i * TOTAL_LEDS / NUM_COMETS);
+    }
+    initialized = true;
+  }
+
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+
+  for (int k = 0; k < NUM_COMETS; k++)
+  {
+    headPos[k] += (speed * 0.5f);
+
+    while (headPos[k] >= TOTAL_LEDS)
+    {
+      headPos[k] -= TOTAL_LEDS;
+    }
+    while (headPos[k] < 0)
+    {
+      headPos[k] += TOTAL_LEDS;
     }
 
-    // Clear the logical strip before drawing the new frame.
-    fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
-
-    // Draw all comets onto the logical strip.
-    for (int k = 0; k < NUM_COMETS; k++) {
-        headPos[k] += (speed * 0.5);
-
-        while (headPos[k] >= TOTAL_LEDS) {
-            headPos[k] -= TOTAL_LEDS;
-        }
-        while (headPos[k] < 0) {
-            headPos[k] += TOTAL_LEDS;
-        }
+    int headIndex = (int)(headPos[k] + 0.5f);
+    if (headIndex >= TOTAL_LEDS)
+    {
+      headIndex -= TOTAL_LEDS;
     }
 
-    for (int p_idx = 0; p_idx < TOTAL_LEDS; p_idx++) {
-        int logical_idx;
+    for (int distance = 0; distance <= tailLength; distance++)
+    {
+      uint8_t brightness = (distance == 0)
+        ? maxBrightness
+        : (uint8_t)map(distance, 1, tailLength, 170, 40);
 
-        if (p_idx < HALF_LEDS) {
-            logical_idx = p_idx;
-        } else {
-            logical_idx = (TOTAL_LEDS - 1) - p_idx + HALF_LEDS;
-        }
+      CRGB pixelColor = cometColor;
+      pixelColor.nscale8(brightness);
 
-        CRGB finalColorForPixel = CRGB::Black;
-        for (int k = 0; k < NUM_COMETS; k++) {
-            float delta = fmod(logical_idx - headPos[k] + TOTAL_LEDS, TOTAL_LEDS);
-            
-            if (delta > HALF_LEDS) {
-                delta = TOTAL_LEDS - delta;
-            }
+      int forwardIndex = (headIndex + distance) % TOTAL_LEDS;
+      Strip[ringToLogicalIndex(forwardIndex)] |= pixelColor;
 
-            uint8_t brightness = 0;
-            if (delta >= 0 && delta <= tailLength) {
-                brightness = map((int)(delta * 100), 0, (tailLength * 100), maxBrightness, 0);
-            }
-            
-            if ((int)roundf(headPos[k]) == logical_idx) {
-                brightness = maxBrightness;
-            }
-            finalColorForPixel |= cometColor.scale8(brightness);
-        }
-        Strip[p_idx] = finalColorForPixel;
+      if (distance > 0)
+      {
+        int backwardIndex = (headIndex - distance + TOTAL_LEDS) % TOTAL_LEDS;
+        Strip[ringToLogicalIndex(backwardIndex)] |= pixelColor;
+      }
     }
+  }
 }
 
 void RunEntry10()
