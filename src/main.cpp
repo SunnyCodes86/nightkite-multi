@@ -2054,12 +2054,12 @@ if (statusStart < TOTAL_LEDS)
 }
 
 int batteryBarMax = min(5, NUM_LEDS);
-if      (Voltage >= 4.20) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-else if (Voltage >  4.00) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-else if (Voltage >  3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-else if (Voltage >  3.60) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-else if (Voltage >  3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-else if (Voltage >  3.20) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
+if      (Voltage >= 4.05) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+else if (Voltage >= 3.92) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+else if (Voltage >= 3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+else if (Voltage >= 3.68) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= 3.55) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= 3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
 }
 
@@ -2118,12 +2118,12 @@ for (int i = 0; i < brightnessPixels; ++i) {
 }
 
 int batteryBarMax = min(5, NUM_LEDS);
-if      (Voltage >= 4.20) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-else if (Voltage >  4.00) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-else if (Voltage >  3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-else if (Voltage >  3.60) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-else if (Voltage >  3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-else if (Voltage >  3.20) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
+if      (Voltage >= 4.05) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+else if (Voltage >= 3.92) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+else if (Voltage >= 3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+else if (Voltage >= 3.68) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= 3.55) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= 3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
 }
 
