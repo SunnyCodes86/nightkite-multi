@@ -33,7 +33,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 - **Helligkeitsstufen:**  
   Sechs Helligkeitsstufen (95 → 255 in Schritten von 32), beeinflussen auch die Akkulaufzeit.
 - **Animations-Muster:**  
-  13 vordefinierte Animations-Muster zur Anpassung des Erscheinungsbilds (ebenfalls Einfluss auf die Laufzeit).
+  14 vordefinierte Animations-Muster zur Anpassung des Erscheinungsbilds (ebenfalls Einfluss auf die Laufzeit).
 - **Ladestandsanzeige:**  
   Zeigt den aktuellen Akkustand direkt über das LED-Band an.
 - **Speicherfunktion:**  
@@ -45,7 +45,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 
 ### 1.1. Animations-Muster im Detail
 
-Die NightKite Multi (v2.1) verfügt über 13 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
+Die NightKite Multi (v2.1) verfügt über 14 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
 Nach dem Einschalten (und der Kalibrierung) startet der Controller mit dem zuletzt verwendeten Muster und der zuletzt gewählten Helligkeit.  
 Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
 
@@ -63,7 +63,8 @@ Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
     - Unruhig: „Sturm“ mit Funken, deren Anzahl mit der Bewegung zunimmt.  
 11. **Jerk-Wave (Ruck-Welle):** Bewegung löst Welle von der Mitte zu den Enden aus; Farbe = Winkel.  
 12. **Yaw-Spinner (mit Richtungs-Gedächtnis):** Lichtkopf mit Blur-Schweif folgt der Drehrate (Yaw-Rate) mit Totzone. Farbe = Winkel.  
-13. **LED-Lauflicht zweifarbig (reaktiv, invertiert):** Wie (6), aber Laufrichtung invertiert.
+13. **Yaw-Spinner Kreis:** Variante von (12), bei der der Lichtkopf optisch ringförmig über beide Strips umläuft. Die Richtung folgt weiter der Yaw-Rate; Farbe = Winkel.  
+14. **LED-Lauflicht zweifarbig (reaktiv, invertiert):** Wie (6), aber Laufrichtung invertiert.
 
 ---
 
@@ -98,7 +99,7 @@ Der Controller besitzt zwei Tasten: **links** und **rechts**.
 Der rechte Button ist ein **Multifunktions-Button**:
 
 - **Muster / Animation wechseln (Doppelklick):**  
-  → Zyklischer Wechsel zum nächsten der 13 Muster.
+  → Zyklischer Wechsel zum nächsten der 14 Muster.
 - **Helligkeitsstufe ändern (kurz drücken):**  
   → Nur während die Akkuanzeige aktiv ist.  
     Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.
@@ -111,13 +112,13 @@ Der rechte Button ist ein **Multifunktions-Button**:
 
 | Anzeige | Spannung | Farbe |
 |----------|-----------|--------|
-| 5 LEDs  | ≥ 4.2 V | Blau |
-| 4 LEDs  | 4.2 – 4.0 V | Grün |
-| 3 LEDs  | 4.0 – 3.8 V | Grün |
-| 2 LEDs  | 3.8 – 3.6 V | Gelb |
-| 1 LED   | 3.6 – 3.4 V | Gelb |
-| 1 LED   | 3.4 – 3.2 V | Rot |
-| Keine LED | 3.2 – 3.0 V | (Abschaltung) |
+| 5 LEDs  | ≥ 4.05 V | Blau |
+| 4 LEDs  | 4.05 – 3.92 V | Grün |
+| 3 LEDs  | 3.92 – 3.80 V | Grün |
+| 2 LEDs  | 3.80 – 3.68 V | Gelb |
+| 1 LED   | 3.68 – 3.55 V | Gelb |
+| 1 LED   | 3.55 – 3.40 V | Rot |
+| Keine LED | < 3.40 V | (sehr leer) |
 
 ---
 
@@ -136,7 +137,7 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 - Aktuelle Werte: `show`
 - Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
 - Einzelwert setzen:
-  - `set pattern <1..13>`
+  - `set pattern <1..14>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
   - `set smoothing <1..512>`
@@ -145,8 +146,8 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `set boot_calibration <off|quick>`
 - Pattern-Auswahl:
   - `patterns`
-  - `enable_pattern <1..13[,id...]>`
-  - `disable_pattern <1..13[,id...]>`
+  - `enable_pattern <1..14[,id...]>`
+  - `disable_pattern <1..14[,id...]>`
 - Diagnose:
   - `battery`
   - `sensor`

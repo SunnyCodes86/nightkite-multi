@@ -33,7 +33,7 @@ The NightKite Multi lighting system offers the following core features:
 - **Brightness Levels:**  
   Six selectable brightness levels (95 → 255 in steps of 32), which also affect battery life.
 - **Animation Patterns:**  
-  13 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
+  14 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
 - **Battery Indicator:**  
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  
@@ -45,7 +45,7 @@ The NightKite Multi lighting system offers the following core features:
 
 ### 1.1. Animation Patterns in Detail
 
-The NightKite Multi (v2.1) includes 13 predefined animation patterns that can be changed with a double-click.  
+The NightKite Multi (v2.1) includes 14 predefined animation patterns that can be changed with a double-click.  
 After powering on and calibration, the controller starts with the last used pattern and brightness level.  
 On first startup: **Pattern ID 1**, **Brightness 95**.
 
@@ -63,7 +63,8 @@ On first startup: **Pattern ID 1**, **Brightness 95**.
     - Turbulent: “storm” with sparks that increase with movement.  
 11. **Jerk Wave:** Sudden motion triggers a wave from the center to the ends; wave speed increases with motion; color = angle.  
 12. **Yaw Spinner (with direction memory):** Light head with blurred trail follows yaw rate with small dead zone to prevent flicker; color = angle.  
-13. **LED Runner (dual-color, reactive, inverted):** Like (6), but with inverted running direction.
+13. **Yaw Spinner Circle:** Variant of (12) where the light head appears to travel in a circular loop across both strips. Direction still follows yaw rate; color = angle.  
+14. **LED Runner (dual-color, reactive, inverted):** Like (6), but with inverted running direction.
 
 ---
 
@@ -98,7 +99,7 @@ The controller has two buttons: **left** and **right**.
 The right button is a **multi-function control**:
 
 - **Change Pattern / Animation (double-click):**  
-  → Cycles through the 13 available animation patterns.
+  → Cycles through the 14 available animation patterns.
 - **Change Brightness (short press):**  
   → Only while the battery display is active.  
     Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
@@ -111,13 +112,13 @@ The right button is a **multi-function control**:
 
 | Indicator | Voltage Range | Color |
 |------------|----------------|--------|
-| 5 LEDs     | ≥ 4.2 V        | Blue |
-| 4 LEDs     | 4.2 – 4.0 V    | Green |
-| 3 LEDs     | 4.0 – 3.8 V    | Green |
-| 2 LEDs     | 3.8 – 3.6 V    | Yellow |
-| 1 LED      | 3.6 – 3.4 V    | Yellow |
-| 1 LED      | 3.4 – 3.2 V    | Red |
-| None       | 3.2 – 3.0 V    | (shutdown protection) |
+| 5 LEDs     | ≥ 4.05 V       | Blue |
+| 4 LEDs     | 4.05 – 3.92 V  | Green |
+| 3 LEDs     | 3.92 – 3.80 V  | Green |
+| 2 LEDs     | 3.80 – 3.68 V  | Yellow |
+| 1 LED      | 3.68 – 3.55 V  | Yellow |
+| 1 LED      | 3.55 – 3.40 V  | Red |
+| None       | < 3.40 V       | (very empty) |
 
 ---
 
@@ -136,7 +137,7 @@ As soon as an active USB serial connection exists, the CLI is available.
 - Show current values: `show`
 - Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`
 - Set single value:
-  - `set pattern <1..13>`
+  - `set pattern <1..14>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
   - `set smoothing <1..512>`
@@ -145,8 +146,8 @@ As soon as an active USB serial connection exists, the CLI is available.
   - `set boot_calibration <off|quick>`
 - Pattern selection:
   - `patterns`
-  - `enable_pattern <1..13[,id...]>`
-  - `disable_pattern <1..13[,id...]>`
+  - `enable_pattern <1..14[,id...]>`
+  - `disable_pattern <1..14[,id...]>`
 - Diagnostics:
   - `battery`
   - `sensor`

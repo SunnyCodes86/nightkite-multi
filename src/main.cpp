@@ -210,7 +210,7 @@ const int DEFAULT_X_GYRO_OFFSET = 111;
 const int DEFAULT_Y_GYRO_OFFSET = -6;
 const int DEFAULT_Z_GYRO_OFFSET = 34;
 const uint8_t FIRST_PATTERN_ID = 1;
-const uint8_t LAST_PATTERN_ID = 13;
+const uint8_t LAST_PATTERN_ID = 14;
 const uint8_t PATTERN_COUNT = LAST_PATTERN_ID - FIRST_PATTERN_ID + 1;
 const uint16_t ALL_ENABLED_PATTERN_MASK = (1u << PATTERN_COUNT) - 1u;
 
@@ -1503,7 +1503,7 @@ void printCliHelp()
   Serial.println("  help");
   Serial.println("  show");
   Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|enabled_patterns>");
-  Serial.println("  set pattern <1..13>");
+  Serial.println("  set pattern <1..14>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
   Serial.println("  set smoothing <1..512>           (takes effect after reboot)");
@@ -1511,8 +1511,8 @@ void printCliHelp()
   Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
   Serial.println("  set boot_calibration <off|quick>");
   Serial.println("  patterns");
-  Serial.println("  enable_pattern <1..13[,id...]>");
-  Serial.println("  disable_pattern <1..13[,id...]>");
+  Serial.println("  enable_pattern <1..14[,id...]>");
+  Serial.println("  disable_pattern <1..14[,id...]>");
   Serial.println("  battery");
   Serial.println("  sensor");
   Serial.println("  timing");
@@ -1613,7 +1613,7 @@ void onCliSet(cmd* cPtr)
   {
     if (!isValidPatternId(value))
     {
-      Serial.println("ERR pattern range 1..13");
+      Serial.println("ERR pattern range 1..14");
       return;
     }
     switchToPattern((uint8_t)value, true);
@@ -1855,7 +1855,7 @@ void onCliEnablePattern(cmd* cPtr)
   uint16_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..13");
+    Serial.println("ERR pattern list must contain IDs in range 1..14");
     return;
   }
 
@@ -1872,7 +1872,7 @@ void onCliDisablePattern(cmd* cPtr)
   uint16_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..13");
+    Serial.println("ERR pattern list must contain IDs in range 1..14");
     return;
   }
 
@@ -2508,6 +2508,59 @@ void RunEntry13()
 
 void running13()
 {
+  static float head = 0;
+  static float prevYaw = 0;
+  static int dir = +1;
+  static CRGB ringBuffer[MAX_TOTAL_LEDS];
+
+  float yaw = ypr[0];
+  float dy = yaw - prevYaw;
+  if (dy > M_PI) dy -= 2 * M_PI;
+  if (dy < -M_PI) dy += 2 * M_PI;
+  prevYaw = yaw;
+
+  float speed = dy * (TOTAL_LEDS * 0.5f);
+  const float DEAD_BAND = 0.02f;
+  if (speed > DEAD_BAND) dir = +1;
+  if (speed < -DEAD_BAND) dir = -1;
+
+  head += speed;
+  while (head >= TOTAL_LEDS) head -= TOTAL_LEDS;
+  while (head < 0) head += TOTAL_LEDS;
+
+  blur1d(ringBuffer, TOTAL_LEDS, 64);
+
+  uint8_t hue = map((int)(yaw * 180.0f / M_PI), -180, 180, 0, 255);
+  auto ringToLogicalIndex = [](int ringIndex) {
+    if (ringIndex < NUM_LEDS) {
+      return ringIndex;
+    }
+    return NUM_LEDS + (TOTAL_LEDS - 1 - ringIndex);
+  };
+
+  int h = (int)head;
+  ringBuffer[h] += CHSV(hue, 220, 255);
+
+  for (int i = 1; i <= 6; ++i) {
+    int p = (h - dir * i + TOTAL_LEDS) % TOTAL_LEDS;
+    ringBuffer[p].nscale8(230);
+  }
+
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  for (int ringIndex = 0; ringIndex < TOTAL_LEDS; ++ringIndex) {
+    Strip[ringToLogicalIndex(ringIndex)] = ringBuffer[ringIndex];
+  }
+}
+
+void RunEntry14()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 14;
+  batteryViewActive = false;
+}
+
+void running14()
+{
   color = map(color, -180, 180, 0, 255);
   color2 = map(color2, 180, -180, 0, 255);
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
@@ -2550,7 +2603,8 @@ const PatternDefinition patternDefinitions[] = {
     {10, "breath_storm", RunEntry10, running10, NULL},
     {11, "jerk_wave", RunEntry11, running11, NULL},
     {12, "yaw_spinner", RunEntry12, running12, NULL},
-    {13, "runner_dual_inverted", RunEntry13, running13, NULL},
+    {13, "yaw_spinner_circle", RunEntry13, running13, NULL},
+    {14, "runner_dual_inverted", RunEntry14, running14, NULL},
 };
 
 // Look up the callbacks and display name for a pattern ID.
