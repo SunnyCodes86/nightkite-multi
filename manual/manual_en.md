@@ -34,6 +34,8 @@ The NightKite Multi lighting system offers the following core features:
   Six selectable brightness levels (95 → 255 in steps of 32), which also affect battery life.
 - **Animation Patterns:**  
   22 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
+- **Autoplay:**  
+  Optional automatic cycling through enabled patterns with a configurable global interval.
 - **Battery Indicator:**  
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  
@@ -108,13 +110,15 @@ The right button is a **multi-function control**:
 
 - **Change Pattern / Animation (double-click):**  
   → Cycles through the 22 available animation patterns.
+- **Toggle Autoplay (double-click while the battery display is active):**  
+  → Turns autoplay on or off globally.
 - **Change Brightness (short press):**  
   → Only while the battery display is active.  
     Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
 - **Show Battery Level (hold):**  
   → Shows the battery level on the main strip.  
-    On the second strip, a blue marker LED flashes and yellow LEDs show the current brightness step (6 levels).  
-    Return to the previously active pattern happens 5 seconds after the last brightness change.
+    On the second strip, a blue marker LED flashes, yellow LEDs show the current brightness step (6 levels), and two additional status LEDs behind them show autoplay state (`green/green` = on, `red/red` = off).  
+    Return to the previously active pattern happens 5 seconds after the last interaction in the battery display.
 
 **Battery Level Scale (voltage-based):**
 
@@ -143,7 +147,7 @@ As soon as an active USB serial connection exists, the CLI is available.
 - Prompt: `nk>`
 - Help: `help`
 - Show current values: `show`
-- Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`
+- Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`, `get autoplay`, `get autoplay_interval`
 - Set single value:
   - `set pattern <1..22>`
   - `set brightness <95|127|159|191|223|255>`
@@ -152,6 +156,8 @@ As soon as an active USB serial connection exists, the CLI is available.
   - `set accel_range <2|4|8|16>`
   - `set gyro_range <250|500|1000|2000>`
   - `set boot_calibration <off|quick>`
+  - `set autoplay <on|off>`
+  - `set autoplay_interval <1..300>`
 - Pattern selection:
   - `patterns`
   - `enable_pattern <1..22[,id...]>`
@@ -175,10 +181,12 @@ As soon as an active USB serial connection exists, the CLI is available.
 Notes:
 - Data commands reply consistently with `OK ...` or `ERR ...`. Example: `OK pattern=1`.
 - `show` returns all relevant configuration values as a compact `key=value` line.
+- `show` also includes the current autoplay state and autoplay interval.
 - `patterns` lists all patterns with `on` or `off` state.
 - `strip_length` always applies to both strips together (symmetric).
 - `set pattern` switches the active pattern immediately.
 - `set pattern` can also select patterns that are currently disabled for button cycling.
+- A manual pattern change keeps autoplay enabled, but resets the autoplay timer.
 - `set brightness` takes effect immediately.
 - `set strip_length` applies immediately to both strips.
 - `enable_pattern` and `disable_pattern` control which patterns are included when cycling with the button.
@@ -187,6 +195,8 @@ Notes:
 - These commands also accept multiple pattern IDs as a comma-separated list, for example `invert_pattern 4,12,13`.
 - Not every pattern has a visually meaningful direction. On supported patterns, this option reverses the animation movement.
 - At least one pattern must always remain enabled.
+- Autoplay cycles only through enabled patterns.
+- Autoplay can be stored persistently and starts automatically after boot if it was saved as enabled.
 - `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` only take effect after reboot. The CLI marks this in the reply with `(applies after reboot)`.
 - `timing` reports `FastLED` FPS and `loop`/`work` times in microseconds.
 - `offsets` reports the currently active MPU offsets.
@@ -230,4 +240,4 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 ---
 
 **Quick Start Summary:**  
-`Power On → Hold Still (Calibration) → Double-Click = Pattern → Long Press = Battery Display → Short Press (in battery display) = Brightness`
+`Power On → Hold Still (Calibration) → Double-Click = Pattern → Long Press = Battery Display → Short Press (in battery display) = Brightness → Double-Click (in battery display) = Autoplay`

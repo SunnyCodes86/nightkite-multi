@@ -34,6 +34,8 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
   Sechs Helligkeitsstufen (95 → 255 in Schritten von 32), beeinflussen auch die Akkulaufzeit.
 - **Animations-Muster:**  
   22 vordefinierte Animations-Muster zur Anpassung des Erscheinungsbilds (ebenfalls Einfluss auf die Laufzeit).
+- **Autoplay:**  
+  Optionales automatisches Durchschalten durch aktivierte Pattern mit einstellbarem globalem Intervall.
 - **Ladestandsanzeige:**  
   Zeigt den aktuellen Akkustand direkt über das LED-Band an.
 - **Speicherfunktion:**  
@@ -108,13 +110,15 @@ Der rechte Button ist ein **Multifunktions-Button**:
 
 - **Muster / Animation wechseln (Doppelklick):**  
   → Zyklischer Wechsel zum nächsten der 22 Muster.
+- **Autoplay umschalten (Doppelklick in der Akkuanzeige):**  
+  → Schaltet Autoplay global ein oder aus.
 - **Helligkeitsstufe ändern (kurz drücken):**  
   → Nur während die Akkuanzeige aktiv ist.  
     Nächste der 6 Helligkeitsstufen: 95 → 127 → 159 → 191 → 223 → 255 → 95.
 - **Akkuladestand anzeigen (gedrückt halten):**  
   → Zeigt den Akkustand auf dem Haupt-Strip an.  
-    Auf dem zweiten Strip blinkt eine blaue LED-Marke; zusätzlich zeigen gelbe LEDs die aktuelle Helligkeitsstufe (6 Stufen) an.  
-    Die Rückkehr zum zuletzt aktiven Muster erfolgt 5 Sekunden nach der letzten Helligkeitsänderung.
+    Auf dem zweiten Strip blinkt eine blaue LED-Marke; zusätzlich zeigen gelbe LEDs die aktuelle Helligkeitsstufe (6 Stufen) an, und zwei weitere Status-LEDs dahinter zeigen den Autoplay-Status (`grün/grün` = an, `rot/rot` = aus).  
+    Die Rückkehr zum zuletzt aktiven Muster erfolgt 5 Sekunden nach der letzten Interaktion in der Akkuanzeige.
 
 **Skala der Akkuanzeige (Spannungsbasiert):**
 
@@ -143,7 +147,7 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 - Prompt: `nk>`
 - Hilfe: `help`
 - Aktuelle Werte: `show`
-- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`
+- Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`, `get autoplay`, `get autoplay_interval`
 - Einzelwert setzen:
   - `set pattern <1..22>`
   - `set brightness <95|127|159|191|223|255>`
@@ -152,6 +156,8 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `set accel_range <2|4|8|16>`
   - `set gyro_range <250|500|1000|2000>`
   - `set boot_calibration <off|quick>`
+  - `set autoplay <on|off>`
+  - `set autoplay_interval <1..300>`
 - Pattern-Auswahl:
   - `patterns`
   - `enable_pattern <1..22[,id...]>`
@@ -175,10 +181,12 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 Hinweise:
 - Daten-Kommandos antworten konsistent mit `OK ...` oder `ERR ...`. Beispiel: `OK pattern=1`.
 - `show` liefert alle relevanten Konfigurationswerte als kompakte `key=value`-Zeile.
+- `show` enthält auch den aktuellen Autoplay-Status und das Autoplay-Intervall.
 - `patterns` zeigt alle Pattern mit Status `on` oder `off`.
 - `strip_length` gilt immer für beide Strips gleichzeitig (symmetrisch).
 - `set pattern` schaltet das aktive Muster sofort um.
 - `set pattern` darf auch deaktivierte Pattern direkt anwählen.
+- Ein manueller Patternwechsel lässt Autoplay aktiv, setzt aber den Autoplay-Timer zurück.
 - `set brightness` wirkt sofort.
 - `set strip_length` wirkt sofort auf beide Strips.
 - `enable_pattern` und `disable_pattern` steuern, welche Pattern per Doppelklick durchgeschaltet werden.
@@ -187,6 +195,8 @@ Hinweise:
 - Auch diese beiden Befehle akzeptieren mehrere Pattern gleichzeitig als kommagetrennte Liste, z. B. `invert_pattern 4,12,13`.
 - Nicht jedes Pattern besitzt eine sichtbare Laufrichtung. Bei unterstützten Patterns kehrt die Option die Bewegungsrichtung um.
 - Es muss immer mindestens ein Pattern aktiv bleiben.
+- Autoplay verwendet nur aktivierte Pattern.
+- Autoplay kann persistent gespeichert werden und startet nach dem Booten automatisch, wenn es gespeichert eingeschaltet war.
 - `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart. Die CLI kennzeichnet das in der Antwort mit `(applies after reboot)`.
 - `timing` zeigt `FastLED`-FPS sowie `loop`-/`work`-Zeiten in Mikrosekunden.
 - `offsets` zeigt die aktuell verwendeten MPU-Offsets.
@@ -230,4 +240,4 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 ---
 
 **Kurzüberblick für den schnellen Einstieg:**  
-`Einschalten → ruhig halten (Kalibrierung) → Doppelklick = Muster → Langdruck = Akkuanzeige → Kurztipp (in Akkuanzeige) = Helligkeit`
+`Einschalten → ruhig halten (Kalibrierung) → Doppelklick = Muster → Langdruck = Akkuanzeige → Kurztipp (in Akkuanzeige) = Helligkeit → Doppelklick (in Akkuanzeige) = Autoplay`

@@ -9,9 +9,10 @@ Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die 
 ### Features
 
 * Helligkeit in 6 Stufen (95 → 255 in Schritten von 32) einstellbar – beeinflusst die Akkulaufzeit
-* 13 reaktionsfreudige Patterns/Animationen, teilweise bewegungsabhängig
+* 22 Patterns/Animationen, teilweise bewegungsabhängig
+* Autoplay zum automatischen Durchschalten durch aktivierte Pattern mit global einstellbarem Intervall
 * Ladestandsanzeige über das LED-Band inkl. Ladefortschritt während USB-Verbindung
-* Persistente Konfiguration in EEPROM: Pattern, Helligkeit, Strip-Länge, Motion-Smoothing, Sensor-Range, Boot-Kalibrierung und MPU-Offsets
+* Persistente Konfiguration in EEPROM: Pattern, Helligkeit, Strip-Länge, Motion-Smoothing, Sensor-Range, Boot-Kalibrierung, aktivierte/invertierte Pattern, Autoplay und MPU-Offsets
 * USB-CLI für Status, Diagnose, Timing und Kalibrierung
 
 ### Verwendete Technologien und Komponenten
@@ -56,7 +57,7 @@ Die folgende Tabelle zeigt die Verbindungen zwischen dem Pimoroni Pico Lipo, dem
 
 Das System wird über einen integrierten 500mAh LiPo Akku betrieben. Der Pimoroni Pico Lipo verfügt über ein integriertes Akku-Management, das ein sicheres Laden und Entladen des Akkus gewährleistet.
 
-**Aufladen:** Das Aufladen erfolgt bequem über den USB-C Anschluss am Mikrocontroller. Während des Ladevorgangs zeigt das LED-Band den Ladefortschritt als Balken, eine rote LED blinkt zur Bestätigung. Voll geladen bedeutet fünf blaue LEDs und die rote Status-LED erlischt.
+**Aufladen:** Das Aufladen erfolgt bequem über den USB-C Anschluss am Mikrocontroller. Während des Ladevorgangs zeigt das LED-Band den Ladefortschritt als Balken, eine rote LED blinkt zur Bestätigung. Voll geladen bedeutet fünf blaue LEDs und die rote Status-LED erlischt erst nahe der vollen Zellspannung (Firmware-Schwelle aktuell: ≥ 4.20 V).
 
 **Laufzeit:** Die Akkulaufzeit beträgt, abhängig von der gewählten LED-Animation und der Helligkeit, zwischen 1 und 2,5 Stunden. Nach dem Abziehen vom USB springt das System automatisch zurück zum zuletzt aktiven Muster.
 
@@ -65,10 +66,11 @@ Das System wird über einen integrierten 500mAh LiPo Akku betrieben. Der Pimoron
 Der Controller verfügt über zwei Tasten:
 
 * **Linker Button:** Schaltet den Controller ein und aus.
-* **Rechter Button:** Hat drei Funktionen:
-    * **Doppelklick (2x kurz hintereinander):** Schaltet zyklisch durch die 13 Animationsmuster.
-    * **Kurz drücken (Shortpress):** Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95).
-    * **Gedrückt halten (Longpress):** Zeigt für 5 Sekunden den Akkuladestand an. Bis zu fünf LEDs dienen als Balkenanzeige; eine blaue Markierung blinkt während der Messung.
+* **Rechter Button:** Hat mehrere Funktionen:
+    * **Doppelklick (2x kurz hintereinander):** Schaltet im normalen Betrieb zyklisch durch die 22 Animationsmuster.
+    * **Kurz drücken (Shortpress):** Nur in der Akkuanzeige. Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95).
+    * **Gedrückt halten (Longpress):** Öffnet die Akkuanzeige. Bis zu fünf LEDs dienen als Balkenanzeige; auf dem zweiten Strip blinkt eine blaue Markierung, gelbe LEDs zeigen die Helligkeitsstufe, und zwei weitere Status-LEDs zeigen Autoplay (`grün/grün` = an, `rot/rot` = aus).
+    * **Doppelklick in der Akkuanzeige:** Schaltet Autoplay global ein oder aus.
 
 **Initialisierung & Speicherfunktion:** Nach dem Einschalten lädt der Controller die gespeicherte Konfiguration und führt standardmäßig eine kurze MPU6050-Quick-Kalibrierung durch. Während dieser Phase (einige Sekunden) sollte der Controller ruhig gehalten werden. Die Boot-Kalibrierung kann über die CLI deaktiviert werden. Sobald die Initialisierung abgeschlossen ist, schalten sich die LEDs ein. Die zuletzt gespeicherten Werte werden automatisch geladen.
 
@@ -122,16 +124,21 @@ Verfügbare Kommandos:
 help
 show
 get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
-set pattern <1..13>
+get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|autoplay|autoplay_interval|enabled_patterns|inverted_patterns>
+set pattern <1..22>
 set brightness <95|127|159|191|223|255>
 set strip_length <10..35>
 set smoothing <1..512>
 set accel_range <2|4|8|16>
 set gyro_range <250|500|1000|2000>
 set boot_calibration <off|quick>
+set autoplay <on|off>
+set autoplay_interval <1..300>
 patterns
-enable_pattern <1..13[,id...]>
-disable_pattern <1..13[,id...]>
+enable_pattern <1..22[,id...]>
+disable_pattern <1..22[,id...]>
+invert_pattern <1..22[,id...]>
+normal_pattern <1..22[,id...]>
 battery
 sensor
 timing
@@ -149,14 +156,18 @@ Hinweise:
 
 * Daten-/Konfigurationskommandos antworten konsistent mit `OK ...` oder `ERR ...`, zum Beispiel `OK pattern=1`.
 * `show` liefert alle relevanten Konfigurationswerte als kompakte `key=value`-Zeile.
+* `show` enthält auch `autoplay`, `autoplay_interval`, `enabled_patterns` und `inverted_patterns`.
 * `patterns` zeigt alle Pattern mit Status `on` oder `off`.
 * `set pattern` schaltet das aktive Muster sofort um.
 * `set pattern` darf auch deaktivierte Pattern direkt anwählen.
+* Ein manueller Patternwechsel lässt Autoplay aktiv, setzt aber den Autoplay-Timer zurück.
 * `set brightness` wirkt sofort.
 * `set strip_length` wirkt sofort auf beide Strips.
 * `enable_pattern` und `disable_pattern` steuern, welche Pattern per Doppelklick durchgeschaltet werden.
 * Beide Befehle akzeptieren auch mehrere Pattern gleichzeitig als kommagetrennte Liste, z. B. `disable_pattern 3,5,7`.
+* `invert_pattern` und `normal_pattern` steuern die Laufrichtung pro Pattern und speichern diese Einstellung persistent.
 * Es muss immer mindestens ein Pattern aktiv bleiben.
+* Autoplay verwendet nur aktivierte Pattern und kann persistent gespeichert werden.
 * `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` werden persistent gespeichert, greifen aber erst nach einem Neustart.
 * `battery` zeigt den ADC-Rohwert, die berechnete Spannung sowie USB-/Serial-Status.
 * `sensor` zeigt MPU-/DMP-Status und die konfigurierten bzw. aktiven Sensor-Ranges.
@@ -196,9 +207,10 @@ This project implements dynamic LED lighting for kites that reacts to their move
 ### Features
 
 * Six brightness levels (95 → 255 in steps of 32) impact the battery runtime
-* 13 motion-reactive patterns/animations with mirrored dual-strip output
+* 22 patterns/animations with mirrored dual-strip output
+* Autoplay for automatic cycling through enabled patterns with a configurable global interval
 * Battery level indicator on the LED strip including charging progress while on USB power
-* Persistent EEPROM configuration for pattern, brightness, strip length, motion smoothing, sensor ranges, boot calibration, and MPU offsets
+* Persistent EEPROM configuration for pattern, brightness, strip length, motion smoothing, sensor ranges, boot calibration, enabled/inverted patterns, autoplay, and MPU offsets
 * USB CLI for configuration, diagnostics, timing, and calibration
 
 ### Used Technologies and Components
@@ -243,7 +255,7 @@ The following table shows the connections between the Pimoroni Pico Lipo, the LE
 
 The system is powered by an integrated 500mAh LiPo battery. The Pimoroni Pico Lipo features integrated battery management, ensuring safe charging and discharging of the battery.
 
-**Charging:** Charging is done via the USB-C port on the microcontroller. While charging, the LED strip displays a progress bar and a red LED blinks to indicate active charging. When five blue LEDs remain and the red LED switches off, the battery is fully charged.
+**Charging:** Charging is done via the USB-C port on the microcontroller. While charging, the LED strip displays a progress bar and a red LED blinks to indicate active charging. The battery is treated as full only near full cell voltage (current firmware threshold: ≥ 4.20 V), at which point five blue LEDs remain and the red status LED switches off.
 
 **Runtime:** Battery runtime is between 1 and 2.5 hours, depending on the selected LED animation and brightness. After unplugging USB power the controller automatically resumes the last active pattern.
 
@@ -252,10 +264,11 @@ The system is powered by an integrated 500mAh LiPo battery. The Pimoroni Pico Li
 The controller has two buttons:
 
 * **Left Button:** Turns the controller on and off.
-* **Right Button:** Provides three functions:
-    * **Double click (two quick presses):** Cycles through the 13 animation patterns.
-    * **Short press:** Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95).
-    * **Long press:** Shows the battery level for 5 seconds. Up to five LEDs form a bar indicator while a blue marker LED blinks during the readout.
+* **Right Button:** Provides multiple functions:
+    * **Double click (two quick presses):** In normal operation, cycles through the 22 animation patterns.
+    * **Short press:** Only in battery display mode. Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95).
+    * **Long press:** Opens the battery display. Up to five LEDs form a bar indicator; on the second strip a blue marker LED blinks, yellow LEDs show brightness level, and two additional status LEDs show autoplay (`green/green` = on, `red/red` = off).
+    * **Double click in battery display:** Toggles autoplay globally.
 
 **Initialization & Persistence:** After power-on, the controller loads the stored configuration and by default performs a short MPU6050 quick calibration. Keep the controller still for a few seconds during this phase. Boot calibration can be disabled via the CLI. Once initialization is complete, the LEDs turn on and the stored configuration is restored automatically.
 
@@ -308,17 +321,21 @@ Available commands:
 ```text
 help
 show
-get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
-set pattern <1..13>
+get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|autoplay|autoplay_interval|enabled_patterns|inverted_patterns>
+set pattern <1..22>
 set brightness <95|127|159|191|223|255>
 set strip_length <10..35>
 set smoothing <1..512>
 set accel_range <2|4|8|16>
 set gyro_range <250|500|1000|2000>
 set boot_calibration <off|quick>
+set autoplay <on|off>
+set autoplay_interval <1..300>
 patterns
-enable_pattern <1..13[,id...]>
-disable_pattern <1..13[,id...]>
+enable_pattern <1..22[,id...]>
+disable_pattern <1..22[,id...]>
+invert_pattern <1..22[,id...]>
+normal_pattern <1..22[,id...]>
 battery
 sensor
 timing
@@ -336,14 +353,18 @@ Notes:
 
 * Data/config commands reply consistently with `OK ...` or `ERR ...`, for example `OK pattern=1`.
 * `show` returns all relevant configuration values as a compact `key=value` line.
+* `show` also includes `autoplay`, `autoplay_interval`, `enabled_patterns`, and `inverted_patterns`.
 * `patterns` lists all patterns with `on` or `off` state.
 * `set pattern` switches the active pattern immediately.
 * `set pattern` can also select patterns that are currently disabled for button cycling.
+* A manual pattern change keeps autoplay enabled, but resets the autoplay timer.
 * `set brightness` takes effect immediately.
 * `set strip_length` applies immediately to both strips.
 * `enable_pattern` and `disable_pattern` control which patterns are included when cycling with the button.
 * Both commands also accept multiple pattern IDs as a comma-separated list, for example `disable_pattern 3,5,7`.
+* `invert_pattern` and `normal_pattern` control per-pattern animation direction and store that setting persistently.
 * At least one pattern must always remain enabled.
+* Autoplay uses only enabled patterns and can be stored persistently.
 * `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` are stored persistently but only take effect after reboot.
 * `battery` reports raw ADC value, calculated voltage, and USB/serial status.
 * `sensor` reports MPU/DMP status and both configured and active sensor ranges.
