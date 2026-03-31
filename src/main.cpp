@@ -161,11 +161,13 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_MAGIC           (sizeof(int) * 13)
 #define EEPROM_ADDR_ENABLED_PATTERNS (sizeof(int) * 14)
 #define EEPROM_ADDR_INVERTED_PATTERNS (sizeof(int) * 15)
+#define EEPROM_ADDR_AUTOPLAY_ENABLED (sizeof(int) * 16)
+#define EEPROM_ADDR_AUTOPLAY_INTERVAL_MS (sizeof(int) * 17)
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 
 // Size of emulated EEPROM.
 // Must cover all persisted ints plus the enabled/inverted pattern bitmasks.
-#define EEPROM_SIZE 64 // 64 Bytes leaves a little headroom
+#define EEPROM_SIZE 80 // 80 Bytes leaves a little headroom
 
 // Persisted configuration values.
 int currentPattern = 1;
@@ -183,6 +185,8 @@ int currentYGyroOffset = -6;
 int currentZGyroOffset = 34;
 uint32_t currentEnabledPatternMask = 0;
 uint32_t currentInvertedPatternMask = 0;
+int currentAutoplayEnabled = 0;
+int currentAutoplayIntervalMs = 20000;
 
 // Last values written to EEPROM.
 // Used to avoid unnecessary flash writes.
@@ -201,6 +205,8 @@ int lastSavedYGyroOffset = -6;
 int lastSavedZGyroOffset = 34;
 uint32_t lastSavedEnabledPatternMask = 0;
 uint32_t lastSavedInvertedPatternMask = 0;
+int lastSavedAutoplayEnabled = 0;
+int lastSavedAutoplayIntervalMs = 20000;
 
 const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
 const int MIN_MOTION_SMOOTHING_SIZE = 1;
@@ -209,6 +215,10 @@ const int MAX_MOTION_SMOOTHING_SIZE = 512;
 const int DEFAULT_ACCEL_RANGE = 2;
 const int DEFAULT_GYRO_RANGE = 2000;
 const int DEFAULT_BOOT_CALIBRATION_MODE = 1;
+const int DEFAULT_AUTOPLAY_ENABLED = 0;
+const int DEFAULT_AUTOPLAY_INTERVAL_MS = 20000;
+const int MIN_AUTOPLAY_INTERVAL_MS = 1000;
+const int MAX_AUTOPLAY_INTERVAL_MS = 300000;
 
 const int BOOT_CALIBRATION_MODE_OFF = 0;
 const int BOOT_CALIBRATION_MODE_QUICK = 1;
@@ -305,6 +315,8 @@ unsigned long currentMillis = 0;
 bool blinkState;
 bool blink;
 bool batteryViewActive = false;
+unsigned long autoplayLastSwitchMs = 0;
+bool autoplayWasPaused = false;
 uint32_t lastLoopDurationUs = 0;
 uint32_t maxLoopDurationUs = 0;
 uint32_t lastWorkDurationUs = 0;
@@ -380,6 +392,13 @@ void applyConfiguredMotionSmoothing();
 void applyConfiguredSensorRanges();
 void applyConfiguredOffsets();
 void syncConfiguredOffsetsFromMPU();
+int sanitizeAutoplayEnabled(int value);
+int sanitizeAutoplayIntervalMs(int value);
+void resetAutoplayTimer();
+bool isAutoplayEnabled();
+const char* autoplayEnabledToString();
+int parseOnOffValue(String valueText);
+void announcePatternChange(const char* source);
 void printOffsets();
 void printOffsetsWithPrefix(const char* prefix);
 void printConfigSummaryWithPrefix(const char* prefix);
@@ -610,8 +629,60 @@ void applyConfiguredStripLength()
 void applyPersistentConfig()
 {
   applyConfiguredStripLength();
+  currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
+  currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
+  resetAutoplayTimer();
+}
+
+int sanitizeAutoplayEnabled(int value)
+{
+  return value != 0 ? 1 : 0;
+}
+
+int sanitizeAutoplayIntervalMs(int value)
+{
+  return constrain(value, MIN_AUTOPLAY_INTERVAL_MS, MAX_AUTOPLAY_INTERVAL_MS);
+}
+
+void resetAutoplayTimer()
+{
+  autoplayLastSwitchMs = millis();
+  autoplayWasPaused = false;
+}
+
+bool isAutoplayEnabled()
+{
+  return currentAutoplayEnabled != 0;
+}
+
+const char* autoplayEnabledToString()
+{
+  return isAutoplayEnabled() ? "on" : "off";
+}
+
+int parseOnOffValue(String valueText)
+{
+  valueText.trim();
+  valueText.toLowerCase();
+  if (valueText == "on")
+  {
+    return 1;
+  }
+  if (valueText == "off")
+  {
+    return 0;
+  }
+  return -1;
+}
+
+void announcePatternChange(const char* source)
+{
+  Serial.print("INFO pattern_changed source=");
+  Serial.print(source != NULL ? source : "unknown");
+  Serial.print(" pattern=");
+  Serial.println(currentPattern);
 }
 
 void applyConfiguredMotionSmoothing()
@@ -726,6 +797,10 @@ void printConfigSummaryWithPrefix(const char* prefix)
   Serial.print(currentGyroRange);
   Serial.print(" boot_calibration=");
   Serial.print(bootCalibrationModeToString(currentBootCalibrationMode));
+  Serial.print(" autoplay=");
+  Serial.print(autoplayEnabledToString());
+  Serial.print(" autoplay_interval=");
+  Serial.print(currentAutoplayIntervalMs / 1000);
   Serial.print(" enabled_patterns=");
   printEnabledPatternsList();
   Serial.print(" inverted_patterns=");
@@ -1143,6 +1218,9 @@ void normalizePersistentConfig()
   {
     currentBootCalibrationMode = DEFAULT_BOOT_CALIBRATION_MODE;
   }
+
+  currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
+  currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
 }
 
 bool isValidPatternId(int value)
@@ -1206,7 +1284,7 @@ bool setPatternEnabled(uint8_t patternId, bool enabled)
   }
   else
   {
-    nextMask &= (uint16_t)~bit;
+    nextMask &= (uint32_t)~bit;
     if (nextMask == 0)
     {
       return false;
@@ -1276,7 +1354,7 @@ bool updateEnabledPatternsFromMask(uint32_t mask, bool enabled)
   }
   else
   {
-    nextMask &= (uint16_t)~mask;
+    nextMask &= (uint32_t)~mask;
     if (nextMask == 0)
     {
       return false;
@@ -1445,6 +1523,8 @@ bool saveConfigToEEPROM(bool verbose)
   EEPROM.put(EEPROM_ADDR_MAGIC, EEPROM_MAGIC);
   EEPROM.put(EEPROM_ADDR_ENABLED_PATTERNS, currentEnabledPatternMask);
   EEPROM.put(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
+  EEPROM.put(EEPROM_ADDR_AUTOPLAY_ENABLED, currentAutoplayEnabled);
+  EEPROM.put(EEPROM_ADDR_AUTOPLAY_INTERVAL_MS, currentAutoplayIntervalMs);
 
   if (verbose)
   {
@@ -1462,6 +1542,10 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.println(currentGyroRange);
     Serial.print("Boot calibration: ");
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    Serial.print("Autoplay: ");
+    Serial.println(autoplayEnabledToString());
+    Serial.print("Autoplay interval (s): ");
+    Serial.println(currentAutoplayIntervalMs / 1000);
     Serial.print("Enabled patterns: ");
     printEnabledPatternsList();
     Serial.println();
@@ -1488,6 +1572,8 @@ bool saveConfigToEEPROM(bool verbose)
     lastSavedZGyroOffset = currentZGyroOffset;
     lastSavedEnabledPatternMask = currentEnabledPatternMask;
     lastSavedInvertedPatternMask = currentInvertedPatternMask;
+    lastSavedAutoplayEnabled = currentAutoplayEnabled;
+    lastSavedAutoplayIntervalMs = currentAutoplayIntervalMs;
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -1520,6 +1606,8 @@ void readConfigFromEEPROM(bool verbose)
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
   currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
   currentInvertedPatternMask = 0;
+  currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
+  currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
 
   EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
   EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
@@ -1539,6 +1627,8 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_Z_GYRO_OFFSET, currentZGyroOffset);
     EEPROM.get(EEPROM_ADDR_ENABLED_PATTERNS, currentEnabledPatternMask);
     EEPROM.get(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
+    EEPROM.get(EEPROM_ADDR_AUTOPLAY_ENABLED, currentAutoplayEnabled);
+    EEPROM.get(EEPROM_ADDR_AUTOPLAY_INTERVAL_MS, currentAutoplayIntervalMs);
   }
   normalizePersistentConfig();
   lastSavedPattern = currentPattern;
@@ -1556,6 +1646,8 @@ void readConfigFromEEPROM(bool verbose)
   lastSavedZGyroOffset = currentZGyroOffset;
   lastSavedEnabledPatternMask = currentEnabledPatternMask;
   lastSavedInvertedPatternMask = currentInvertedPatternMask;
+  lastSavedAutoplayEnabled = currentAutoplayEnabled;
+  lastSavedAutoplayIntervalMs = currentAutoplayIntervalMs;
 
   if (magic != EEPROM_MAGIC)
   {
@@ -1579,6 +1671,10 @@ void readConfigFromEEPROM(bool verbose)
     Serial.println(currentGyroRange);
     Serial.print("Boot calibration: ");
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
+    Serial.print("Autoplay: ");
+    Serial.println(autoplayEnabledToString());
+    Serial.print("Autoplay interval (s): ");
+    Serial.println(currentAutoplayIntervalMs / 1000);
     Serial.print("Enabled patterns: ");
     printEnabledPatternsList();
     Serial.println();
@@ -1594,7 +1690,7 @@ void printCliHelp()
   Serial.println("Commands:");
   Serial.println("  help");
   Serial.println("  show");
-  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|enabled_patterns|inverted_patterns>");
+  Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|autoplay|autoplay_interval|enabled_patterns|inverted_patterns>");
   Serial.println("  set pattern <1..22>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
@@ -1602,6 +1698,8 @@ void printCliHelp()
   Serial.println("  set accel_range <2|4|8|16>       (takes effect after reboot)");
   Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
   Serial.println("  set boot_calibration <off|quick>");
+  Serial.println("  set autoplay <on|off>");
+  Serial.println("  set autoplay_interval <1..300>");
   Serial.println("  patterns");
   Serial.println("  enable_pattern <1..22[,id...]>");
   Serial.println("  disable_pattern <1..22[,id...]>");
@@ -1684,6 +1782,18 @@ void onCliGet(cmd* cPtr)
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
     return;
   }
+  if (key == "autoplay")
+  {
+    Serial.print("OK autoplay=");
+    Serial.println(autoplayEnabledToString());
+    return;
+  }
+  if (key == "autoplay_interval")
+  {
+    Serial.print("OK autoplay_interval=");
+    Serial.println(currentAutoplayIntervalMs / 1000);
+    return;
+  }
   if (key == "enabled_patterns")
   {
     Serial.print("OK enabled_patterns=");
@@ -1718,6 +1828,7 @@ void onCliSet(cmd* cPtr)
       return;
     }
     switchToPattern((uint8_t)value, true);
+    announcePatternChange("cli");
     Serial.print("OK pattern=");
     Serial.println(currentPattern);
     return;
@@ -1816,6 +1927,36 @@ void onCliSet(cmd* cPtr)
     Serial.println(bootCalibrationModeToString(currentBootCalibrationMode));
     return;
   }
+  if (key == "autoplay")
+  {
+    int autoplayValue = parseOnOffValue(valueText);
+    if (autoplayValue < 0)
+    {
+      Serial.println("ERR autoplay must be 'on' or 'off'");
+      return;
+    }
+
+    currentAutoplayEnabled = sanitizeAutoplayEnabled(autoplayValue);
+    resetAutoplayTimer();
+    Serial.print("OK autoplay=");
+    Serial.println(autoplayEnabledToString());
+    return;
+  }
+  if (key == "autoplay_interval")
+  {
+    int intervalMs = value * 1000;
+    if (intervalMs < MIN_AUTOPLAY_INTERVAL_MS || intervalMs > MAX_AUTOPLAY_INTERVAL_MS)
+    {
+      Serial.println("ERR autoplay_interval range 1..300");
+      return;
+    }
+
+    currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(intervalMs);
+    resetAutoplayTimer();
+    Serial.print("OK autoplay_interval=");
+    Serial.println(currentAutoplayIntervalMs / 1000);
+    return;
+  }
 
   Serial.println("ERR unknown key");
 }
@@ -1857,7 +1998,10 @@ void onCliDefaults(cmd* cPtr)
   currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
   currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
   currentInvertedPatternMask = 0;
+  currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
+  currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
   applyPersistentConfig();
+  resetAutoplayTimer();
   batteryViewLastInteractionMs = millis();
   printConfigSummaryWithPrefix("OK defaults=1 saved=0 reboot_required=1 ");
 }
@@ -2263,6 +2407,17 @@ else if (Voltage >= BATTERY_BAR_2_THRESHOLD)       fill_solid(Strip, min(2, batt
 else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
 else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)   fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
+
+int autoplayStatusPixel = statusStart + 1 + brightnessPixels;
+if (autoplayStatusPixel < TOTAL_LEDS)
+{
+  CRGB statusColor = isAutoplayEnabled() ? CRGB::Green : CRGB::Red;
+  Strip[autoplayStatusPixel] = statusColor;
+  if ((autoplayStatusPixel + 1) < TOTAL_LEDS)
+  {
+    Strip[autoplayStatusPixel + 1] = statusColor;
+  }
+}
 }
 
 void RunEntry()
@@ -3181,6 +3336,7 @@ void switchToPattern(uint8_t patternId, bool activatePatternState)
   if (patternCurrentlyActive && previousPattern == patternId && !activatePatternState)
   {
     // Avoid needless reinitialization when only one enabled pattern exists.
+    resetAutoplayTimer();
     batteryViewLastInteractionMs = millis();
     return;
   }
@@ -3191,6 +3347,7 @@ void switchToPattern(uint8_t patternId, bool activatePatternState)
   }
 
   currentPattern = patternId;
+  resetAutoplayTimer();
   batteryViewLastInteractionMs = millis();
 
   if (activatePatternState)
@@ -3529,7 +3686,9 @@ void loop()
             currentYGyroOffset != lastSavedYGyroOffset ||
             currentZGyroOffset != lastSavedZGyroOffset ||
             currentEnabledPatternMask != lastSavedEnabledPatternMask ||
-            currentInvertedPatternMask != lastSavedInvertedPatternMask) {
+            currentInvertedPatternMask != lastSavedInvertedPatternMask ||
+            currentAutoplayEnabled != lastSavedAutoplayEnabled ||
+            currentAutoplayIntervalMs != lastSavedAutoplayIntervalMs) {
             // At least one value changed.
             Serial.println("Values have changed. Saving new values to EEPROM...");
             saveConfigToEEPROM(true);
@@ -3594,9 +3753,18 @@ void loop()
 
   if (multiresponseButton.doubleClick())
   {
-    if (!batteryViewActive && !UsbConnected)
+    if (batteryViewActive)
+    {
+      currentAutoplayEnabled = isAutoplayEnabled() ? 0 : 1;
+      resetAutoplayTimer();
+      batteryViewLastInteractionMs = millis();
+      Serial.print("INFO autoplay=");
+      Serial.println(autoplayEnabledToString());
+    }
+    else if (!UsbConnected)
     {
       switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
+      announcePatternChange("button");
     }
     // Serial.println("doubleclick");
   }
@@ -3620,6 +3788,31 @@ void loop()
     FastLED.setBrightness(BRIGHTNESS);
     currentBrightness = BRIGHTNESS;
     batteryViewLastInteractionMs = millis();
+  }
+
+  const bool autoplayPaused = batteryViewActive || UsbConnected;
+  if (isAutoplayEnabled())
+  {
+    if (autoplayPaused)
+    {
+      autoplayWasPaused = true;
+    }
+    else
+    {
+      if (autoplayWasPaused)
+      {
+        resetAutoplayTimer();
+      }
+      if (millis() - autoplayLastSwitchMs >= (unsigned long)currentAutoplayIntervalMs)
+      {
+        switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
+        announcePatternChange("autoplay");
+      }
+    }
+  }
+  else
+  {
+    autoplayWasPaused = false;
   }
 
   lastLoopDurationUs = micros() - loopStartUs;
