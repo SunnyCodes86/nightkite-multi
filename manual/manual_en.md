@@ -33,7 +33,7 @@ The NightKite Multi lighting system offers the following core features:
 - **Brightness Levels:**  
   Six selectable brightness levels (95 → 255 in steps of 32), which also affect battery life.
 - **Animation Patterns:**  
-  14 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
+  22 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
 - **Battery Indicator:**  
   Displays the current battery level directly via the LED strip.
 - **Memory Function:**  
@@ -45,7 +45,7 @@ The NightKite Multi lighting system offers the following core features:
 
 ### 1.1. Animation Patterns in Detail
 
-The NightKite Multi (v2.1) includes 14 predefined animation patterns that can be changed with a double-click.  
+The NightKite Multi (v2.1) includes 22 predefined animation patterns that can be changed with a double-click.  
 After powering on and calibration, the controller starts with the last used pattern and brightness level.  
 On first startup: **Pattern ID 1**, **Brightness 95**.
 
@@ -65,6 +65,14 @@ On first startup: **Pattern ID 1**, **Brightness 95**.
 12. **Yaw Spinner (with direction memory):** Light head with blurred trail follows yaw rate with small dead zone to prevent flicker; color = angle.  
 13. **Yaw Spinner Circle:** Variant of (12) where the light head appears to travel in a circular loop across both strips. Direction still follows yaw rate; color = angle.  
 14. **LED Runner (dual-color, reactive, inverted):** Like (6), but with inverted running direction.
+15. **Palette Beat Motion:** A pulsing palette pattern inspired by FastLED PaletteBeat. Yaw sets the base color family, movement intensity changes pulse rate and palette spread, and yaw movement nudges the apparent flow direction.
+16. **Pacifica Kite:** Layered ocean-like waves with soft whitecaps. Motion increases wave energy; yaw shifts the cool color family.
+17. **Twinkle Motion:** Soft star-like twinkles on a dim base glow. Motion increases twinkle density and brightness.
+18. **Fire Jet:** Fire-like energy building from the center and spreading through the strip. Motion controls spark intensity.
+19. **Noise Ring:** Flowing noise-based ring texture with palette movement driven by motion and yaw.
+20. **Pride Yaw:** Smooth, saturated flowing rainbow bands with yaw-based hue offset and motion-dependent pace.
+21. **Confetti Jerk:** Calm glow with bursts of bright confetti when the kite gets sharp motion impulses.
+22. **Center Ripple:** Clear ripple waves starting from the middle and running outward after motion impulses.
 
 ---
 
@@ -99,7 +107,7 @@ The controller has two buttons: **left** and **right**.
 The right button is a **multi-function control**:
 
 - **Change Pattern / Animation (double-click):**  
-  → Cycles through the 14 available animation patterns.
+  → Cycles through the 22 available animation patterns.
 - **Change Brightness (short press):**  
   → Only while the battery display is active.  
     Switches through the six brightness levels: 95 → 127 → 159 → 191 → 223 → 255 → 95.
@@ -137,7 +145,7 @@ As soon as an active USB serial connection exists, the CLI is available.
 - Show current values: `show`
 - Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`
 - Set single value:
-  - `set pattern <1..14>`
+  - `set pattern <1..22>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
   - `set smoothing <1..512>`
@@ -146,10 +154,10 @@ As soon as an active USB serial connection exists, the CLI is available.
   - `set boot_calibration <off|quick>`
 - Pattern selection:
   - `patterns`
-  - `enable_pattern <1..14[,id...]>`
-  - `disable_pattern <1..14[,id...]>`
-  - `invert_pattern <1..14[,id...]>`
-  - `normal_pattern <1..14[,id...]>`
+  - `enable_pattern <1..22[,id...]>`
+  - `disable_pattern <1..22[,id...]>`
+  - `invert_pattern <1..22[,id...]>`
+  - `normal_pattern <1..22[,id...]>`
 - Diagnostics:
   - `battery`
   - `sensor`
@@ -197,7 +205,7 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 - **Charging Indicator:** While charging, the LED strip shows the charge level as a bar;  
   a red LED blinks during the active charging process.  
 - **USB CLI active:** While a serial session is active, the charging display is suppressed so CLI usage stays predictable.  
-- **Fully Charged:** When five blue LEDs are lit (≥ 4.2 V), the battery is full and the red LED turns off.  
+- **Fully Charged:** The charging display switches to five blue LEDs only near full cell voltage (firmware threshold: ≥ 4.20 V, approx. 4.2 V); then the red LED turns off.  
 - **Automatic Return:** After disconnecting USB, the system automatically returns to the last active pattern.  
 - **Runtime:** Typically between 1 – 2.5 hours depending on brightness and pattern.
 

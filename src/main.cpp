@@ -107,6 +107,14 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // MPU interrupt input pin
 #define DEFAULT_LEDS_PER_STRIP 25
 #define MAX_TOTAL_LEDS (MAX_LEDS_PER_STRIP * 2)
 
+constexpr float BATTERY_BAR_5_THRESHOLD = 4.05f;
+constexpr float BATTERY_BAR_4_THRESHOLD = 3.92f;
+constexpr float BATTERY_BAR_3_THRESHOLD = 3.80f;
+constexpr float BATTERY_BAR_2_THRESHOLD = 3.68f;
+constexpr float BATTERY_BAR_1_YELLOW_THRESHOLD = 3.55f;
+constexpr float BATTERY_BAR_1_RED_THRESHOLD = 3.40f;
+constexpr float CHARGING_FULL_THRESHOLD = 4.20f;
+
 int ledsPerStrip = DEFAULT_LEDS_PER_STRIP;
 int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // total logical LEDs across both strips
 int halfLeds = DEFAULT_LEDS_PER_STRIP; // LEDs per strip
@@ -173,8 +181,8 @@ int currentZAccelOffset = 3687;
 int currentXGyroOffset = 111;
 int currentYGyroOffset = -6;
 int currentZGyroOffset = 34;
-uint16_t currentEnabledPatternMask = 0;
-uint16_t currentInvertedPatternMask = 0;
+uint32_t currentEnabledPatternMask = 0;
+uint32_t currentInvertedPatternMask = 0;
 
 // Last values written to EEPROM.
 // Used to avoid unnecessary flash writes.
@@ -191,8 +199,8 @@ int lastSavedZAccelOffset = 3687;
 int lastSavedXGyroOffset = 111;
 int lastSavedYGyroOffset = -6;
 int lastSavedZGyroOffset = 34;
-uint16_t lastSavedEnabledPatternMask = 0;
-uint16_t lastSavedInvertedPatternMask = 0;
+uint32_t lastSavedEnabledPatternMask = 0;
+uint32_t lastSavedInvertedPatternMask = 0;
 
 const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
 const int MIN_MOTION_SMOOTHING_SIZE = 1;
@@ -212,10 +220,10 @@ const int DEFAULT_X_GYRO_OFFSET = 111;
 const int DEFAULT_Y_GYRO_OFFSET = -6;
 const int DEFAULT_Z_GYRO_OFFSET = 34;
 const uint8_t FIRST_PATTERN_ID = 1;
-const uint8_t LAST_PATTERN_ID = 14;
+const uint8_t LAST_PATTERN_ID = 22;
 const uint8_t PATTERN_COUNT = LAST_PATTERN_ID - FIRST_PATTERN_ID + 1;
-const uint16_t ALL_ENABLED_PATTERN_MASK = (1u << PATTERN_COUNT) - 1u;
-const uint16_t ALL_INVERTED_PATTERN_MASK = (1u << PATTERN_COUNT) - 1u;
+const uint32_t ALL_ENABLED_PATTERN_MASK = (1ul << PATTERN_COUNT) - 1ul;
+const uint32_t ALL_INVERTED_PATTERN_MASK = (1ul << PATTERN_COUNT) - 1ul;
 
 int activeMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
 
@@ -386,15 +394,15 @@ void clearInactiveLeds();
 void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
 bool isValidPatternId(int value);
-uint16_t sanitizeEnabledPatternMask(uint16_t mask);
-uint16_t sanitizeInvertedPatternMask(uint16_t mask);
+uint32_t sanitizeEnabledPatternMask(uint32_t mask);
+uint32_t sanitizeInvertedPatternMask(uint32_t mask);
 bool isPatternEnabled(uint8_t patternId);
 bool isPatternInverted(uint8_t patternId);
 int getPatternDirectionFactor(uint8_t patternId);
 bool setPatternEnabled(uint8_t patternId, bool enabled);
-bool parsePatternListMask(String valueText, uint16_t* maskOut);
-bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled);
-bool updateInvertedPatternsFromMask(uint16_t mask, bool inverted);
+bool parsePatternListMask(String valueText, uint32_t* maskOut);
+bool updateEnabledPatternsFromMask(uint32_t mask, bool enabled);
+bool updateInvertedPatternsFromMask(uint32_t mask, bool inverted);
 uint8_t getNextEnabledPattern(uint8_t currentId);
 const PatternDefinition* getPatternDefinition(uint8_t patternId);
 void runPatternEntry(uint8_t patternId);
@@ -1143,7 +1151,7 @@ bool isValidPatternId(int value)
 }
 
 // Clamp the bitmask to the known pattern range and guarantee at least one enabled pattern.
-uint16_t sanitizeEnabledPatternMask(uint16_t mask)
+uint32_t sanitizeEnabledPatternMask(uint32_t mask)
 {
   mask &= ALL_ENABLED_PATTERN_MASK;
   if (mask == 0)
@@ -1153,7 +1161,7 @@ uint16_t sanitizeEnabledPatternMask(uint16_t mask)
   return mask;
 }
 
-uint16_t sanitizeInvertedPatternMask(uint16_t mask)
+uint32_t sanitizeInvertedPatternMask(uint32_t mask)
 {
   return mask & ALL_INVERTED_PATTERN_MASK;
 }
@@ -1165,7 +1173,7 @@ bool isPatternEnabled(uint8_t patternId)
     return false;
   }
   const uint8_t bitIndex = (uint8_t)(patternId - FIRST_PATTERN_ID);
-  return (currentEnabledPatternMask & (1u << bitIndex)) != 0;
+  return (currentEnabledPatternMask & (1ul << bitIndex)) != 0;
 }
 
 bool isPatternInverted(uint8_t patternId)
@@ -1175,7 +1183,7 @@ bool isPatternInverted(uint8_t patternId)
     return false;
   }
   const uint8_t bitIndex = (uint8_t)(patternId - FIRST_PATTERN_ID);
-  return (currentInvertedPatternMask & (1u << bitIndex)) != 0;
+  return (currentInvertedPatternMask & (1ul << bitIndex)) != 0;
 }
 
 int getPatternDirectionFactor(uint8_t patternId)
@@ -1190,8 +1198,8 @@ bool setPatternEnabled(uint8_t patternId, bool enabled)
     return false;
   }
 
-  const uint16_t bit = (uint16_t)(1u << (patternId - FIRST_PATTERN_ID));
-  uint16_t nextMask = currentEnabledPatternMask;
+  const uint32_t bit = (uint32_t)(1ul << (patternId - FIRST_PATTERN_ID));
+  uint32_t nextMask = currentEnabledPatternMask;
   if (enabled)
   {
     nextMask |= bit;
@@ -1210,7 +1218,7 @@ bool setPatternEnabled(uint8_t patternId, bool enabled)
 }
 
 // Parse a comma-separated pattern list like "1,3,7" into a bitmask.
-bool parsePatternListMask(String valueText, uint16_t* maskOut)
+bool parsePatternListMask(String valueText, uint32_t* maskOut)
 {
   if (maskOut == NULL)
   {
@@ -1223,7 +1231,7 @@ bool parsePatternListMask(String valueText, uint16_t* maskOut)
     return false;
   }
 
-  uint16_t mask = 0;
+  uint32_t mask = 0;
   int start = 0;
   while (start < valueText.length())
   {
@@ -1241,7 +1249,7 @@ bool parsePatternListMask(String valueText, uint16_t* maskOut)
       return false;
     }
 
-    mask |= (uint16_t)(1u << (patternId - FIRST_PATTERN_ID));
+    mask |= (uint32_t)(1ul << (patternId - FIRST_PATTERN_ID));
     if (comma < 0)
     {
       break;
@@ -1253,7 +1261,7 @@ bool parsePatternListMask(String valueText, uint16_t* maskOut)
   return mask != 0;
 }
 
-bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled)
+bool updateEnabledPatternsFromMask(uint32_t mask, bool enabled)
 {
   mask &= ALL_ENABLED_PATTERN_MASK;
   if (mask == 0)
@@ -1261,7 +1269,7 @@ bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled)
     return false;
   }
 
-  uint16_t nextMask = currentEnabledPatternMask;
+  uint32_t nextMask = currentEnabledPatternMask;
   if (enabled)
   {
     nextMask |= mask;
@@ -1279,7 +1287,7 @@ bool updateEnabledPatternsFromMask(uint16_t mask, bool enabled)
   return true;
 }
 
-bool updateInvertedPatternsFromMask(uint16_t mask, bool inverted)
+bool updateInvertedPatternsFromMask(uint32_t mask, bool inverted)
 {
   mask &= ALL_INVERTED_PATTERN_MASK;
   if (mask == 0)
@@ -1293,7 +1301,7 @@ bool updateInvertedPatternsFromMask(uint16_t mask, bool inverted)
   }
   else
   {
-    currentInvertedPatternMask &= (uint16_t)~mask;
+    currentInvertedPatternMask &= (uint32_t)~mask;
   }
 
   currentInvertedPatternMask = sanitizeInvertedPatternMask(currentInvertedPatternMask);
@@ -1587,7 +1595,7 @@ void printCliHelp()
   Serial.println("  help");
   Serial.println("  show");
   Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|enabled_patterns|inverted_patterns>");
-  Serial.println("  set pattern <1..14>");
+  Serial.println("  set pattern <1..22>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
   Serial.println("  set smoothing <1..512>           (takes effect after reboot)");
@@ -1595,10 +1603,10 @@ void printCliHelp()
   Serial.println("  set gyro_range <250|500|1000|2000> (takes effect after reboot)");
   Serial.println("  set boot_calibration <off|quick>");
   Serial.println("  patterns");
-  Serial.println("  enable_pattern <1..14[,id...]>");
-  Serial.println("  disable_pattern <1..14[,id...]>");
-  Serial.println("  invert_pattern <1..14[,id...]>");
-  Serial.println("  normal_pattern <1..14[,id...]>");
+  Serial.println("  enable_pattern <1..22[,id...]>");
+  Serial.println("  disable_pattern <1..22[,id...]>");
+  Serial.println("  invert_pattern <1..22[,id...]>");
+  Serial.println("  normal_pattern <1..22[,id...]>");
   Serial.println("  battery");
   Serial.println("  sensor");
   Serial.println("  timing");
@@ -1706,7 +1714,7 @@ void onCliSet(cmd* cPtr)
   {
     if (!isValidPatternId(value))
     {
-      Serial.println("ERR pattern range 1..14");
+      Serial.println("ERR pattern range 1..22");
       return;
     }
     switchToPattern((uint8_t)value, true);
@@ -1946,10 +1954,10 @@ void onCliPatterns(cmd* cPtr)
 void onCliEnablePattern(cmd* cPtr)
 {
   Command cmd(cPtr);
-  uint16_t mask = 0;
+  uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..14");
+    Serial.println("ERR pattern list must contain IDs in range 1..22");
     return;
   }
 
@@ -1963,10 +1971,10 @@ void onCliEnablePattern(cmd* cPtr)
 void onCliDisablePattern(cmd* cPtr)
 {
   Command cmd(cPtr);
-  uint16_t mask = 0;
+  uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..14");
+    Serial.println("ERR pattern list must contain IDs in range 1..22");
     return;
   }
 
@@ -1985,10 +1993,10 @@ void onCliDisablePattern(cmd* cPtr)
 void onCliInvertPattern(cmd* cPtr)
 {
   Command cmd(cPtr);
-  uint16_t mask = 0;
+  uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..14");
+    Serial.println("ERR pattern list must contain IDs in range 1..22");
     return;
   }
 
@@ -2001,10 +2009,10 @@ void onCliInvertPattern(cmd* cPtr)
 void onCliNormalPattern(cmd* cPtr)
 {
   Command cmd(cPtr);
-  uint16_t mask = 0;
+  uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..14");
+    Serial.println("ERR pattern list must contain IDs in range 1..22");
     return;
   }
 
@@ -2184,12 +2192,12 @@ if (statusStart < TOTAL_LEDS)
 }
 
 int batteryBarMax = min(5, NUM_LEDS);
-if      (Voltage >= 4.05) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-else if (Voltage >= 3.92) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-else if (Voltage >= 3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-else if (Voltage >= 3.68) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= 3.55) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= 3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
+if      (Voltage >= CHARGING_FULL_THRESHOLD)        fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+else if (Voltage >= BATTERY_BAR_4_THRESHOLD)       fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+else if (Voltage >= BATTERY_BAR_3_THRESHOLD)       fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+else if (Voltage >= BATTERY_BAR_2_THRESHOLD)       fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)   fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
 }
 
@@ -2248,12 +2256,12 @@ for (int i = 0; i < brightnessPixels; ++i) {
 }
 
 int batteryBarMax = min(5, NUM_LEDS);
-if      (Voltage >= 4.05) fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-else if (Voltage >= 3.92) fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-else if (Voltage >= 3.80) fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-else if (Voltage >= 3.68) fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= 3.55) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= 3.40) fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
+if      (Voltage >= BATTERY_BAR_5_THRESHOLD)       fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+else if (Voltage >= BATTERY_BAR_4_THRESHOLD)       fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+else if (Voltage >= BATTERY_BAR_3_THRESHOLD)       fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+else if (Voltage >= BATTERY_BAR_2_THRESHOLD)       fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)   fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
 else                      {/* leave empty = very empty */}
 }
 
@@ -2735,6 +2743,362 @@ void running14()
   }
 }
 
+void RunEntry15()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 15;
+  batteryViewActive = false;
+}
+
+void running15()
+{
+  static CRGBPalette16 currentPaletteA(CRGB::Black);
+  static CRGBPalette16 currentPaletteB(CRGB::Black);
+  static CRGBPalette16 targetPaletteA(RainbowColors_p);
+  static CRGBPalette16 targetPaletteB(CRGB::Blue);
+  static CRGBPalette16 beatPalette(CRGB::Black);
+  static CRGB frameBuffer[MAX_TOTAL_LEDS];
+  static float prevYaw = 0.0f;
+  static float filteredYawRate = 0.0f;
+  static float filteredMotion = 0.0f;
+  static float scrollAccumulator = 0.0f;
+  static int flowDirection = 1;
+  static uint8_t scrollIndex = 0;
+  static unsigned long lastScrollMs = 0;
+
+  const uint32_t motion = smoothedMotion();
+  const uint8_t yawHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+
+  float yaw = ypr[0];
+  float dy = yaw - prevYaw;
+  if (dy > M_PI) dy -= 2 * M_PI;
+  if (dy < -M_PI) dy += 2 * M_PI;
+  prevYaw = yaw;
+  filteredYawRate = (filteredYawRate * 0.84f) + (dy * 0.16f);
+  filteredMotion = (filteredMotion * 0.90f) + ((float)motion * 0.10f);
+
+  const int filteredMotionInt = (int)filteredMotion;
+  const uint8_t bpm = constrain(map(filteredMotionInt, 2000, 20000, 14, 34), 12, 40);
+  const uint8_t paletteSpread = constrain(map(filteredMotionInt, 2000, 20000, 20, 34), 18, 38);
+  const uint8_t accentValue = constrain(map(filteredMotionInt, 2000, 20000, 90, 220), 80, 224);
+  const uint8_t accentSaturation = constrain(map(filteredMotionInt, 2000, 20000, 150, 235), 140, 240);
+  const float scrollStep = (float)constrain(map(filteredMotionInt, 2000, 20000, 3, 10), 2, 12) / 10.0f;
+
+  targetPaletteA = CRGBPalette16(
+      CHSV(yawHue, 220, 16),
+      CHSV(yawHue + 24, 255, 80),
+      CHSV(yawHue + 56, 220, 170),
+      CHSV(yawHue + 88, 180, 255));
+
+  const uint8_t accentHue = yawHue + 128;
+  targetPaletteB = CRGBPalette16(
+      CHSV(accentHue, accentSaturation, 8),
+      CHSV(accentHue + 32, 220, accentValue / 3),
+      CHSV(accentHue + 96, accentSaturation, accentValue),
+      CHSV(accentHue + 140, 160, 255));
+
+  EVERY_N_MILLISECONDS(30)
+  {
+    nblendPaletteTowardPalette(currentPaletteA, targetPaletteA, 4);
+    nblendPaletteTowardPalette(currentPaletteB, targetPaletteB, 4);
+  }
+
+  uint8_t beat = beat8(bpm);
+  uint8_t mixer = ease8InOutCubic(cubicwave8(beat));
+  blend(currentPaletteA, currentPaletteB, beatPalette, 16, mixer);
+
+  const int baseDirection = getPatternDirectionFactor(15);
+  if (filteredYawRate > 0.065f)
+  {
+    flowDirection = baseDirection;
+  }
+  else if (filteredYawRate < -0.065f)
+  {
+    flowDirection = -baseDirection;
+  }
+
+  const unsigned long now = millis();
+  if (now - lastScrollMs >= 40)
+  {
+    lastScrollMs = now;
+    scrollAccumulator += scrollStep;
+    while (scrollAccumulator >= 1.0f)
+    {
+      scrollAccumulator -= 1.0f;
+      scrollIndex = (uint8_t)(scrollIndex + (flowDirection > 0 ? 1 : 255));
+    }
+  }
+
+  fill_palette(frameBuffer, TOTAL_LEDS, scrollIndex, paletteSpread, beatPalette, 255, LINEARBLEND);
+  blur1d(frameBuffer, TOTAL_LEDS, 48);
+
+  const uint8_t pulseValue = beatsin8(bpm, 72, 170);
+  const uint8_t pulseWidth = constrain(map(filteredMotionInt, 2000, 20000, 3, 8), 2, 8);
+  int center = TOTAL_LEDS / 2;
+  for (int offset = 0; offset < pulseWidth; ++offset)
+  {
+    uint8_t value = qsub8(pulseValue, offset * 14);
+    frameBuffer[(center + offset) % TOTAL_LEDS] += CHSV(yawHue, 170, value);
+    frameBuffer[(center - offset + TOTAL_LEDS) % TOTAL_LEDS] += CHSV(yawHue, 170, value);
+  }
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    nblend(Strip[i], frameBuffer[i], 64);
+  }
+}
+
+void RunEntry16()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 16;
+  batteryViewActive = false;
+}
+
+void running16()
+{
+  static uint16_t waveA = 0;
+  static uint16_t waveB = 0;
+  static uint16_t waveC = 0;
+
+  const uint32_t motion = smoothedMotion();
+  const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 96, 160);
+  const uint8_t whitecap = constrain(map((int)motion, 2000, 20000, 24, 110), 16, 120);
+
+  waveA += 10 + constrain(map((int)motion, 2000, 20000, 0, 18), 0, 20);
+  waveB += 7 + constrain(map((int)motion, 2000, 20000, 0, 12), 0, 14);
+  waveC += 4 + constrain(map((int)motion, 2000, 20000, 0, 8), 0, 10);
+
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    uint8_t a = sin8((i * 11) + (waveA >> 4));
+    uint8_t b = sin8((i * 17) - (waveB >> 5));
+    uint8_t c = sin8((i * 7) + (waveC >> 6));
+    uint8_t bri = qadd8(scale8(a, 90), scale8(b, 80));
+    bri = qadd8(bri, scale8(c, 70));
+    bri = scale8(bri, 200);
+
+    uint8_t hue = baseHue + scale8(c, 28);
+    Strip[i] = CHSV(hue, 210, bri);
+
+    if (bri > 160)
+    {
+      Strip[i] += CHSV(baseHue + 10, 80, qsub8(bri, 160) + whitecap);
+    }
+  }
+}
+
+void RunEntry17()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 17;
+  batteryViewActive = false;
+}
+
+void running17()
+{
+  const uint32_t motion = smoothedMotion();
+  const uint8_t hue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+  const uint8_t fadeAmount = constrain(map((int)motion, 2000, 20000, 20, 50), 16, 60);
+  const uint8_t spawnCount = constrain(map((int)motion, 2000, 20000, 1, 6), 1, 8);
+
+  fadeToBlackBy(Strip, TOTAL_LEDS, fadeAmount);
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    Strip[i] += CHSV(hue, 180, 8);
+  }
+
+  for (uint8_t s = 0; s < spawnCount; ++s)
+  {
+    if (random8() < 90)
+    {
+      int p = random16(TOTAL_LEDS);
+      uint8_t twinkleHue = hue + random8(96);
+      Strip[p] += CHSV(twinkleHue, 140 + random8(100), 180 + random8(75));
+    }
+  }
+}
+
+void RunEntry18()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 18;
+  batteryViewActive = false;
+}
+
+void running18()
+{
+  static uint8_t heat[MAX_TOTAL_LEDS];
+  const uint32_t motion = smoothedMotion();
+  const int cooling = constrain(map((int)motion, 2000, 20000, 70, 28), 20, 90);
+  const uint8_t sparking = constrain(map((int)motion, 2000, 20000, 40, 160), 30, 180);
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    heat[i] = qsub8(heat[i], random8(0, ((cooling * 10) / TOTAL_LEDS) + 2));
+  }
+
+  for (int k = TOTAL_LEDS - 1; k >= 2; --k)
+  {
+    heat[k] = (uint8_t)((heat[k - 1] + heat[k - 2] + heat[k - 2]) / 3);
+  }
+
+  if (random8() < sparking)
+  {
+    int center = TOTAL_LEDS / 2;
+    int y = center + random8(3) - 1;
+    y = constrain(y, 0, TOTAL_LEDS - 1);
+    heat[y] = qadd8(heat[y], random8(160, 255));
+  }
+
+  const uint8_t hueBias = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 48);
+  for (int j = 0; j < TOTAL_LEDS; ++j)
+  {
+    uint8_t colorindex = scale8(heat[j], 240);
+    CRGB c = ColorFromPalette(HeatColors_p, colorindex);
+    c += CHSV(hueBias, 180, scale8(heat[j], 40));
+    Strip[j] = c;
+  }
+}
+
+void RunEntry19()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 19;
+  batteryViewActive = false;
+}
+
+void running19()
+{
+  static uint16_t noiseTime = 0;
+  const uint32_t motion = smoothedMotion();
+  const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+  const uint8_t scale = constrain(map((int)motion, 2000, 20000, 26, 10), 8, 40);
+  const uint8_t timeStep = constrain(map((int)motion, 2000, 20000, 1, 6), 1, 8);
+  noiseTime += timeStep;
+
+  CRGBPalette16 noisePalette(
+      CHSV(baseHue, 220, 20),
+      CHSV(baseHue + 32, 255, 120),
+      CHSV(baseHue + 96, 200, 255),
+      CHSV(baseHue + 160, 180, 180));
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    uint8_t index = inoise8(i * scale, noiseTime * 32);
+    uint8_t bri = inoise8((i * scale) + 1000, noiseTime * 24);
+    Strip[i] = ColorFromPalette(noisePalette, index, bri, LINEARBLEND);
+  }
+}
+
+void RunEntry20()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 20;
+  batteryViewActive = false;
+}
+
+void running20()
+{
+  static uint16_t phase = 0;
+  const uint32_t motion = smoothedMotion();
+  const uint8_t hueBase = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+  const uint8_t sat = constrain(map((int)motion, 2000, 20000, 180, 255), 170, 255);
+  const uint8_t waveSpeed = constrain(map((int)motion, 2000, 20000, 2, 8), 1, 10);
+  phase += waveSpeed;
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    uint8_t hue = hueBase + sin8((i * 9) + (phase >> 1)) / 3 + sin8((i * 5) - (phase >> 2)) / 5;
+    uint8_t bri = qadd8(100, scale8(sin8((i * 13) + phase), 140));
+    Strip[i] = CHSV(hue, sat, bri);
+  }
+}
+
+void RunEntry21()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 21;
+  batteryViewActive = false;
+}
+
+void running21()
+{
+  static uint32_t prevMag = 0;
+  uint32_t mag = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y) + (uint32_t)abs(aaWorld.z);
+  int32_t jerk = (int32_t)mag - (int32_t)prevMag;
+  prevMag = mag;
+
+  const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+  fadeToBlackBy(Strip, TOTAL_LEDS, 26);
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    Strip[i] += CHSV(baseHue, 180, 4);
+  }
+
+  uint8_t burstCount = 0;
+  if (jerk > 2500)
+  {
+    burstCount = constrain(map((int)jerk, 2500, 12000, 2, 9), 1, 12);
+  }
+  else if (random8() < 32)
+  {
+    burstCount = 1;
+  }
+
+  for (uint8_t i = 0; i < burstCount; ++i)
+  {
+    int p = random16(TOTAL_LEDS);
+    Strip[p] += CHSV(baseHue + random8(80), 180 + random8(75), 180 + random8(75));
+  }
+}
+
+void RunEntry22()
+{
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+  currentPattern = 22;
+  batteryViewActive = false;
+}
+
+void running22()
+{
+  static int16_t phase = 20000;
+  static uint32_t prevMag = 0;
+  uint32_t mag = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y) + (uint32_t)abs(aaWorld.z);
+  int32_t jerk = (int32_t)mag - (int32_t)prevMag;
+  prevMag = mag;
+
+  if (jerk > 2600 || phase > 15000)
+  {
+    phase = 0;
+  }
+
+  fadeToBlackBy(Strip, TOTAL_LEDS, 22);
+
+  if (phase <= (NUM_LEDS + 4) * 24)
+  {
+    phase += 12 + constrain(map((int)smoothedMotion(), 2000, 20000, 0, 26), 0, 30);
+    const uint8_t hue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+    const int center = NUM_LEDS / 2;
+
+    for (int i = 0; i < NUM_LEDS; ++i)
+    {
+      int distance = abs(i - center);
+      int wave = abs((distance * 24) - phase);
+      if (wave < 40)
+      {
+        uint8_t bri = map(wave, 0, 40, 255, 0);
+        Strip[i] += CHSV(hue, 180, bri);
+        Strip[i + NUM_LEDS] += CHSV(hue, 180, bri);
+      }
+    }
+  }
+}
+
 const PatternDefinition patternDefinitions[] = {
     {1, "rainbow", RunEntry, running, NULL},
     {2, "full_color", RunEntry2, running2, NULL},
@@ -2750,6 +3114,14 @@ const PatternDefinition patternDefinitions[] = {
     {12, "yaw_spinner", RunEntry12, running12, NULL},
     {13, "yaw_spinner_circle", RunEntry13, running13, NULL},
     {14, "runner_dual_inverted", RunEntry14, running14, NULL},
+    {15, "palette_beat_motion", RunEntry15, running15, NULL},
+    {16, "pacifica_kite", RunEntry16, running16, NULL},
+    {17, "twinkle_motion", RunEntry17, running17, NULL},
+    {18, "fire_jet", RunEntry18, running18, NULL},
+    {19, "noise_ring", RunEntry19, running19, NULL},
+    {20, "pride_yaw", RunEntry20, running20, NULL},
+    {21, "confetti_jerk", RunEntry21, running21, NULL},
+    {22, "center_ripple", RunEntry22, running22, NULL},
 };
 
 // Look up the callbacks and display name for a pattern ID.
