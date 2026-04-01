@@ -1,4 +1,4 @@
-# User Manual for the NightKite Multi LED Kite Lighting (v2.1)
+# User Manual for the NightKite Multi LED Kite Lighting (v3.0)
 
 Welcome to your **NightKite Multi LED Kite Lighting System**!  
 This system brings your stunt kite to life at night by generating dynamic LED effects that respond to the kite’s movement and acceleration.  
@@ -47,7 +47,7 @@ The NightKite Multi lighting system offers the following core features:
 
 ### 1.1. Animation Patterns in Detail
 
-The NightKite Multi (v2.1) includes 22 predefined animation patterns that can be changed with a double-click.  
+The NightKite Multi (v3.0) includes 22 predefined animation patterns that can be changed with a double-click.  
 After powering on and calibration, the controller starts with the last used pattern and brightness level.  
 On first startup: **Pattern ID 1**, **Brightness 95**.
 

@@ -1,6 +1,6 @@
 # Lenkdrachen LED Beleuchtung mit Bewegungsreaktion (Kite LED Lighting with Motion Response)
 
-## Deutsch *(Version 2.1)*
+## Deutsch *(Version 3.0)*
 
 Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die auf deren Bewegungen und Beschleunigungen reagiert. Die Farbe der LEDs wird durch den aktuellen Winkel des Drachens bestimmt, während die Geschwindigkeit der Animationsabläufe von der Bewegungsgeschwindigkeit des Drachens abhängt.
 
@@ -198,7 +198,7 @@ Dieses Projekt ist unter der [MIT Lizenz](LICENSE.txt) lizenziert.
 
 ---
 
-## English *(Version 2.1)*
+## English *(Version 3.0)*
 
 This project implements dynamic LED lighting for kites that reacts to their movements and accelerations. The color of the LEDs is determined by the current angle of the kite, while the speed of the animation sequences depends on the kite's speed of motion.
 

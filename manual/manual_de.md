@@ -1,4 +1,4 @@
-# Bedienungsanleitung für die NightKite Multi LED-Drachenbeleuchtung (v2.1)
+# Bedienungsanleitung für die NightKite Multi LED-Drachenbeleuchtung (v3.0)
 
 Willkommen bei deiner **NightKite Multi LED-Drachenbeleuchtung**!  
 Dieses System bringt deinen Lenkdrachen im Dunkeln zum Leuchten, indem es dynamische LED-Effekte erzeugt, die auf die Bewegungen und Beschleunigungen deines Drachens reagieren.  
@@ -47,7 +47,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 
 ### 1.1. Animations-Muster im Detail
 
-Die NightKite Multi (v2.1) verfügt über 22 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
+Die NightKite Multi (v3.0) verfügt über 22 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
 Nach dem Einschalten (und der Kalibrierung) startet der Controller mit dem zuletzt verwendeten Muster und der zuletzt gewählten Helligkeit.  
 Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
 
