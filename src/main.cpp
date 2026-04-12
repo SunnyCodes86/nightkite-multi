@@ -2929,15 +2929,15 @@ void running15()
   if (dy > M_PI) dy -= 2 * M_PI;
   if (dy < -M_PI) dy += 2 * M_PI;
   prevYaw = yaw;
-  filteredYawRate = (filteredYawRate * 0.84f) + (dy * 0.16f);
-  filteredMotion = (filteredMotion * 0.90f) + ((float)motion * 0.10f);
+  filteredYawRate = (filteredYawRate * 0.90f) + (dy * 0.10f);
+  filteredMotion = (filteredMotion * 0.94f) + ((float)motion * 0.06f);
 
   const int filteredMotionInt = (int)filteredMotion;
-  const uint8_t bpm = constrain(map(filteredMotionInt, 2000, 20000, 14, 34), 12, 40);
-  const uint8_t paletteSpread = constrain(map(filteredMotionInt, 2000, 20000, 20, 34), 18, 38);
-  const uint8_t accentValue = constrain(map(filteredMotionInt, 2000, 20000, 90, 220), 80, 224);
-  const uint8_t accentSaturation = constrain(map(filteredMotionInt, 2000, 20000, 150, 235), 140, 240);
-  const float scrollStep = (float)constrain(map(filteredMotionInt, 2000, 20000, 3, 10), 2, 12) / 10.0f;
+  const uint8_t bpm = constrain(map(filteredMotionInt, 2000, 20000, 16, 28), 14, 32);
+  const uint8_t paletteSpread = constrain(map(filteredMotionInt, 2000, 20000, 22, 30), 20, 32);
+  const uint8_t accentValue = constrain(map(filteredMotionInt, 2000, 20000, 110, 205), 96, 212);
+  const uint8_t accentSaturation = constrain(map(filteredMotionInt, 2000, 20000, 160, 225), 150, 232);
+  const float scrollStep = (float)constrain(map(filteredMotionInt, 2000, 20000, 2, 6), 2, 7) / 10.0f;
 
   targetPaletteA = CRGBPalette16(
       CHSV(yawHue, 220, 16),
@@ -2954,8 +2954,8 @@ void running15()
 
   EVERY_N_MILLISECONDS(30)
   {
-    nblendPaletteTowardPalette(currentPaletteA, targetPaletteA, 4);
-    nblendPaletteTowardPalette(currentPaletteB, targetPaletteB, 4);
+    nblendPaletteTowardPalette(currentPaletteA, targetPaletteA, 2);
+    nblendPaletteTowardPalette(currentPaletteB, targetPaletteB, 2);
   }
 
   uint8_t beat = beat8(bpm);
@@ -2963,17 +2963,17 @@ void running15()
   blend(currentPaletteA, currentPaletteB, beatPalette, 16, mixer);
 
   const int baseDirection = getPatternDirectionFactor(15);
-  if (filteredYawRate > 0.065f)
+  if (filteredYawRate > 0.095f)
   {
     flowDirection = baseDirection;
   }
-  else if (filteredYawRate < -0.065f)
+  else if (filteredYawRate < -0.095f)
   {
     flowDirection = -baseDirection;
   }
 
   const unsigned long now = millis();
-  if (now - lastScrollMs >= 40)
+  if (now - lastScrollMs >= 50)
   {
     lastScrollMs = now;
     scrollAccumulator += scrollStep;
@@ -2985,21 +2985,42 @@ void running15()
   }
 
   fill_palette(frameBuffer, TOTAL_LEDS, scrollIndex, paletteSpread, beatPalette, 255, LINEARBLEND);
-  blur1d(frameBuffer, TOTAL_LEDS, 48);
+  blur1d(frameBuffer, TOTAL_LEDS, 72);
 
-  const uint8_t pulseValue = beatsin8(bpm, 72, 170);
-  const uint8_t pulseWidth = constrain(map(filteredMotionInt, 2000, 20000, 3, 8), 2, 8);
+  const uint8_t pulseValue = beatsin8(bpm, 84, 156);
+  const uint8_t pulseWidth = constrain(map(filteredMotionInt, 2000, 20000, 2, 5), 2, 6);
   int center = TOTAL_LEDS / 2;
   for (int offset = 0; offset < pulseWidth; ++offset)
   {
-    uint8_t value = qsub8(pulseValue, offset * 14);
+    uint8_t value = qsub8(pulseValue, offset * 10);
     frameBuffer[(center + offset) % TOTAL_LEDS] += CHSV(yawHue, 170, value);
     frameBuffer[(center - offset + TOTAL_LEDS) % TOTAL_LEDS] += CHSV(yawHue, 170, value);
   }
 
+  uint8_t framePeak = 0;
   for (int i = 0; i < TOTAL_LEDS; ++i)
   {
-    nblend(Strip[i], frameBuffer[i], 64);
+    framePeak = max(framePeak, max(frameBuffer[i].r, max(frameBuffer[i].g, frameBuffer[i].b)));
+  }
+
+  if (framePeak > 0)
+  {
+    // Normalize the mixed palette output toward the configured global brightness
+    // without changing hue relationships inside the frame.
+    const uint8_t targetPeak = constrain(map(BRIGHTNESS, MIN_BRIGHTNESS, MAX_BRIGHTNESS, 176, 255), 176, 255);
+    const uint16_t gain256 = min<uint16_t>(512, ((uint16_t)targetPeak * 256) / framePeak);
+
+    for (int i = 0; i < TOTAL_LEDS; ++i)
+    {
+      frameBuffer[i].r = min<uint16_t>(255, ((uint16_t)frameBuffer[i].r * gain256) >> 8);
+      frameBuffer[i].g = min<uint16_t>(255, ((uint16_t)frameBuffer[i].g * gain256) >> 8);
+      frameBuffer[i].b = min<uint16_t>(255, ((uint16_t)frameBuffer[i].b * gain256) >> 8);
+    }
+  }
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    nblend(Strip[i], frameBuffer[i], 48);
   }
 }
 
@@ -3017,7 +3038,7 @@ void running16()
   static uint16_t waveC = 0;
 
   const uint32_t motion = smoothedMotion();
-  const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 96, 160);
+  const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
   const uint8_t whitecap = constrain(map((int)motion, 2000, 20000, 24, 110), 16, 120);
 
   waveA += 10 + constrain(map((int)motion, 2000, 20000, 0, 18), 0, 20);
@@ -3086,36 +3107,48 @@ void RunEntry18()
 
 void running18()
 {
-  static uint8_t heat[MAX_TOTAL_LEDS];
+  static uint8_t heat[2][MAX_LEDS_PER_STRIP];
   const uint32_t motion = smoothedMotion();
-  const int cooling = constrain(map((int)motion, 2000, 20000, 70, 28), 20, 90);
-  const uint8_t sparking = constrain(map((int)motion, 2000, 20000, 40, 160), 30, 180);
-
-  for (int i = 0; i < TOTAL_LEDS; ++i)
-  {
-    heat[i] = qsub8(heat[i], random8(0, ((cooling * 10) / TOTAL_LEDS) + 2));
-  }
-
-  for (int k = TOTAL_LEDS - 1; k >= 2; --k)
-  {
-    heat[k] = (uint8_t)((heat[k - 1] + heat[k - 2] + heat[k - 2]) / 3);
-  }
-
-  if (random8() < sparking)
-  {
-    int center = TOTAL_LEDS / 2;
-    int y = center + random8(3) - 1;
-    y = constrain(y, 0, TOTAL_LEDS - 1);
-    heat[y] = qadd8(heat[y], random8(160, 255));
-  }
-
+  const uint8_t cooling = constrain(map((int)motion, 2000, 20000, 68, 38), 28, 80);
+  const uint8_t sparking = constrain(map((int)motion, 2000, 20000, 38, 92), 28, 110);
+  const uint8_t flareWidth = min(3, NUM_LEDS);
   const uint8_t hueBias = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 48);
-  for (int j = 0; j < TOTAL_LEDS; ++j)
+  const uint8_t motionLevel = constrain(map((int)motion, 2000, 20000, 0, 255), 0, 255);
+  const uint8_t restReach = constrain(map((int)motion, 2000, 20000, NUM_LEDS / 3, NUM_LEDS), max(2, NUM_LEDS / 4), NUM_LEDS);
+
+  for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
-    uint8_t colorindex = scale8(heat[j], 240);
-    CRGB c = ColorFromPalette(HeatColors_p, colorindex);
-    c += CHSV(hueBias, 180, scale8(heat[j], 40));
-    Strip[j] = c;
+    for (int i = 0; i < NUM_LEDS; ++i)
+    {
+      heat[stripIndex][i] = qsub8(heat[stripIndex][i], random8(0, ((cooling * 10) / max(1, NUM_LEDS)) + 2));
+    }
+
+    for (int k = NUM_LEDS - 1; k >= 2; --k)
+    {
+      heat[stripIndex][k] = (uint8_t)((heat[stripIndex][k - 1] + heat[stripIndex][k - 2] + heat[stripIndex][k - 2]) / 3);
+    }
+
+    if (random8() < sparking)
+    {
+      uint8_t y = random8(flareWidth);
+      heat[stripIndex][y] = qadd8(heat[stripIndex][y], random8(140, 200));
+    }
+
+    for (int j = 0; j < NUM_LEDS; ++j)
+    {
+      uint8_t visibleHeat = heat[stripIndex][j];
+      if (j >= restReach)
+      {
+        const uint8_t falloff = map(j, restReach, max(restReach + 1, NUM_LEDS - 1), 220, 40);
+        visibleHeat = scale8(visibleHeat, max(falloff, motionLevel));
+      }
+
+      uint8_t colorindex = scale8(visibleHeat, 232);
+      CRGB c = ColorFromPalette(HeatColors_p, colorindex);
+      c += CHSV(hueBias, 180, scale8(visibleHeat, 24));
+      const int logicalIndex = (stripIndex * NUM_LEDS) + j;
+      nblend(Strip[logicalIndex], c, 192);
+    }
   }
 }
 
@@ -3129,23 +3162,41 @@ void RunEntry19()
 void running19()
 {
   static uint16_t noiseTime = 0;
+  static float noiseTimeAccumulator = 0.0f;
+  static uint8_t smoothedHue = 0;
+  static CRGB frameBuffer[MAX_TOTAL_LEDS];
   const uint32_t motion = smoothedMotion();
-  const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
-  const uint8_t scale = constrain(map((int)motion, 2000, 20000, 26, 10), 8, 40);
-  const uint8_t timeStep = constrain(map((int)motion, 2000, 20000, 1, 6), 1, 8);
-  noiseTime += timeStep;
+  const uint8_t targetHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
+  smoothedHue = lerp8by8(smoothedHue, targetHue, 24);
+
+  const uint8_t scale = constrain(map((int)motion, 2000, 20000, 22, 12), 10, 28);
+  const float timeStep = (float)constrain(map((int)motion, 2000, 20000, 2, 10), 1, 12) / 10.0f;
+  noiseTimeAccumulator += timeStep;
+  while (noiseTimeAccumulator >= 1.0f)
+  {
+    noiseTimeAccumulator -= 1.0f;
+    ++noiseTime;
+  }
 
   CRGBPalette16 noisePalette(
-      CHSV(baseHue, 220, 20),
-      CHSV(baseHue + 32, 255, 120),
-      CHSV(baseHue + 96, 200, 255),
-      CHSV(baseHue + 160, 180, 180));
+      CHSV(smoothedHue, 210, 28),
+      CHSV(smoothedHue + 24, 220, 96),
+      CHSV(smoothedHue + 72, 180, 180),
+      CHSV(smoothedHue + 128, 150, 255));
 
   for (int i = 0; i < TOTAL_LEDS; ++i)
   {
-    uint8_t index = inoise8(i * scale, noiseTime * 32);
-    uint8_t bri = inoise8((i * scale) + 1000, noiseTime * 24);
-    Strip[i] = ColorFromPalette(noisePalette, index, bri, LINEARBLEND);
+    uint8_t index = inoise8(i * scale, noiseTime * 20);
+    uint8_t density = inoise8((i * (scale + 3)) + 1000, noiseTime * 16);
+    uint8_t bri = qadd8(56, scale8(density, 168));
+    frameBuffer[i] = ColorFromPalette(noisePalette, index, bri, LINEARBLEND);
+  }
+
+  blur1d(frameBuffer, TOTAL_LEDS, 84);
+
+  for (int i = 0; i < TOTAL_LEDS; ++i)
+  {
+    nblend(Strip[i], frameBuffer[i], 72);
   }
 }
 
@@ -3223,20 +3274,23 @@ void running22()
 {
   static int16_t phase = 20000;
   static uint32_t prevMag = 0;
+  static unsigned long lastTriggerMs = 0;
   uint32_t mag = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y) + (uint32_t)abs(aaWorld.z);
   int32_t jerk = (int32_t)mag - (int32_t)prevMag;
   prevMag = mag;
+  const unsigned long now = millis();
 
-  if (jerk > 2600 || phase > 15000)
+  if ((jerk > 4200 && (now - lastTriggerMs) > 220) || phase > 15000)
   {
     phase = 0;
+    lastTriggerMs = now;
   }
 
-  fadeToBlackBy(Strip, TOTAL_LEDS, 22);
+  fadeToBlackBy(Strip, TOTAL_LEDS, 28);
 
   if (phase <= (NUM_LEDS + 4) * 24)
   {
-    phase += 12 + constrain(map((int)smoothedMotion(), 2000, 20000, 0, 26), 0, 30);
+    phase += 7 + constrain(map((int)smoothedMotion(), 2000, 20000, 0, 14), 0, 16);
     const uint8_t hue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
     const int center = NUM_LEDS / 2;
 
@@ -3244,9 +3298,9 @@ void running22()
     {
       int distance = abs(i - center);
       int wave = abs((distance * 24) - phase);
-      if (wave < 40)
+      if (wave < 48)
       {
-        uint8_t bri = map(wave, 0, 40, 255, 0);
+        uint8_t bri = map(wave, 0, 48, 220, 0);
         Strip[i] += CHSV(hue, 180, bri);
         Strip[i + NUM_LEDS] += CHSV(hue, 180, bri);
       }
