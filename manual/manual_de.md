@@ -168,6 +168,7 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `battery`
   - `sensor`
   - `timing`
+  - `timing reset`
   - `offsets`
 - Kalibrierung:
   - `calibrate quick`
@@ -198,7 +199,8 @@ Hinweise:
 - Autoplay verwendet nur aktivierte Pattern.
 - Autoplay kann persistent gespeichert werden und startet nach dem Booten automatisch, wenn es gespeichert eingeschaltet war.
 - `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart. Die CLI kennzeichnet das in der Antwort mit `(applies after reboot)`.
-- `timing` zeigt `FastLED`-FPS sowie `loop`-/`work`-Zeiten in Mikrosekunden.
+- `timing` zeigt `FastLED`-FPS, `loop`-/`work`-Zeiten, Frame-Budget und Sample-Anzahl in Mikrosekunden.
+- `timing reset` setzt die Timing-Statistik (`avg`, `max`, `samples`) zurück, damit einzelne Pattern oder Änderungen direkt vergleichbar sind.
 - `offsets` zeigt die aktuell verwendeten MPU-Offsets.
 - `calibrate quick` ist die schnelle Alltags-Kalibrierung und speichert die gefundenen Offsets.
 - `calibrate precise` nutzt den deutlich langsameren `IMU_Zero`-basierten Präzisionspfad und speichert die gefundenen Offsets.

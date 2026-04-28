@@ -141,7 +141,7 @@ invert_pattern <1..22[,id...]>
 normal_pattern <1..22[,id...]>
 battery
 sensor
-timing
+timing [reset]
 offsets
 calibrate quick
 calibrate precise
@@ -171,7 +171,8 @@ Hinweise:
 * `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` werden persistent gespeichert, greifen aber erst nach einem Neustart.
 * `battery` zeigt den ADC-Rohwert, die berechnete Spannung sowie USB-/Serial-Status.
 * `sensor` zeigt MPU-/DMP-Status und die konfigurierten bzw. aktiven Sensor-Ranges.
-* `timing` zeigt `FastLED`-FPS sowie Loop-/Work-Zeiten in Mikrosekunden.
+* `timing` zeigt `FastLED`-FPS, Loop-/Work-Zeiten, Frame-Budget und Samples in Mikrosekunden.
+* `timing reset` setzt die Timing-Statistik (`avg`, `max`, `samples`) zurück, damit Pattern oder Änderungen direkt vergleichbar sind.
 * `offsets` zeigt die aktuell verwendeten MPU-Offsets.
 * `calibrate quick` führt die bisherige schnelle Kalibrierung aus und speichert die Offsets.
 * `calibrate precise` nutzt den langsameren `IMU_Zero`-basierten Kalibrierpfad und speichert die Offsets.
@@ -338,7 +339,7 @@ invert_pattern <1..22[,id...]>
 normal_pattern <1..22[,id...]>
 battery
 sensor
-timing
+timing [reset]
 offsets
 calibrate quick
 calibrate precise
@@ -368,7 +369,8 @@ Notes:
 * `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` are stored persistently but only take effect after reboot.
 * `battery` reports raw ADC value, calculated voltage, and USB/serial status.
 * `sensor` reports MPU/DMP status and both configured and active sensor ranges.
-* `timing` reports `FastLED` FPS plus loop/work timings in microseconds.
+* `timing` reports `FastLED` FPS, loop/work timings, frame budget, and sample count in microseconds.
+* `timing reset` clears the timing statistics (`avg`, `max`, `samples`) so patterns or changes can be compared directly.
 * `offsets` reports the currently active MPU offsets.
 * `calibrate quick` runs the fast calibration path and saves the resulting offsets.
 * `calibrate precise` runs the slower `IMU_Zero`-style calibration path and saves the resulting offsets.

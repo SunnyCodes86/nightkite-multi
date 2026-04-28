@@ -387,6 +387,7 @@ int readBatteryRawValue();
 float convertBatteryRawToVoltage(int rawValue);
 void printBatteryStatus();
 void printSensorStatus();
+void resetTimingStats();
 void printTimingStatus();
 bool saveConfigToEEPROM(bool verbose);
 void readConfigFromEEPROM(bool verbose);
@@ -1455,6 +1456,17 @@ void printTimingStatus()
   Serial.println(loopTimingSamples);
 }
 
+void resetTimingStats()
+{
+  lastLoopDurationUs = 0;
+  maxLoopDurationUs = 0;
+  lastWorkDurationUs = 0;
+  maxWorkDurationUs = 0;
+  totalLoopDurationUs = 0;
+  totalWorkDurationUs = 0;
+  loopTimingSamples = 0;
+}
+
 bool saveConfigToEEPROM(bool verbose)
 {
   normalizePersistentConfig();
@@ -1658,7 +1670,7 @@ void printCliHelp()
   Serial.println("  normal_pattern <1..22[,id...]>");
   Serial.println("  battery");
   Serial.println("  sensor");
-  Serial.println("  timing");
+  Serial.println("  timing [reset]");
   Serial.println("  offsets");
   Serial.println("  calibrate quick");
   Serial.println("  calibrate precise");
@@ -1971,7 +1983,24 @@ void onCliSensor(cmd* cPtr)
 
 void onCliTiming(cmd* cPtr)
 {
-  (void)cPtr;
+  Command cmd(cPtr);
+  String action = cmd.getArgument("action").getValue();
+  action.toLowerCase();
+  action.trim();
+
+  if (action == "reset")
+  {
+    resetTimingStats();
+    Serial.println("OK timing_reset=1");
+    return;
+  }
+
+  if (action.length() > 0)
+  {
+    Serial.println("ERR timing action must be 'reset'");
+    return;
+  }
+
   printTimingStatus();
 }
 
@@ -2159,7 +2188,7 @@ void setupCLI()
   Command sensor = cli.addCommand("sensor", onCliSensor);
   (void)sensor;
   Command timing = cli.addCommand("timing", onCliTiming);
-  (void)timing;
+  timing.addPositionalArgument("action", "");
   Command offsets = cli.addCommand("offsets", onCliOffsets);
   (void)offsets;
   Command calibrate = cli.addCommand("calibrate", onCliCalibrate);
