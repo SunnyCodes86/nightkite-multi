@@ -93,11 +93,9 @@ constexpr float CHARGING_FULL_THRESHOLD = 4.20f;
 
 int ledsPerStrip = DEFAULT_LEDS_PER_STRIP;
 int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // total logical LEDs across both strips
-int halfLeds = DEFAULT_LEDS_PER_STRIP; // LEDs per strip
 
 #define NUM_LEDS ledsPerStrip
 #define TOTAL_LEDS totalLeds
-#define HALF_LEDS halfLeds
 #define NUM_COMETS 4        // comet count
 
 
@@ -315,7 +313,6 @@ int color;
 int color2;
 int accel;
 uint8_t accelcon;
-int accelabs;
 int fade;
 
 // ============================================================================
@@ -591,7 +588,6 @@ void applyConfiguredStripLength()
 {
   ledsPerStrip = currentStripLength;
   totalLeds = ledsPerStrip * 2;
-  halfLeds = totalLeds / 2;
 }
 
 void applyPersistentConfig()
