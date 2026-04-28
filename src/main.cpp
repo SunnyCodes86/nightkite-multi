@@ -99,10 +99,8 @@ int halfLeds = DEFAULT_LEDS_PER_STRIP; // LEDs per strip
 #define TOTAL_LEDS totalLeds
 #define HALF_LEDS halfLeds
 #define NUM_COMETS 4        // comet count
-#define NUM_COMETS2 2        // comet count2
 
-// CRGB Strip1[NUM_LEDS];
-// CRGB Strip2[NUM_LEDS];
+
 // Logical LED buffer used by all patterns (contiguous: strip1 then strip2).
 CRGB Strip[MAX_TOTAL_LEDS];
 // Physical LED buffer wired as two fixed hardware segments.
@@ -242,8 +240,6 @@ const unsigned long CLI_CONNECT_BANNER_DELAY_MS = 150;
 // ============================================================================
 /* MPU6050 default I2C address is 0x68*/
 MPU6050 mpu;
-// MPU6050 mpu(0x69); //Use for AD0 high
-// MPU6050 mpu(0x68, &Wire1); //Use for AD0 low, but 2nd Wire (TWI/I2C) object.
 
 /*---MPU6050 Control/Status Variables---*/
 bool DMPReady = false;  // Set true if DMP init was successful
@@ -3478,11 +3474,6 @@ void setup()
     Serial.println("MPU6050 connection successful");
   }
 
-  /* Wait for Serial input (debug helper, normally unused) */
-  // Serial.println(F("\nSend any character to begin: "));
-  // while (Serial.available() && Serial.read()); // Empty buffer
-  // while (!Serial.available());                 // Wait for data
-  // while (Serial.available() && Serial.read()); // Empty buffer again
 
   /* Initialize and configure the DMP */
   if (mpuConnected)
@@ -3553,8 +3544,6 @@ void setup()
   delay(1000); // Give the power rail and USB state a moment to settle.
 
   // Register both physical LED segments with FastLED.
- // FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(Strip1, NUM_LEDS).setCorrection(TypicalLEDStrip);
- // FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(Strip2, NUM_LEDS).setCorrection(TypicalLEDStrip);
 
   FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(PhysicalStrip, 0, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
   FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(PhysicalStrip, MAX_LEDS_PER_STRIP, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
@@ -3641,13 +3630,6 @@ void loop()
         }
     }
 
-  //FastLED.countFPS();
-  // Serial.println(LEDS.getFPS());
-  // Serial.println(FastLED.getFPS());
-  // Serial.println(fsm.getPreviousState()->getID());
-  // Serial.println(fsm.getDotDefinition());
-  // Serial.println(State3());
-
   // Periodic shared hue update used by several patterns.
   EVERY_N_MILLISECONDS(20) { gHue++; } // Slowly cycle the shared base hue.
 
@@ -3690,7 +3672,6 @@ void loop()
       switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
       announcePatternChange("button");
     }
-    // Serial.println("doubleclick");
   }
 
   // Legacy debug helper left intentionally disabled.
@@ -3708,7 +3689,6 @@ void loop()
     {
       BRIGHTNESS = MIN_BRIGHTNESS; // Wrap around to the minimum brightness.
     }
-    // Serial.println(BRIGHTNESS);
     FastLED.setBrightness(BRIGHTNESS);
     currentBrightness = BRIGHTNESS;
     batteryViewLastInteractionMs = millis();
