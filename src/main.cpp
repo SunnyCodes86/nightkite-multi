@@ -3752,25 +3752,6 @@ void loop()
         }
     }
 
-
-  // Copy the logical LEDs into the fixed physical strip layout and show them.
-  clearInactiveLeds();
-  syncLogicalToPhysicalLeds();
-  FastLED.show();
-  lastWorkDurationUs = micros() - loopStartUs;
-  totalWorkDurationUs += lastWorkDurationUs;
-  if (lastWorkDurationUs > maxWorkDurationUs)
-  {
-    maxWorkDurationUs = lastWorkDurationUs;
-  }
-  // Keep the framerate bounded by the configured frame budget, not by
-  // adding a full extra delay on top of the actual render work.
-  const uint32_t frameBudgetUs = 1000000UL / FRAMES_PER_SECOND;
-  if (lastWorkDurationUs < frameBudgetUs)
-  {
-    delayMicroseconds(frameBudgetUs - lastWorkDurationUs);
-  }
-
   //FastLED.countFPS();
   // Serial.println(LEDS.getFPS());
   // Serial.println(FastLED.getFPS());
@@ -3867,6 +3848,26 @@ void loop()
   else
   {
     autoplayWasPaused = false;
+  }
+
+  // Copy the logical LEDs into the fixed physical strip layout and show them.
+  clearInactiveLeds();
+  syncLogicalToPhysicalLeds();
+  FastLED.show();
+
+  lastWorkDurationUs = micros() - loopStartUs;
+  totalWorkDurationUs += lastWorkDurationUs;
+  if (lastWorkDurationUs > maxWorkDurationUs)
+  {
+    maxWorkDurationUs = lastWorkDurationUs;
+  }
+
+  // Keep the framerate bounded by the configured frame budget after all
+  // per-frame work has completed.
+  const uint32_t frameBudgetUs = 1000000UL / FRAMES_PER_SECOND;
+  if (lastWorkDurationUs < frameBudgetUs)
+  {
+    delayMicroseconds(frameBudgetUs - lastWorkDurationUs);
   }
 
   lastLoopDurationUs = micros() - loopStartUs;
