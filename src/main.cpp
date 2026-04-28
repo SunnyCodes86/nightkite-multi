@@ -2275,35 +2275,62 @@ void ChargingRunning()
     // Save the timestamp for the next blink toggle.
     previousMillis = currentMillis;
     // Toggle the status LED state.
-    if (blink == 0){
+    if (blink == 0)
+    {
       blink = 1;
     }
-    else{
+    else
+    {
       blink = 0;
     }
   }
 
-// Hysteresis for voltage measurement.
+  // Hysteresis for voltage measurement.
   static float vLast = 0;
-const float HYS = 0.03;  // 30 mV
-if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
+  const float HYS = 0.03; // 30 mV
+  if (fabsf(Voltage - vLast) < HYS)
+  {
+    Voltage = vLast;
+  }
+  else
+  {
+    vLast = Voltage;
+  }
 
-fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
 
-int statusStart = NUM_LEDS;
-if (statusStart < TOTAL_LEDS)
-{
-  Strip[statusStart] = blink ? CRGB::Red : CRGB::Black;
-}
+  int statusStart = NUM_LEDS;
+  if (statusStart < TOTAL_LEDS)
+  {
+    Strip[statusStart] = blink ? CRGB::Red : CRGB::Black;
+  }
 
-int batteryBarMax = min(5, NUM_LEDS);
-if      (Voltage >= CHARGING_FULL_THRESHOLD)        fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-else if (Voltage >= BATTERY_BAR_4_THRESHOLD)       fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-else if (Voltage >= BATTERY_BAR_3_THRESHOLD)       fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-else if (Voltage >= BATTERY_BAR_2_THRESHOLD)       fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)   fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
-else                      {/* leave empty = very empty */}
+  int batteryBarMax = min(5, NUM_LEDS);
+  if (Voltage >= CHARGING_FULL_THRESHOLD)
+  {
+    fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+  }
+  else if (Voltage >= BATTERY_BAR_4_THRESHOLD)
+  {
+    fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+  }
+  else if (Voltage >= BATTERY_BAR_3_THRESHOLD)
+  {
+    fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+  }
+  else if (Voltage >= BATTERY_BAR_2_THRESHOLD)
+  {
+    fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+  }
+  else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD)
+  {
+    fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+  }
+  else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)
+  {
+    fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
+  }
+  // Below the red threshold, leave the battery bar off.
 }
 
 void ChargingExit()
@@ -2330,55 +2357,83 @@ void BatteryRunning()
     // Save the timestamp for the next blink toggle.
     previousMillis = currentMillis;
     // Toggle the status LED state.
-    if (blink == 0){
+    if (blink == 0)
+    {
       blink = 1;
     }
-    else{
+    else
+    {
       blink = 0;
     }
   }
 
   // Hysteresis for voltage measurement.
   static float vLast = 0;
-const float HYS = 0.03;  // 30 mV
-if (fabsf(Voltage - vLast) < HYS) Voltage = vLast; else vLast = Voltage;
-
-fill_solid(Strip, NUM_LEDS*2, CRGB::Black);
-
-int statusStart = NUM_LEDS;
-if (statusStart < TOTAL_LEDS)
-{
-  Strip[statusStart] = blink ? CRGB::Blue : CRGB::Black;
-}
-
-// Show brightness level (6 steps from 95 to 255) on the status strip.
-int brightnessLevel = ((BRIGHTNESS - MIN_BRIGHTNESS) / 32) + 1;
-brightnessLevel = constrain(brightnessLevel, 1, 6);
-int availableBrightnessPixels = max(0, NUM_LEDS - 1);
-int brightnessPixels = min(6, availableBrightnessPixels);
-for (int i = 0; i < brightnessPixels; ++i) {
-  Strip[statusStart + 1 + i] = (i < brightnessLevel) ? CRGB::Yellow : CRGB::Black;
-}
-
-int batteryBarMax = min(5, NUM_LEDS);
-if      (Voltage >= BATTERY_BAR_5_THRESHOLD)       fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-else if (Voltage >= BATTERY_BAR_4_THRESHOLD)       fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-else if (Voltage >= BATTERY_BAR_3_THRESHOLD)       fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-else if (Voltage >= BATTERY_BAR_2_THRESHOLD)       fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD) fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)   fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
-else                      {/* leave empty = very empty */}
-
-int autoplayStatusPixel = statusStart + 1 + brightnessPixels;
-if (autoplayStatusPixel < TOTAL_LEDS)
-{
-  CRGB statusColor = isAutoplayEnabled() ? CRGB::Green : CRGB::Red;
-  Strip[autoplayStatusPixel] = statusColor;
-  if ((autoplayStatusPixel + 1) < TOTAL_LEDS)
+  const float HYS = 0.03; // 30 mV
+  if (fabsf(Voltage - vLast) < HYS)
   {
-    Strip[autoplayStatusPixel + 1] = statusColor;
+    Voltage = vLast;
   }
-}
+  else
+  {
+    vLast = Voltage;
+  }
+
+  fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
+
+  int statusStart = NUM_LEDS;
+  if (statusStart < TOTAL_LEDS)
+  {
+    Strip[statusStart] = blink ? CRGB::Blue : CRGB::Black;
+  }
+
+  // Show brightness level (6 steps from 95 to 255) on the status strip.
+  int brightnessLevel = ((BRIGHTNESS - MIN_BRIGHTNESS) / 32) + 1;
+  brightnessLevel = constrain(brightnessLevel, 1, 6);
+  int availableBrightnessPixels = max(0, NUM_LEDS - 1);
+  int brightnessPixels = min(6, availableBrightnessPixels);
+  for (int i = 0; i < brightnessPixels; ++i)
+  {
+    Strip[statusStart + 1 + i] = (i < brightnessLevel) ? CRGB::Yellow : CRGB::Black;
+  }
+
+  int batteryBarMax = min(5, NUM_LEDS);
+  if (Voltage >= BATTERY_BAR_5_THRESHOLD)
+  {
+    fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
+  }
+  else if (Voltage >= BATTERY_BAR_4_THRESHOLD)
+  {
+    fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
+  }
+  else if (Voltage >= BATTERY_BAR_3_THRESHOLD)
+  {
+    fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
+  }
+  else if (Voltage >= BATTERY_BAR_2_THRESHOLD)
+  {
+    fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
+  }
+  else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD)
+  {
+    fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
+  }
+  else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)
+  {
+    fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
+  }
+  // Below the red threshold, leave the battery bar off.
+
+  int autoplayStatusPixel = statusStart + 1 + brightnessPixels;
+  if (autoplayStatusPixel < TOTAL_LEDS)
+  {
+    CRGB statusColor = isAutoplayEnabled() ? CRGB::Green : CRGB::Red;
+    Strip[autoplayStatusPixel] = statusColor;
+    if ((autoplayStatusPixel + 1) < TOTAL_LEDS)
+    {
+      Strip[autoplayStatusPixel + 1] = statusColor;
+    }
+  }
 }
 
 void RunEntry()
@@ -3440,7 +3495,7 @@ void setup()
   Fastwire::setup(400, true);
 #endif
 
-  Serial.begin(115200); // 115200 is required for Teapot Demo output
+  Serial.begin(115200); // USB CLI and startup diagnostics.
   Serial.setTimeout(5);
   delay(1000); // Short startup delay for recovery / serial attach.
 
@@ -3663,7 +3718,7 @@ void loop()
     }
   }
 
-  // Legacy debug helper left intentionally disabled.
+  // USB-only power enters the charging state unless a serial session is active.
   if (UsbConnected == 1)
   {
     fsm.trigger(usbpower);
