@@ -74,7 +74,6 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // MPU interrupt input pin
 
 #define PinStrip1 PIN_LED_STRIP_1
 #define PinStrip2 PIN_LED_STRIP_2
-// #define CLK_PIN   4
 #define LED_TYPE WS2811
 #define COLOR_ORDER GRB
 
@@ -216,7 +215,6 @@ const size_t BRIGHTNESS_LEVEL_COUNT = sizeof(BRIGHTNESS_LEVELS) / sizeof(BRIGHTN
 // for timekeeping
 unsigned long lastUpdateTime = 0;
 const unsigned long UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds (5 * 60 * 1000)
-//const unsigned long UPDATE_INTERVAL = 30 * 1000; // 30 sec for debug
 const unsigned long BATTERY_VIEW_TIMEOUT_MS = 5000;
 unsigned long batteryViewLastInteractionMs = 0;
 
@@ -446,7 +444,6 @@ uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 
 int sumPulse(int time_shift)
 {
-  // time_shift = 0;  //Uncomment to heart beat/pulse all LEDs together
   int pulse1 = pulseWave8(millis() + time_shift, cycleLength, pulseLength);
   int pulse2 = pulseWave8(millis() + time_shift + pulseOffset, cycleLength, pulseLength);
   return qadd8(pulse1, pulse2); // Add pulses together without overflow
@@ -3445,7 +3442,6 @@ void setup()
 
   Serial.begin(115200); // 115200 is required for Teapot Demo output
   Serial.setTimeout(5);
-  // while (!Serial);
   delay(1000); // Short startup delay for recovery / serial attach.
 
   // Load persisted config early so the remaining setup can use stored values.
@@ -3546,8 +3542,6 @@ void setup()
 
   // Apply persisted global brightness.
   FastLED.setBrightness(BRIGHTNESS);
-
-  // FastLED.setMaxRefreshRate(120);
 
   // Initialize motion smoothing with the configured window size.
   applyConfiguredMotionSmoothing();
@@ -3650,7 +3644,6 @@ void loop()
   if (multiresponseButton.longPress())
   {
     fsm.trigger(longpress);
-    // Serial.println("longpress");
   }
 
   if (multiresponseButton.doubleClick())
