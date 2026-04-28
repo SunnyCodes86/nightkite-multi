@@ -1,29 +1,19 @@
 /*
-  MPU6050 DMP6
+  NightKite multi-strip controller
 
-  Digital Motion Processor or DMP performs complex motion processing tasks.
-  - Fuses the data from the accel, gyro, and external magnetometer if applied,
-  compensating individual sensor noise and errors.
-  - Detect specific types of motion without the need to continuously monitor
-  raw sensor data with a microcontroller.
-  - Reduce workload on the microprocessor.
-  - Output processed data such as quaternions, Euler angles, and gravity vectors.
+  Drives two WS2811 LED strips from one logical LED buffer and uses an MPU6050
+  DMP packet stream for motion-reactive effects. The motion pipeline reads
+  yaw/pitch/roll for orientation-reactive color and gravity-free world-frame
+  acceleration for movement intensity, bursts, and pattern speed.
 
-  The code includes an auto-calibration and offsets generator tasks. Different
-  output formats available.
+  Runtime configuration is available through the USB serial CLI and persisted
+  to EEPROM. Board-specific pins are supplied through PlatformIO build flags
+  for the supported Pico-class targets.
 
-  This code is compatible with the teapot project by using the teapot output format.
-
-  Circuit: In addition to connection 3.3v, GND, SDA, and SCL, this sketch
-  depends on the MPU6050's INT pin being connected to the Arduino's
-  external interrupt #0 pin.
-
-  The teapot processing example may be broken due FIFO structure change if using DMP
-  6.12 firmware version.
-
-  Find the full MPU6050 library documentation here:
-  https://github.com/ElectronicCats/mpu6050/wiki
-
+  Hardware overview:
+  - MPU6050 on I2C with its INT pin connected to PIN_MPU_INTERRUPT.
+  - Two WS2811 data outputs configured by PIN_LED_STRIP_1 and PIN_LED_STRIP_2.
+  - Multi-function button, battery ADC input, and USB power sense input.
 */
 
 // ============================================================================
