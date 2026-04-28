@@ -41,35 +41,11 @@
 #include <math.h> // Math library
 
 // ============================================================================
-//  OUTPUT FORMAT SELECTION
+//  MOTION DATA
 // ============================================================================
 
-/* OUTPUT FORMAT DEFINITION-------------------------------------------------------------------------------------------
-- Use "OUTPUT_READABLE_QUATERNION" for quaternion commponents in [w, x, y, z] format. Quaternion does not
-suffer from gimbal lock problems but is harder to parse or process efficiently on a remote host or software
-environment like Processing.
-
-- Use "OUTPUT_READABLE_EULER" for Euler angles (in degrees) output, calculated from the quaternions coming
-from the FIFO. EULER ANGLES SUFFER FROM GIMBAL LOCK PROBLEM.
-
-- Use "OUTPUT_READABLE_YAWPITCHROLL" for yaw/pitch/roll angles (in degrees) calculated from the quaternions
-coming from the FIFO. THIS REQUIRES GRAVITY VECTOR CALCULATION.
-YAW/PITCH/ROLL ANGLES SUFFER FROM GIMBAL LOCK PROBLEM.
-
-- Use "OUTPUT_READABLE_REALACCEL" for acceleration components with gravity removed. The accel reference frame
-is not compensated for orientation. +X will always be +X according to the sensor.
-
-- Use "OUTPUT_READABLE_WORLDACCEL" for acceleration components with gravity removed and adjusted for the world
-reference frame. Yaw is relative if there is no magnetometer present.
-
--  Use "OUTPUT_TEAPOT" for output that matches the InvenSense teapot demo.
--------------------------------------------------------------------------------------------------------------------------------*/
-#define OUTPUT_READABLE_YAWPITCHROLL
-// #define OUTPUT_READABLE_QUATERNION
-// #define OUTPUT_READABLE_EULER
-// #define OUTPUT_READABLE_REALACCEL
-#define OUTPUT_READABLE_WORLDACCEL
-// #define OUTPUT_TEAPOT
+// The LED patterns use yaw/pitch/roll for orientation-reactive color and
+// gravity-free world acceleration for motion intensity.
 
 // ============================================================================
 //  HARDWARE & LED CONFIG
@@ -283,11 +259,7 @@ VectorInt16 gy;      // [x, y, z]            Gyro sensor measurements
 VectorInt16 aaReal;  // [x, y, z]            Gravity-free accel sensor measurements
 VectorInt16 aaWorld; // [x, y, z]            World-frame accel sensor measurements
 VectorFloat gravity; // [x, y, z]            Gravity vector
-float euler[3];      // [psi, theta, phi]    Euler angle container
 float ypr[3];        // [yaw, pitch, roll]   Yaw/Pitch/Roll container and gravity vector
-
-/*-Packet structure for InvenSense teapot demo-*/
-uint8_t teapotPacket[14] = {'$', 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, '\r', '\n'};
 
 volatile bool MPUInterrupt = false; // Indicates whether MPU6050 interrupt pin has gone high
 /*------Interrupt detection routine------*/
@@ -3617,100 +3589,17 @@ void loop()
   /* Read a packet from FIFO */
   if (DMPReady && mpu.dmpGetCurrentFIFOPacket(FIFOBuffer))
   { // Get the Latest packet
-#ifdef OUTPUT_READABLE_YAWPITCHROLL
-    /* Display Euler angles in degrees */
+    // Orientation for hue/rotation-reactive patterns.
     mpu.dmpGetQuaternion(&q, FIFOBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-    // Serial.print("ypr\t");
-    // Serial.print(ypr[0] * 180/M_PI);
     color = ypr[0] * 180 / M_PI;
     color2 = ypr[0] * 180 / M_PI;
-// Serial.print(";");
-// Serial.print("\t");
-// Serial.print(ypr[1] * 180/M_PI);
-// Serial.print(";");
-// Serial.print("\t");
-// Serial.println(ypr[2] * 180/M_PI);
-#endif
 
-#ifdef OUTPUT_READABLE_QUATERNION
-    /* Display Quaternion values in easy matrix form: [w, x, y, z] */
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
-    // Serial.print("quat\t");
-    // Serial.print(q.w);
-    // Serial.print(";");
-    // Serial.print("\t");
-    // Serial.print(q.x);
-    // Serial.print(";");
-    // Serial.print("\t");
-    // Serial.print(q.y);
-    // Serial.print(";");
-    // Serial.print("\t");
-    // Serial.println(q.z);
-#endif
-
-#ifdef OUTPUT_READABLE_EULER
-    /* Display Euler angles in degrees */
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
-    mpu.dmpGetEuler(euler, &q);
-// Serial.print("euler\t");
-// Serial.print(euler[0] * 180/M_PI);
-// Serial.print(";");
-// Serial.print("\t");
-// Serial.print(euler[1] * 180/M_PI);
-// Serial.print(";");
-// Serial.print("\t");
-// Serial.println(euler[2] * 180/M_PI);
-#endif
-
-#ifdef OUTPUT_READABLE_REALACCEL
-    /* Display real acceleration, adjusted to remove gravity */
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
+    // Gravity-free world-frame acceleration for motion-reactive patterns.
     mpu.dmpGetAccel(&aa, FIFOBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
-    mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
-// Serial.print("areal\t");
-// Serial.print(aaReal.x);
-// Serial.print(";");
-// Serial.print("\t");
-// Serial.print(aaReal.y);
-// Serial.print(";");
-// Serial.print("\t");
-// Serial.println(aaReal.z);
-#endif
-
-#ifdef OUTPUT_READABLE_WORLDACCEL
-    /* Display initial world-frame acceleration, adjusted to remove gravity
-    and rotated based on known orientation from Quaternion */
-    mpu.dmpGetQuaternion(&q, FIFOBuffer);
-    mpu.dmpGetAccel(&aa, FIFOBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
     mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
-    // Serial.print("aworld\t");
-    // Serial.print(aaWorld.x);
-    // Serial.print("\t");
-    // Serial.print(";");
-    // Serial.print(aaWorld.y);
-    // Serial.print("\t");
-    // Serial.print(";");
-    // Serial.println(aaWorld.z);
-#endif
-
-#ifdef OUTPUT_TEAPOT
-    /* Display quaternion values in InvenSense Teapot demo format */
-    teapotPacket[2] = FIFOBuffer[0];
-    teapotPacket[3] = FIFOBuffer[1];
-    teapotPacket[4] = FIFOBuffer[4];
-    teapotPacket[5] = FIFOBuffer[5];
-    teapotPacket[6] = FIFOBuffer[8];
-    teapotPacket[7] = FIFOBuffer[9];
-    teapotPacket[8] = FIFOBuffer[12];
-    teapotPacket[9] = FIFOBuffer[13];
-    Serial.write(teapotPacket, 14);
-    teapotPacket[11]++; // PacketCount, loops at 0xFF on purpose
-#endif
 
     /* Blink LED to indicate activity */
     blinkState = !blinkState;
