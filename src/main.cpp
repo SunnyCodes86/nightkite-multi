@@ -82,6 +82,12 @@
 #ifndef NIGHTKITE_HARDWARE
 #define NIGHTKITE_HARDWARE "unknown"
 #endif
+#ifndef NIGHTKITE_BOOT_DEBUG
+#define NIGHTKITE_BOOT_DEBUG 1
+#endif
+#ifndef NIGHTKITE_SAFE_BOOT
+#define NIGHTKITE_SAFE_BOOT 0
+#endif
 
 constexpr const char* FIRMWARE_VERSION = "4.0.0-alpha.1";
 constexpr uint8_t NK4_PROTOCOL_VERSION = 4;
@@ -316,6 +322,13 @@ enum UsbProtocolMode
   USB_PROTOCOL_MACHINE = 1
 };
 UsbProtocolMode usbProtocolMode = USB_PROTOCOL_HUMAN;
+bool configValid = false;
+bool configRepaired = false;
+bool eepromReady = false;
+bool safeBootActive = (NIGHTKITE_SAFE_BOOT != 0);
+bool imuReady = false;
+const char* bootStage = "reset";
+bool bootLoopAnnounced = false;
 
 // ============================================================================
 //  MPU6050 & MOTION STATE
@@ -642,6 +655,7 @@ void syncConfiguredOffsetsFromMPU();
 void applyDefaultExtendedConfig(bool resetName);
 void updateShortIdFromUid();
 void ensureDeviceIdentity();
+void bootMark(const char* stage);
 void copyCString(char* dest, size_t destSize, const char* source);
 void writeEEPROMCString(int address, const char* value, size_t maxLength);
 void readEEPROMCString(int address, char* value, size_t maxLength);
@@ -650,6 +664,7 @@ void generateDeviceUid();
 void setDefaultDeviceName();
 bool sanitizeDeviceName(String value, char* output, size_t outputSize);
 bool sanitizeUidString(String value, char* output, size_t outputSize);
+bool readStoredDeviceUid(char* output, size_t outputSize);
 const char* playModeToString(int value);
 int parsePlayMode(String value);
 const char* bootModeToString(int value);
@@ -687,6 +702,7 @@ bool runPreciseCalibration(bool verbose);
 void clearInactiveLeds();
 void syncLogicalToPhysicalLeds();
 void normalizePersistentConfig();
+bool isCurrentConfigSane();
 bool isValidPatternId(int value);
 uint32_t sanitizeEnabledPatternMask(uint32_t mask);
 uint32_t sanitizeInvertedPatternMask(uint32_t mask);
@@ -961,6 +977,16 @@ int parseOnOffValue(String valueText)
   return -1;
 }
 
+void bootMark(const char* stage)
+{
+  bootStage = (stage != NULL) ? stage : "unknown";
+  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+#if NIGHTKITE_BOOT_DEBUG
+  Serial.print("BOOT ");
+  Serial.println(bootStage);
+#endif
+}
+
 int sanitizeBinaryFlag(int value)
 {
   return value != 0 ? 1 : 0;
@@ -1102,6 +1128,24 @@ bool sanitizeUidString(String value, char* output, size_t outputSize)
     }
   }
   copyCString(output, outputSize, value.c_str());
+  return true;
+}
+
+bool readStoredDeviceUid(char* output, size_t outputSize)
+{
+  if (output == NULL || outputSize < DEVICE_UID_LENGTH + 1)
+  {
+    return false;
+  }
+
+  char storedUid[DEVICE_UID_LENGTH + 1];
+  readEEPROMCString(EEPROM_ADDR_DEVICE_UID, storedUid, sizeof(storedUid));
+  if (!isValidDeviceUid(storedUid))
+  {
+    return false;
+  }
+
+  copyCString(output, outputSize, storedUid);
   return true;
 }
 
@@ -1835,7 +1879,10 @@ void normalizePersistentConfig()
     currentBootMode = DEFAULT_BOOT_MODE;
   }
   currentSyncEnabled = sanitizeBinaryFlag(currentSyncEnabled);
-  currentSyncGroupId = constrain(currentSyncGroupId, 0, 255);
+  if (currentSyncGroupId < 1 || currentSyncGroupId > 255)
+  {
+    currentSyncGroupId = DEFAULT_SYNC_GROUP_ID;
+  }
   if (currentSyncRole < SYNC_ROLE_STANDALONE || currentSyncRole > SYNC_ROLE_FOLLOWER)
   {
     currentSyncRole = DEFAULT_SYNC_ROLE;
@@ -1858,6 +1905,40 @@ void normalizePersistentConfig()
   {
     currentWirelessProfile = DEFAULT_WIRELESS_PROFILE;
   }
+}
+
+bool isCurrentConfigSane()
+{
+  char scratchName[DEVICE_NAME_LENGTH + 1];
+  char scratchUid[DEVICE_UID_LENGTH + 1];
+
+  return currentConfigVersion == CONFIG_VERSION_4_ALPHA &&
+      isValidPatternId(currentPattern) &&
+      isValidBrightnessLevel(currentBrightness) &&
+      isValidStripLength(currentStripLength) &&
+      isValidMotionSmoothingSize(currentMotionSmoothingSize) &&
+      isValidAccelRange(currentAccelRange) &&
+      isValidGyroRange(currentGyroRange) &&
+      isValidBootCalibrationMode(currentBootCalibrationMode) &&
+      currentAutoplayEnabled >= 0 && currentAutoplayEnabled <= 1 &&
+      currentAutoplayIntervalMs >= MIN_AUTOPLAY_INTERVAL_MS &&
+      currentAutoplayIntervalMs <= MAX_AUTOPLAY_INTERVAL_MS &&
+      (currentEnabledPatternMask & ~ALL_ENABLED_PATTERN_MASK) == 0 &&
+      (currentEnabledPatternMask & ALL_ENABLED_PATTERN_MASK) != 0 &&
+      (currentInvertedPatternMask & ~ALL_INVERTED_PATTERN_MASK) == 0 &&
+      isValidDeviceUid(currentDeviceUid) &&
+      sanitizeDeviceName(String(currentDeviceName), scratchName, sizeof(scratchName)) &&
+      currentPlayMode >= PLAY_MODE_MANUAL && currentPlayMode <= PLAY_MODE_SYNC &&
+      currentBootMode == BOOT_MODE_LAST &&
+      currentSyncEnabled >= 0 && currentSyncEnabled <= 1 &&
+      currentSyncGroupId >= 1 && currentSyncGroupId <= 255 &&
+      currentSyncRole >= SYNC_ROLE_STANDALONE && currentSyncRole <= SYNC_ROLE_FOLLOWER &&
+      (strlen(currentSyncMasterUid) == 0 || sanitizeUidString(String(currentSyncMasterUid), scratchUid, sizeof(scratchUid))) &&
+      currentSyncLossBehavior >= SYNC_LOSS_CONTINUE_LOCAL &&
+      currentSyncLossBehavior <= SYNC_LOSS_WARNING_ONLY &&
+      currentWirelessEnabled >= 0 && currentWirelessEnabled <= 1 &&
+      currentWirelessProfile >= WIRELESS_PROFILE_LONG_RANGE &&
+      currentWirelessProfile <= WIRELESS_PROFILE_FAST_SYNC;
 }
 
 bool isValidPatternId(int value)
@@ -2295,6 +2376,8 @@ bool saveConfigToEEPROM(bool verbose)
 
   if (EEPROM.commit())
   {
+    configValid = true;
+    configRepaired = false;
     markCurrentConfigSaved();
     if (verbose)
     {
@@ -2314,6 +2397,11 @@ void readConfigFromEEPROM(bool verbose)
 {
   int magic = 0;
   bool loadedExtendedConfig = false;
+  bool loadedLegacyConfig = false;
+  char storedUid[DEVICE_UID_LENGTH + 1] = "";
+  configValid = false;
+  configRepaired = false;
+
   currentPattern = FIRST_PATTERN_ID;
   currentBrightness = MIN_BRIGHTNESS;
   currentStripLength = DEFAULT_LEDS_PER_STRIP;
@@ -2334,12 +2422,30 @@ void readConfigFromEEPROM(bool verbose)
   currentDeviceUid[0] = '\0';
   currentDeviceName[0] = '\0';
   applyDefaultExtendedConfig(false);
+  readStoredDeviceUid(storedUid, sizeof(storedUid));
+
+  if (safeBootActive)
+  {
+    if (isValidDeviceUid(storedUid))
+    {
+      copyCString(currentDeviceUid, sizeof(currentDeviceUid), storedUid);
+    }
+    ensureDeviceIdentity();
+    normalizePersistentConfig();
+    configRepaired = true;
+    if (verbose)
+    {
+      Serial.println("INFO safe_boot=1 config_ignored=1");
+    }
+    return;
+  }
 
   EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
   EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
   EEPROM.get(EEPROM_ADDR_MAGIC, magic);
   if (magic == EEPROM_MAGIC)
   {
+    loadedLegacyConfig = true;
     EEPROM.get(EEPROM_ADDR_STRIP_LENGTH, currentStripLength);
     EEPROM.get(EEPROM_ADDR_SMOOTHING_SIZE, currentMotionSmoothingSize);
     EEPROM.get(EEPROM_ADDR_ACCEL_RANGE, currentAccelRange);
@@ -2378,14 +2484,32 @@ void readConfigFromEEPROM(bool verbose)
   // original 3.x EEPROM addresses intact for backward compatibility.
   if (!loadedExtendedConfig)
   {
+    if (isValidDeviceUid(storedUid))
+    {
+      copyCString(currentDeviceUid, sizeof(currentDeviceUid), storedUid);
+    }
     currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
   }
+  const bool loadedValuesSane = loadedExtendedConfig && isCurrentConfigSane();
   normalizePersistentConfig();
-  markCurrentConfigSaved();
-
-  if (magic != EEPROM_MAGIC || !loadedExtendedConfig)
+  configValid = loadedValuesSane;
+  configRepaired = !loadedValuesSane;
+  if (loadedValuesSane)
   {
-    saveConfigToEEPROM(false);
+    markCurrentConfigSaved();
+  }
+
+  if (verbose && !loadedLegacyConfig)
+  {
+    Serial.println("INFO config_valid=0 reason=bad_magic defaults=1");
+  }
+  else if (verbose && !loadedExtendedConfig)
+  {
+    Serial.println("INFO config_valid=0 reason=legacy_or_incomplete defaults_extended=1");
+  }
+  else if (verbose && !loadedValuesSane)
+  {
+    Serial.println("INFO config_valid=0 reason=invalid_values normalized=1");
   }
 
   if (verbose)
@@ -2659,6 +2783,18 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += (NIGHTKITE_BLE ? 1 : 0);
     fields += " sync_supported=1 patterns=";
     fields += PATTERN_COUNT;
+    fields += " config_valid=";
+    fields += configValid ? 1 : 0;
+    fields += " config_repaired=";
+    fields += configRepaired ? 1 : 0;
+    fields += " config_version=";
+    fields += currentConfigVersion;
+    fields += " safe_boot=";
+    fields += safeBootActive ? 1 : 0;
+    fields += " imu=";
+    fields += imuReady ? 1 : 0;
+    fields += " boot_stage=";
+    fields += bootStage;
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -2689,7 +2825,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += " usb=";
     fields += (UsbPowerRaw == 1 ? 1 : 0);
     fields += " imu=";
-    fields += (DMPReady ? 1 : 0);
+    fields += (imuReady ? 1 : 0);
     fields += " fps=";
     fields += FastLED.getFPS();
     fields += " play_mode=";
@@ -2702,6 +2838,16 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += syncRoleToString(currentSyncRole);
     fields += " sync_group=";
     fields += currentSyncGroupId;
+    fields += " config_valid=";
+    fields += configValid ? 1 : 0;
+    fields += " config_repaired=";
+    fields += configRepaired ? 1 : 0;
+    fields += " config_version=";
+    fields += currentConfigVersion;
+    fields += " safe_boot=";
+    fields += safeBootActive ? 1 : 0;
+    fields += " boot_stage=";
+    fields += bootStage;
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -2996,6 +3142,8 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
     currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
     applyDefaultExtendedConfig(true);
+    configValid = false;
+    configRepaired = true;
     applyPersistentConfig();
     nk4WriteOk(writer, seq, "defaults=1 saved=0");
     return;
@@ -3420,6 +3568,8 @@ void onCliDefaults(cmd* cPtr)
   currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
   currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
   applyDefaultExtendedConfig(true);
+  configValid = false;
+  configRepaired = true;
   applyPersistentConfig();
   resetAutoplayTimer();
   batteryViewLastInteractionMs = millis();
@@ -5017,37 +5167,61 @@ int num_timed = sizeof(timedTransitions) / sizeof(TimedTransition);
 
 void setup()
 {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+
+  Serial.begin(115200); // USB CLI, NK4, and startup diagnostics.
+  Serial.setTimeout(5);
+  bootMark("setup");
+  bootMark("serial");
+
+  pinMode(PIN_BATTERY_ADC, INPUT);
+  pinMode(PIN_USB_SENSE, INPUT);
+  analogReadResolution(12);
+  bootMark("pins");
+
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
   Wire.begin();
+  Wire.setTimeout(25, false);
   Wire.setClock(400000); // 400kHz I2C clock. Comment on this line if having compilation difficulties
 #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
   Fastwire::setup(400, true);
 #endif
-
-  Serial.begin(115200); // USB CLI and startup diagnostics.
-  Serial.setTimeout(5);
-  delay(1000); // Short startup delay for recovery / serial attach.
+  bootMark("i2c");
 
   // Load persisted config early so the remaining setup can use stored values.
   EEPROM.begin(EEPROM_SIZE);
+  eepromReady = true;
+  bootMark("config_load");
   Serial.println("EEPROM initialized.");
   readConfigFromEEPROM(true);
+  bootMark(configValid ? "config_ok" : "config_defaults");
 
   /* Initialize device */
+  bootMark("imu_begin");
   Serial.println(F("Initializing I2C devices..."));
-  mpu.initialize();
-  pinMode(INTERRUPT_PIN, INPUT);
-
-  /* Verify connection */
-  Serial.println(F("Testing MPU6050 connection..."));
-  bool mpuConnected = (mpu.testConnection() == true);
-  if (!mpuConnected)
+  bool mpuConnected = false;
+  if (!safeBootActive)
   {
-    Serial.println("MPU6050 connection failed - continuing without DMP.");
+    mpu.initialize();
+    pinMode(INTERRUPT_PIN, INPUT);
+
+    /* Verify connection */
+    Serial.println(F("Testing MPU6050 connection..."));
+    mpuConnected = (mpu.testConnection() == true);
+    if (!mpuConnected)
+    {
+      Serial.println("MPU6050 connection failed - continuing without DMP.");
+    }
+    else
+    {
+      Serial.println("MPU6050 connection successful");
+    }
   }
   else
   {
-    Serial.println("MPU6050 connection successful");
+    devStatus = 1;
+    Serial.println("INFO safe_boot=1 imu_skipped=1");
   }
 
 
@@ -5077,13 +5251,14 @@ void setup()
   /* Making sure it worked (returns 0 if so) */
   if (devStatus == 0)
   {
-    if (currentBootCalibrationMode == BOOT_CALIBRATION_MODE_QUICK)
+    const bool allowBootCalibration = configValid && !safeBootActive && currentBootCalibrationMode == BOOT_CALIBRATION_MODE_QUICK;
+    if (allowBootCalibration)
     {
       runQuickCalibration(true);
     }
     else
     {
-      Serial.println("Using stored offsets without boot calibration.");
+      Serial.println(configValid ? "Using stored offsets without boot calibration." : "Using defaults without boot calibration.");
       printOffsets();
     }
 
@@ -5100,6 +5275,7 @@ void setup()
     /* Set the DMP Ready flag so the main loop() function knows it is okay to use it */
     Serial.println(F("DMP ready! Waiting for first interrupt..."));
     DMPReady = true;
+    imuReady = true;
     packetSize = mpu.dmpGetFIFOPacketSize(); // Get expected DMP packet size for later comparison
   }
   else
@@ -5110,17 +5286,10 @@ void setup()
     // 1 = initial memory load failed
     // 2 = DMP configuration updates failed
   }
-  pinMode(LED_BUILTIN, OUTPUT);
-
-  // Battery / USB sense setup.
-  pinMode(PIN_BATTERY_ADC, INPUT);
-  pinMode(PIN_USB_SENSE, INPUT);
-  analogReadResolution(12);
-
-  delay(1000); // Give the power rail and USB state a moment to settle.
+  bootMark(imuReady ? "imu_ok" : "imu_unavailable");
 
   // Register both physical LED segments with FastLED.
-
+  bootMark("led_begin");
   FastLED.addLeds<LED_TYPE, PinStrip1, COLOR_ORDER>(PhysicalStrip, 0, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
   FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(PhysicalStrip, MAX_LEDS_PER_STRIP, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
 
@@ -5129,6 +5298,7 @@ void setup()
 
   // Initialize motion smoothing with the configured window size.
   applyConfiguredMotionSmoothing();
+  bootMark("led_ok");
 
   applyPersistentConfig();
   patternClock.begin();
@@ -5142,6 +5312,7 @@ void setup()
 
   // Start in the generic pattern state; the active pattern comes from currentPattern.
   fsm.setInitialState(&s[2]);
+  bootMark("setup_done");
 }
 
 // ============================================================================
@@ -5150,6 +5321,12 @@ void setup()
 
 void loop()
 {
+  if (!bootLoopAnnounced)
+  {
+    bootMark("loop");
+    bootLoopAnnounced = true;
+  }
+
   const uint32_t loopStartUs = micros();
   /* Read a packet from FIFO */
   if (DMPReady && mpu.dmpGetCurrentFIFOPacket(FIFOBuffer))
