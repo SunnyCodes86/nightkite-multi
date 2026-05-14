@@ -29,6 +29,7 @@
 #include <Smoothed.h> // Smoothing library
 #include <EEPROM.h> //EEPROM Library
 #include <math.h> // Math library
+#include <string.h>
 
 // ============================================================================
 //  MOTION DATA
@@ -59,6 +60,30 @@
 #ifndef PIN_USB_SENSE
 #define PIN_USB_SENSE 24
 #endif
+#ifndef PIN_RM2_WL_ON
+#define PIN_RM2_WL_ON 32
+#endif
+#ifndef PIN_RM2_WL_CS
+#define PIN_RM2_WL_CS 33
+#endif
+#ifndef PIN_RM2_WL_CLK
+#define PIN_RM2_WL_CLK 34
+#endif
+#ifndef PIN_RM2_WL_DATA
+#define PIN_RM2_WL_DATA 35
+#endif
+#ifndef NIGHTKITE_BLE
+#define NIGHTKITE_BLE 0
+#endif
+#ifndef NIGHTKITE_RM2
+#define NIGHTKITE_RM2 0
+#endif
+#ifndef NIGHTKITE_HARDWARE
+#define NIGHTKITE_HARDWARE "unknown"
+#endif
+
+constexpr const char* FIRMWARE_VERSION = "4.0.0-alpha.1";
+constexpr uint8_t NK4_PROTOCOL_VERSION = 4;
 
 int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // MPU interrupt input pin
 
@@ -124,11 +149,42 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_INVERTED_PATTERNS (sizeof(int) * 15)
 #define EEPROM_ADDR_AUTOPLAY_ENABLED (sizeof(int) * 16)
 #define EEPROM_ADDR_AUTOPLAY_INTERVAL_MS (sizeof(int) * 17)
+#define EEPROM_ADDR_DEVICE_UID       80
+#define EEPROM_ADDR_DEVICE_NAME      100
+#define EEPROM_ADDR_CONFIG_VERSION   132
+#define EEPROM_ADDR_PLAY_MODE        136
+#define EEPROM_ADDR_BOOT_MODE        140
+#define EEPROM_ADDR_SYNC_ENABLED     144
+#define EEPROM_ADDR_SYNC_GROUP_ID    148
+#define EEPROM_ADDR_SYNC_ROLE        152
+#define EEPROM_ADDR_SYNC_MASTER_UID  156
+#define EEPROM_ADDR_SYNC_LOSS_BEHAVIOR 176
+#define EEPROM_ADDR_WIRELESS_ENABLED 180
+#define EEPROM_ADDR_WIRELESS_PROFILE 184
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
+const int CONFIG_VERSION_4_ALPHA = 400;
 
 // Size of emulated EEPROM.
 // Must cover all persisted ints plus the enabled/inverted pattern bitmasks.
-#define EEPROM_SIZE 80 // 80 Bytes leaves a little headroom
+#define EEPROM_SIZE 224
+
+const size_t DEVICE_UID_LENGTH = 16;
+const size_t SHORT_ID_LENGTH = 6;
+const size_t DEVICE_NAME_LENGTH = 24;
+
+const int PLAY_MODE_MANUAL = 0;
+const int PLAY_MODE_AUTOPLAY = 1;
+const int PLAY_MODE_SYNC = 2;
+const int BOOT_MODE_LAST = 0;
+const int SYNC_ROLE_STANDALONE = 0;
+const int SYNC_ROLE_MASTER = 1;
+const int SYNC_ROLE_FOLLOWER = 2;
+const int SYNC_LOSS_CONTINUE_LOCAL = 0;
+const int SYNC_LOSS_FALLBACK_AUTOPLAY = 1;
+const int SYNC_LOSS_WARNING_ONLY = 2;
+const int WIRELESS_PROFILE_LONG_RANGE = 0;
+const int WIRELESS_PROFILE_BALANCED = 1;
+const int WIRELESS_PROFILE_FAST_SYNC = 2;
 
 // Persisted configuration values.
 int currentPattern = 1;
@@ -148,6 +204,19 @@ uint32_t currentEnabledPatternMask = 0;
 uint32_t currentInvertedPatternMask = 0;
 int currentAutoplayEnabled = 0;
 int currentAutoplayIntervalMs = 20000;
+int currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+char currentDeviceUid[DEVICE_UID_LENGTH + 1] = "";
+char currentShortId[SHORT_ID_LENGTH + 1] = "";
+char currentDeviceName[DEVICE_NAME_LENGTH + 1] = "";
+int currentPlayMode = PLAY_MODE_MANUAL;
+int currentBootMode = BOOT_MODE_LAST;
+int currentSyncEnabled = 0;
+int currentSyncGroupId = 1;
+int currentSyncRole = SYNC_ROLE_STANDALONE;
+char currentSyncMasterUid[DEVICE_UID_LENGTH + 1] = "";
+int currentSyncLossBehavior = SYNC_LOSS_CONTINUE_LOCAL;
+int currentWirelessEnabled = 0;
+int currentWirelessProfile = WIRELESS_PROFILE_BALANCED;
 
 // Last values written to EEPROM.
 // Used to avoid unnecessary flash writes.
@@ -168,6 +237,18 @@ uint32_t lastSavedEnabledPatternMask = 0;
 uint32_t lastSavedInvertedPatternMask = 0;
 int lastSavedAutoplayEnabled = 0;
 int lastSavedAutoplayIntervalMs = 20000;
+int lastSavedConfigVersion = CONFIG_VERSION_4_ALPHA;
+char lastSavedDeviceUid[DEVICE_UID_LENGTH + 1] = "";
+char lastSavedDeviceName[DEVICE_NAME_LENGTH + 1] = "";
+int lastSavedPlayMode = PLAY_MODE_MANUAL;
+int lastSavedBootMode = BOOT_MODE_LAST;
+int lastSavedSyncEnabled = 0;
+int lastSavedSyncGroupId = 1;
+int lastSavedSyncRole = SYNC_ROLE_STANDALONE;
+char lastSavedSyncMasterUid[DEVICE_UID_LENGTH + 1] = "";
+int lastSavedSyncLossBehavior = SYNC_LOSS_CONTINUE_LOCAL;
+int lastSavedWirelessEnabled = 0;
+int lastSavedWirelessProfile = WIRELESS_PROFILE_BALANCED;
 
 const int DEFAULT_MOTION_SMOOTHING_SIZE = 100;
 const int MIN_MOTION_SMOOTHING_SIZE = 1;
@@ -178,6 +259,14 @@ const int DEFAULT_GYRO_RANGE = 2000;
 const int DEFAULT_BOOT_CALIBRATION_MODE = 1;
 const int DEFAULT_AUTOPLAY_ENABLED = 0;
 const int DEFAULT_AUTOPLAY_INTERVAL_MS = 20000;
+const int DEFAULT_PLAY_MODE = PLAY_MODE_MANUAL;
+const int DEFAULT_BOOT_MODE = BOOT_MODE_LAST;
+const int DEFAULT_SYNC_ENABLED = 0;
+const int DEFAULT_SYNC_GROUP_ID = 1;
+const int DEFAULT_SYNC_ROLE = SYNC_ROLE_STANDALONE;
+const int DEFAULT_SYNC_LOSS_BEHAVIOR = SYNC_LOSS_CONTINUE_LOCAL;
+const int DEFAULT_WIRELESS_ENABLED = 0;
+const int DEFAULT_WIRELESS_PROFILE = WIRELESS_PROFILE_BALANCED;
 const int MIN_AUTOPLAY_INTERVAL_MS = 1000;
 const int MAX_AUTOPLAY_INTERVAL_MS = 300000;
 
@@ -220,6 +309,12 @@ const unsigned long CLI_AUTOPARSE_TIMEOUT_MS = 200;
 bool cliSessionBannerPending = false;
 unsigned long cliSessionBecameActiveMs = 0;
 const unsigned long CLI_CONNECT_BANNER_DELAY_MS = 150;
+enum UsbProtocolMode
+{
+  USB_PROTOCOL_HUMAN = 0,
+  USB_PROTOCOL_MACHINE = 1
+};
+UsbProtocolMode usbProtocolMode = USB_PROTOCOL_HUMAN;
 
 // ============================================================================
 //  MPU6050 & MOTION STATE
@@ -323,6 +418,204 @@ struct PatternDefinition
   PatternCallback exit;
 };
 
+struct NkSyncBeaconV1
+{
+  uint8_t magic0;
+  uint8_t magic1;
+  uint8_t version;
+  uint8_t groupId;
+  uint8_t flags;
+  uint16_t seq;
+  uint8_t pattern;
+  uint8_t brightness;
+  uint32_t phaseMs;
+  uint16_t beatMs;
+  uint16_t crc;
+} __attribute__((packed));
+
+class PatternClock
+{
+public:
+  void begin()
+  {
+    baseMs = millis();
+    phaseMs = 0;
+    running = true;
+    armed = false;
+  }
+
+  uint32_t now() const
+  {
+    if (!running)
+    {
+      return phaseMs;
+    }
+    return phaseMs + (millis() - baseMs);
+  }
+
+  void setPhase(uint32_t phase)
+  {
+    phaseMs = phase;
+    baseMs = millis();
+    running = true;
+    armed = false;
+  }
+
+  void armStart(uint32_t localStartMs, uint32_t phase)
+  {
+    armedStartMs = localStartMs;
+    armedPhaseMs = phase;
+    armed = true;
+    running = false;
+  }
+
+  void tick()
+  {
+    if (armed && (int32_t)(millis() - armedStartMs) >= 0)
+    {
+      phaseMs = armedPhaseMs;
+      baseMs = armedStartMs;
+      running = true;
+      armed = false;
+    }
+  }
+
+  bool isRunning() const
+  {
+    return running;
+  }
+
+  bool isArmed() const
+  {
+    return armed;
+  }
+
+private:
+  uint32_t baseMs = 0;
+  uint32_t phaseMs = 0;
+  uint32_t armedStartMs = 0;
+  uint32_t armedPhaseMs = 0;
+  bool running = false;
+  bool armed = false;
+};
+
+class SyncEngine
+{
+public:
+  enum State
+  {
+    IDLE,
+    ARMED,
+    RUNNING,
+    LOST,
+    ERROR
+  };
+
+  void begin()
+  {
+    state = IDLE;
+    lastSeq = 0;
+    localStartMs = 0;
+    locked = false;
+    driftMs = 0;
+  }
+
+  bool arm(uint8_t group, uint8_t pattern, uint8_t brightness, uint32_t startInMs, uint32_t phase)
+  {
+    if (state == ARMED)
+    {
+      return false;
+    }
+    armedGroup = group;
+    armedPattern = pattern;
+    armedBrightness = brightness;
+    armedPhaseMs = phase;
+    localStartMs = millis() + startInMs;
+    state = ARMED;
+    locked = false;
+    lastSeq++;
+    return true;
+  }
+
+  void cancel()
+  {
+    state = IDLE;
+    locked = false;
+    driftMs = 0;
+  }
+
+  void tick()
+  {
+    if (state == ARMED && (int32_t)(millis() - localStartMs) >= 0)
+    {
+      state = RUNNING;
+      locked = true;
+    }
+  }
+
+  const char* stateName() const
+  {
+    switch (state)
+    {
+      case IDLE: return "idle";
+      case ARMED: return "armed";
+      case RUNNING: return "running";
+      case LOST: return "lost";
+      case ERROR: return "error";
+      default: return "error";
+    }
+  }
+
+  State state = IDLE;
+  uint16_t lastSeq = 0;
+  uint32_t localStartMs = 0;
+  uint32_t armedPhaseMs = 0;
+  uint8_t armedGroup = 1;
+  uint8_t armedPattern = 1;
+  uint8_t armedBrightness = MIN_BRIGHTNESS;
+  bool locked = false;
+  int32_t driftMs = 0;
+};
+
+class IResponseWriter
+{
+public:
+  virtual void print(const char* value) = 0;
+  virtual void print(const String& value) = 0;
+  virtual void print(int value) = 0;
+  virtual void print(unsigned int value) = 0;
+  virtual void print(unsigned long value) = 0;
+  virtual void println() = 0;
+};
+
+class SerialResponseWriter : public IResponseWriter
+{
+public:
+  void print(const char* value) override { Serial.print(value); }
+  void print(const String& value) override { Serial.print(value); }
+  void print(int value) override { Serial.print(value); }
+  void print(unsigned int value) override { Serial.print(value); }
+  void print(unsigned long value) override { Serial.print(value); }
+  void println() override { Serial.println(); }
+};
+
+struct NkKeyValue
+{
+  String key;
+  String value;
+};
+
+struct NkCommand
+{
+  String seq;
+  String command;
+  NkKeyValue pairs[18];
+  uint8_t pairCount = 0;
+};
+
+PatternClock patternClock;
+SyncEngine syncEngine;
+
 // ============================================================================
 //  HELPERS
 // ============================================================================
@@ -345,6 +638,34 @@ void applyConfiguredMotionSmoothing();
 void applyConfiguredSensorRanges();
 void applyConfiguredOffsets();
 void syncConfiguredOffsetsFromMPU();
+void applyDefaultExtendedConfig(bool resetName);
+void updateShortIdFromUid();
+void ensureDeviceIdentity();
+void copyCString(char* dest, size_t destSize, const char* source);
+void writeEEPROMCString(int address, const char* value, size_t maxLength);
+void readEEPROMCString(int address, char* value, size_t maxLength);
+bool isValidDeviceUid(const char* value);
+void generateDeviceUid();
+void setDefaultDeviceName();
+bool sanitizeDeviceName(String value, char* output, size_t outputSize);
+bool sanitizeUidString(String value, char* output, size_t outputSize);
+const char* playModeToString(int value);
+int parsePlayMode(String value);
+const char* bootModeToString(int value);
+int parseBootMode(String value);
+const char* syncRoleToString(int value);
+int parseSyncRole(String value);
+const char* syncLossBehaviorToString(int value);
+int parseSyncLossBehavior(String value);
+const char* wirelessProfileToString(int value);
+int parseWirelessProfile(String value);
+int sanitizeBinaryFlag(int value);
+int estimateBatteryPercent(float voltage);
+String formatHex32(uint32_t value);
+String buildPatternMaskFields();
+bool hasUnsavedConfigChanges();
+void markCurrentConfigSaved();
+void emitNk4Event(const char* eventName, const String& fields);
 int sanitizeAutoplayEnabled(int value);
 int sanitizeAutoplayIntervalMs(int value);
 void resetAutoplayTimer();
@@ -391,6 +712,14 @@ void resetTimingStats();
 void printTimingStatus();
 bool saveConfigToEEPROM(bool verbose);
 void readConfigFromEEPROM(bool verbose);
+bool parseNk4Line(const String& line, NkCommand* outCommand, String* errorCode, String* errorMessage);
+String nk4GetValue(const NkCommand& command, const char* key);
+bool nk4HasKey(const NkCommand& command, const char* key);
+bool handleNk4Line(const String& line);
+void handleNk4Command(const NkCommand& command, IResponseWriter& writer);
+void nk4WriteOk(IResponseWriter& writer, const String& seq, const String& fields);
+void nk4WriteError(IResponseWriter& writer, const String& seq, const char* code, const char* message);
+void showPlayModeIndicatorTest();
 void printCliHelp();
 void printCliPrompt();
 void setupCLI();
@@ -409,6 +738,7 @@ void onCliTiming(cmd* cPtr);
 void onCliOffsets(cmd* cPtr);
 void onCliCalibrate(cmd* cPtr);
 void onCliReboot(cmd* cPtr);
+void onCliProtocol(cmd* cPtr);
 void onCliPatterns(cmd* cPtr);
 void onCliEnablePattern(cmd* cPtr);
 void onCliDisablePattern(cmd* cPtr);
@@ -629,8 +959,327 @@ int parseOnOffValue(String valueText)
   return -1;
 }
 
+int sanitizeBinaryFlag(int value)
+{
+  return value != 0 ? 1 : 0;
+}
+
+void copyCString(char* dest, size_t destSize, const char* source)
+{
+  if (dest == NULL || destSize == 0)
+  {
+    return;
+  }
+  if (source == NULL)
+  {
+    dest[0] = '\0';
+    return;
+  }
+  strncpy(dest, source, destSize - 1);
+  dest[destSize - 1] = '\0';
+}
+
+void writeEEPROMCString(int address, const char* value, size_t maxLength)
+{
+  for (size_t i = 0; i < maxLength; i++)
+  {
+    char ch = (value != NULL && value[i] != '\0') ? value[i] : '\0';
+    EEPROM.write(address + (int)i, (uint8_t)ch);
+    if (ch == '\0')
+    {
+      for (size_t j = i + 1; j < maxLength; j++)
+      {
+        EEPROM.write(address + (int)j, 0);
+      }
+      break;
+    }
+  }
+}
+
+void readEEPROMCString(int address, char* value, size_t maxLength)
+{
+  if (value == NULL || maxLength == 0)
+  {
+    return;
+  }
+  for (size_t i = 0; i < maxLength - 1; i++)
+  {
+    value[i] = (char)EEPROM.read(address + (int)i);
+    if (value[i] == '\0')
+    {
+      value[i] = '\0';
+      return;
+    }
+  }
+  value[maxLength - 1] = '\0';
+}
+
+bool isValidDeviceUid(const char* value)
+{
+  if (value == NULL || strlen(value) != DEVICE_UID_LENGTH)
+  {
+    return false;
+  }
+  for (size_t i = 0; i < DEVICE_UID_LENGTH; i++)
+  {
+    const char ch = value[i];
+    if (!((ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'F')))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+void updateShortIdFromUid()
+{
+  if (!isValidDeviceUid(currentDeviceUid))
+  {
+    copyCString(currentShortId, sizeof(currentShortId), "000000");
+    return;
+  }
+  copyCString(currentShortId, sizeof(currentShortId), currentDeviceUid + DEVICE_UID_LENGTH - SHORT_ID_LENGTH);
+}
+
+void generateDeviceUid()
+{
+  const char* hex = "0123456789ABCDEF";
+  randomSeed((uint32_t)micros() ^ ((uint32_t)analogRead(PIN_BATTERY_ADC) << 10) ^ ((uint32_t)millis() << 20));
+  for (size_t i = 0; i < DEVICE_UID_LENGTH; i++)
+  {
+    currentDeviceUid[i] = hex[random(0, 16)];
+  }
+  currentDeviceUid[DEVICE_UID_LENGTH] = '\0';
+  updateShortIdFromUid();
+}
+
+void setDefaultDeviceName()
+{
+  String name = "NK-";
+  name += currentShortId;
+  copyCString(currentDeviceName, sizeof(currentDeviceName), name.c_str());
+}
+
+bool sanitizeDeviceName(String value, char* output, size_t outputSize)
+{
+  value.trim();
+  if (value.length() == 0 || output == NULL || outputSize < 2)
+  {
+    return false;
+  }
+  if (value.length() >= (int)outputSize)
+  {
+    return false;
+  }
+  for (int i = 0; i < value.length(); i++)
+  {
+    const char ch = value[i];
+    if (!isalnum((int)ch) && ch != '-' && ch != '_' && ch != '.')
+    {
+      return false;
+    }
+  }
+  copyCString(output, outputSize, value.c_str());
+  return true;
+}
+
+bool sanitizeUidString(String value, char* output, size_t outputSize)
+{
+  value.trim();
+  value.toUpperCase();
+  if (output == NULL || outputSize < DEVICE_UID_LENGTH + 1 || value.length() != (int)DEVICE_UID_LENGTH)
+  {
+    return false;
+  }
+  for (int i = 0; i < value.length(); i++)
+  {
+    const char ch = value[i];
+    if (!isxdigit((int)ch))
+    {
+      return false;
+    }
+  }
+  copyCString(output, outputSize, value.c_str());
+  return true;
+}
+
+void applyDefaultExtendedConfig(bool resetName)
+{
+  currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+  currentPlayMode = DEFAULT_PLAY_MODE;
+  currentBootMode = DEFAULT_BOOT_MODE;
+  currentSyncEnabled = DEFAULT_SYNC_ENABLED;
+  currentSyncGroupId = DEFAULT_SYNC_GROUP_ID;
+  currentSyncRole = DEFAULT_SYNC_ROLE;
+  currentSyncMasterUid[0] = '\0';
+  currentSyncLossBehavior = DEFAULT_SYNC_LOSS_BEHAVIOR;
+  currentWirelessEnabled = DEFAULT_WIRELESS_ENABLED;
+  currentWirelessProfile = DEFAULT_WIRELESS_PROFILE;
+  if (resetName)
+  {
+    setDefaultDeviceName();
+  }
+}
+
+void ensureDeviceIdentity()
+{
+  if (!isValidDeviceUid(currentDeviceUid))
+  {
+    generateDeviceUid();
+  }
+  else
+  {
+    updateShortIdFromUid();
+  }
+
+  char sanitizedName[DEVICE_NAME_LENGTH + 1];
+  if (!sanitizeDeviceName(String(currentDeviceName), sanitizedName, sizeof(sanitizedName)))
+  {
+    setDefaultDeviceName();
+  }
+  else
+  {
+    copyCString(currentDeviceName, sizeof(currentDeviceName), sanitizedName);
+  }
+}
+
+const char* playModeToString(int value)
+{
+  switch (value)
+  {
+    case PLAY_MODE_AUTOPLAY: return "autoplay";
+    case PLAY_MODE_SYNC: return "sync";
+    case PLAY_MODE_MANUAL:
+    default: return "manual";
+  }
+}
+
+int parsePlayMode(String value)
+{
+  value.trim();
+  value.toLowerCase();
+  if (value == "manual") return PLAY_MODE_MANUAL;
+  if (value == "autoplay") return PLAY_MODE_AUTOPLAY;
+  if (value == "sync") return PLAY_MODE_SYNC;
+  return -1;
+}
+
+const char* bootModeToString(int value)
+{
+  (void)value;
+  return "last";
+}
+
+int parseBootMode(String value)
+{
+  value.trim();
+  value.toLowerCase();
+  if (value == "last" || value == "0") return BOOT_MODE_LAST;
+  return -1;
+}
+
+const char* syncRoleToString(int value)
+{
+  switch (value)
+  {
+    case SYNC_ROLE_MASTER: return "master";
+    case SYNC_ROLE_FOLLOWER: return "follower";
+    case SYNC_ROLE_STANDALONE:
+    default: return "standalone";
+  }
+}
+
+int parseSyncRole(String value)
+{
+  value.trim();
+  value.toLowerCase();
+  if (value == "standalone") return SYNC_ROLE_STANDALONE;
+  if (value == "master") return SYNC_ROLE_MASTER;
+  if (value == "follower") return SYNC_ROLE_FOLLOWER;
+  return -1;
+}
+
+const char* syncLossBehaviorToString(int value)
+{
+  switch (value)
+  {
+    case SYNC_LOSS_FALLBACK_AUTOPLAY: return "fallback_autoplay";
+    case SYNC_LOSS_WARNING_ONLY: return "warning_only";
+    case SYNC_LOSS_CONTINUE_LOCAL:
+    default: return "continue_local";
+  }
+}
+
+int parseSyncLossBehavior(String value)
+{
+  value.trim();
+  value.toLowerCase();
+  if (value == "continue_local") return SYNC_LOSS_CONTINUE_LOCAL;
+  if (value == "fallback_autoplay") return SYNC_LOSS_FALLBACK_AUTOPLAY;
+  if (value == "warning_only") return SYNC_LOSS_WARNING_ONLY;
+  return -1;
+}
+
+const char* wirelessProfileToString(int value)
+{
+  switch (value)
+  {
+    case WIRELESS_PROFILE_LONG_RANGE: return "long_range";
+    case WIRELESS_PROFILE_FAST_SYNC: return "fast_sync";
+    case WIRELESS_PROFILE_BALANCED:
+    default: return "balanced";
+  }
+}
+
+int parseWirelessProfile(String value)
+{
+  value.trim();
+  value.toLowerCase();
+  if (value == "long_range") return WIRELESS_PROFILE_LONG_RANGE;
+  if (value == "balanced") return WIRELESS_PROFILE_BALANCED;
+  if (value == "fast_sync") return WIRELESS_PROFILE_FAST_SYNC;
+  return -1;
+}
+
+int estimateBatteryPercent(float voltage)
+{
+  if (voltage >= CHARGING_FULL_THRESHOLD) return 100;
+  if (voltage <= BATTERY_BAR_1_RED_THRESHOLD) return 0;
+  return constrain((int)(((voltage - BATTERY_BAR_1_RED_THRESHOLD) * 100.0f) / (CHARGING_FULL_THRESHOLD - BATTERY_BAR_1_RED_THRESHOLD)), 0, 100);
+}
+
+String formatHex32(uint32_t value)
+{
+  char buffer[11];
+  snprintf(buffer, sizeof(buffer), "0x%08lX", (unsigned long)value);
+  return String(buffer);
+}
+
+String buildPatternMaskFields()
+{
+  String fields = "count=";
+  fields += PATTERN_COUNT;
+  fields += " active=";
+  fields += currentPattern;
+  fields += " enabled_mask=";
+  fields += formatHex32(currentEnabledPatternMask);
+  fields += " inverted_mask=";
+  fields += formatHex32(currentInvertedPatternMask);
+  return fields;
+}
+
 void announcePatternChange(const char* source)
 {
+  if (usbProtocolMode == USB_PROTOCOL_MACHINE)
+  {
+    String fields = "source=";
+    fields += source != NULL ? source : "unknown";
+    fields += " pattern=";
+    fields += currentPattern;
+    emitNk4Event("pattern_changed", fields);
+    return;
+  }
+
   Serial.print("INFO pattern_changed source=");
   Serial.print(source != NULL ? source : "unknown");
   Serial.print(" pattern=");
@@ -1173,6 +1822,40 @@ void normalizePersistentConfig()
 
   currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
   currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
+  currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+  ensureDeviceIdentity();
+  if (currentPlayMode < PLAY_MODE_MANUAL || currentPlayMode > PLAY_MODE_SYNC)
+  {
+    currentPlayMode = DEFAULT_PLAY_MODE;
+  }
+  if (currentBootMode != BOOT_MODE_LAST)
+  {
+    currentBootMode = DEFAULT_BOOT_MODE;
+  }
+  currentSyncEnabled = sanitizeBinaryFlag(currentSyncEnabled);
+  currentSyncGroupId = constrain(currentSyncGroupId, 0, 255);
+  if (currentSyncRole < SYNC_ROLE_STANDALONE || currentSyncRole > SYNC_ROLE_FOLLOWER)
+  {
+    currentSyncRole = DEFAULT_SYNC_ROLE;
+  }
+  char sanitizedMasterUid[DEVICE_UID_LENGTH + 1];
+  if (strlen(currentSyncMasterUid) > 0 && !sanitizeUidString(String(currentSyncMasterUid), sanitizedMasterUid, sizeof(sanitizedMasterUid)))
+  {
+    currentSyncMasterUid[0] = '\0';
+  }
+  else if (strlen(currentSyncMasterUid) > 0)
+  {
+    copyCString(currentSyncMasterUid, sizeof(currentSyncMasterUid), sanitizedMasterUid);
+  }
+  if (currentSyncLossBehavior < SYNC_LOSS_CONTINUE_LOCAL || currentSyncLossBehavior > SYNC_LOSS_WARNING_ONLY)
+  {
+    currentSyncLossBehavior = DEFAULT_SYNC_LOSS_BEHAVIOR;
+  }
+  currentWirelessEnabled = sanitizeBinaryFlag(currentWirelessEnabled);
+  if (currentWirelessProfile < WIRELESS_PROFILE_LONG_RANGE || currentWirelessProfile > WIRELESS_PROFILE_FAST_SYNC)
+  {
+    currentWirelessProfile = DEFAULT_WIRELESS_PROFILE;
+  }
 }
 
 bool isValidPatternId(int value)
@@ -1467,6 +2150,72 @@ void resetTimingStats()
   loopTimingSamples = 0;
 }
 
+void markCurrentConfigSaved()
+{
+  lastSavedPattern = currentPattern;
+  lastSavedBrightness = currentBrightness;
+  lastSavedStripLength = currentStripLength;
+  lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
+  lastSavedAccelRange = currentAccelRange;
+  lastSavedGyroRange = currentGyroRange;
+  lastSavedBootCalibrationMode = currentBootCalibrationMode;
+  lastSavedXAccelOffset = currentXAccelOffset;
+  lastSavedYAccelOffset = currentYAccelOffset;
+  lastSavedZAccelOffset = currentZAccelOffset;
+  lastSavedXGyroOffset = currentXGyroOffset;
+  lastSavedYGyroOffset = currentYGyroOffset;
+  lastSavedZGyroOffset = currentZGyroOffset;
+  lastSavedEnabledPatternMask = currentEnabledPatternMask;
+  lastSavedInvertedPatternMask = currentInvertedPatternMask;
+  lastSavedAutoplayEnabled = currentAutoplayEnabled;
+  lastSavedAutoplayIntervalMs = currentAutoplayIntervalMs;
+  lastSavedConfigVersion = currentConfigVersion;
+  copyCString(lastSavedDeviceUid, sizeof(lastSavedDeviceUid), currentDeviceUid);
+  copyCString(lastSavedDeviceName, sizeof(lastSavedDeviceName), currentDeviceName);
+  lastSavedPlayMode = currentPlayMode;
+  lastSavedBootMode = currentBootMode;
+  lastSavedSyncEnabled = currentSyncEnabled;
+  lastSavedSyncGroupId = currentSyncGroupId;
+  lastSavedSyncRole = currentSyncRole;
+  copyCString(lastSavedSyncMasterUid, sizeof(lastSavedSyncMasterUid), currentSyncMasterUid);
+  lastSavedSyncLossBehavior = currentSyncLossBehavior;
+  lastSavedWirelessEnabled = currentWirelessEnabled;
+  lastSavedWirelessProfile = currentWirelessProfile;
+}
+
+bool hasUnsavedConfigChanges()
+{
+  return currentPattern != lastSavedPattern ||
+      currentBrightness != lastSavedBrightness ||
+      currentStripLength != lastSavedStripLength ||
+      currentMotionSmoothingSize != lastSavedMotionSmoothingSize ||
+      currentAccelRange != lastSavedAccelRange ||
+      currentGyroRange != lastSavedGyroRange ||
+      currentBootCalibrationMode != lastSavedBootCalibrationMode ||
+      currentXAccelOffset != lastSavedXAccelOffset ||
+      currentYAccelOffset != lastSavedYAccelOffset ||
+      currentZAccelOffset != lastSavedZAccelOffset ||
+      currentXGyroOffset != lastSavedXGyroOffset ||
+      currentYGyroOffset != lastSavedYGyroOffset ||
+      currentZGyroOffset != lastSavedZGyroOffset ||
+      currentEnabledPatternMask != lastSavedEnabledPatternMask ||
+      currentInvertedPatternMask != lastSavedInvertedPatternMask ||
+      currentAutoplayEnabled != lastSavedAutoplayEnabled ||
+      currentAutoplayIntervalMs != lastSavedAutoplayIntervalMs ||
+      currentConfigVersion != lastSavedConfigVersion ||
+      strcmp(currentDeviceUid, lastSavedDeviceUid) != 0 ||
+      strcmp(currentDeviceName, lastSavedDeviceName) != 0 ||
+      currentPlayMode != lastSavedPlayMode ||
+      currentBootMode != lastSavedBootMode ||
+      currentSyncEnabled != lastSavedSyncEnabled ||
+      currentSyncGroupId != lastSavedSyncGroupId ||
+      currentSyncRole != lastSavedSyncRole ||
+      strcmp(currentSyncMasterUid, lastSavedSyncMasterUid) != 0 ||
+      currentSyncLossBehavior != lastSavedSyncLossBehavior ||
+      currentWirelessEnabled != lastSavedWirelessEnabled ||
+      currentWirelessProfile != lastSavedWirelessProfile;
+}
+
 bool saveConfigToEEPROM(bool verbose)
 {
   normalizePersistentConfig();
@@ -1488,6 +2237,18 @@ bool saveConfigToEEPROM(bool verbose)
   EEPROM.put(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
   EEPROM.put(EEPROM_ADDR_AUTOPLAY_ENABLED, currentAutoplayEnabled);
   EEPROM.put(EEPROM_ADDR_AUTOPLAY_INTERVAL_MS, currentAutoplayIntervalMs);
+  writeEEPROMCString(EEPROM_ADDR_DEVICE_UID, currentDeviceUid, DEVICE_UID_LENGTH + 1);
+  writeEEPROMCString(EEPROM_ADDR_DEVICE_NAME, currentDeviceName, DEVICE_NAME_LENGTH + 1);
+  EEPROM.put(EEPROM_ADDR_CONFIG_VERSION, currentConfigVersion);
+  EEPROM.put(EEPROM_ADDR_PLAY_MODE, currentPlayMode);
+  EEPROM.put(EEPROM_ADDR_BOOT_MODE, currentBootMode);
+  EEPROM.put(EEPROM_ADDR_SYNC_ENABLED, currentSyncEnabled);
+  EEPROM.put(EEPROM_ADDR_SYNC_GROUP_ID, currentSyncGroupId);
+  EEPROM.put(EEPROM_ADDR_SYNC_ROLE, currentSyncRole);
+  writeEEPROMCString(EEPROM_ADDR_SYNC_MASTER_UID, currentSyncMasterUid, DEVICE_UID_LENGTH + 1);
+  EEPROM.put(EEPROM_ADDR_SYNC_LOSS_BEHAVIOR, currentSyncLossBehavior);
+  EEPROM.put(EEPROM_ADDR_WIRELESS_ENABLED, currentWirelessEnabled);
+  EEPROM.put(EEPROM_ADDR_WIRELESS_PROFILE, currentWirelessProfile);
 
   if (verbose)
   {
@@ -1509,6 +2270,18 @@ bool saveConfigToEEPROM(bool verbose)
     Serial.println(autoplayEnabledToString());
     Serial.print("Autoplay interval (s): ");
     Serial.println(currentAutoplayIntervalMs / 1000);
+    Serial.print("Firmware version: ");
+    Serial.println(FIRMWARE_VERSION);
+    Serial.print("Device UID: ");
+    Serial.println(currentDeviceUid);
+    Serial.print("Device name: ");
+    Serial.println(currentDeviceName);
+    Serial.print("Play mode: ");
+    Serial.println(playModeToString(currentPlayMode));
+    Serial.print("Sync role: ");
+    Serial.println(syncRoleToString(currentSyncRole));
+    Serial.print("Wireless profile: ");
+    Serial.println(wirelessProfileToString(currentWirelessProfile));
     Serial.print("Enabled patterns: ");
     printEnabledPatternsList();
     Serial.println();
@@ -1520,23 +2293,7 @@ bool saveConfigToEEPROM(bool verbose)
 
   if (EEPROM.commit())
   {
-    lastSavedPattern = currentPattern;
-    lastSavedBrightness = currentBrightness;
-    lastSavedStripLength = currentStripLength;
-    lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
-    lastSavedAccelRange = currentAccelRange;
-    lastSavedGyroRange = currentGyroRange;
-    lastSavedBootCalibrationMode = currentBootCalibrationMode;
-    lastSavedXAccelOffset = currentXAccelOffset;
-    lastSavedYAccelOffset = currentYAccelOffset;
-    lastSavedZAccelOffset = currentZAccelOffset;
-    lastSavedXGyroOffset = currentXGyroOffset;
-    lastSavedYGyroOffset = currentYGyroOffset;
-    lastSavedZGyroOffset = currentZGyroOffset;
-    lastSavedEnabledPatternMask = currentEnabledPatternMask;
-    lastSavedInvertedPatternMask = currentInvertedPatternMask;
-    lastSavedAutoplayEnabled = currentAutoplayEnabled;
-    lastSavedAutoplayIntervalMs = currentAutoplayIntervalMs;
+    markCurrentConfigSaved();
     if (verbose)
     {
       Serial.println("New values successfully saved to EEPROM.");
@@ -1554,6 +2311,7 @@ bool saveConfigToEEPROM(bool verbose)
 void readConfigFromEEPROM(bool verbose)
 {
   int magic = 0;
+  bool loadedExtendedConfig = false;
   currentPattern = FIRST_PATTERN_ID;
   currentBrightness = MIN_BRIGHTNESS;
   currentStripLength = DEFAULT_LEDS_PER_STRIP;
@@ -1571,6 +2329,9 @@ void readConfigFromEEPROM(bool verbose)
   currentInvertedPatternMask = 0;
   currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
   currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
+  currentDeviceUid[0] = '\0';
+  currentDeviceName[0] = '\0';
+  applyDefaultExtendedConfig(false);
 
   EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
   EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
@@ -1592,27 +2353,35 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
     EEPROM.get(EEPROM_ADDR_AUTOPLAY_ENABLED, currentAutoplayEnabled);
     EEPROM.get(EEPROM_ADDR_AUTOPLAY_INTERVAL_MS, currentAutoplayIntervalMs);
+    int storedConfigVersion = 0;
+    EEPROM.get(EEPROM_ADDR_CONFIG_VERSION, storedConfigVersion);
+    if (storedConfigVersion == CONFIG_VERSION_4_ALPHA)
+    {
+      loadedExtendedConfig = true;
+      currentConfigVersion = storedConfigVersion;
+      readEEPROMCString(EEPROM_ADDR_DEVICE_UID, currentDeviceUid, DEVICE_UID_LENGTH + 1);
+      readEEPROMCString(EEPROM_ADDR_DEVICE_NAME, currentDeviceName, DEVICE_NAME_LENGTH + 1);
+      EEPROM.get(EEPROM_ADDR_PLAY_MODE, currentPlayMode);
+      EEPROM.get(EEPROM_ADDR_BOOT_MODE, currentBootMode);
+      EEPROM.get(EEPROM_ADDR_SYNC_ENABLED, currentSyncEnabled);
+      EEPROM.get(EEPROM_ADDR_SYNC_GROUP_ID, currentSyncGroupId);
+      EEPROM.get(EEPROM_ADDR_SYNC_ROLE, currentSyncRole);
+      readEEPROMCString(EEPROM_ADDR_SYNC_MASTER_UID, currentSyncMasterUid, DEVICE_UID_LENGTH + 1);
+      EEPROM.get(EEPROM_ADDR_SYNC_LOSS_BEHAVIOR, currentSyncLossBehavior);
+      EEPROM.get(EEPROM_ADDR_WIRELESS_ENABLED, currentWirelessEnabled);
+      EEPROM.get(EEPROM_ADDR_WIRELESS_PROFILE, currentWirelessProfile);
+    }
+  }
+  // Future migrations can branch on storedConfigVersion here while leaving the
+  // original 3.x EEPROM addresses intact for backward compatibility.
+  if (!loadedExtendedConfig)
+  {
+    currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
   }
   normalizePersistentConfig();
-  lastSavedPattern = currentPattern;
-  lastSavedBrightness = currentBrightness;
-  lastSavedStripLength = currentStripLength;
-  lastSavedMotionSmoothingSize = currentMotionSmoothingSize;
-  lastSavedAccelRange = currentAccelRange;
-  lastSavedGyroRange = currentGyroRange;
-  lastSavedBootCalibrationMode = currentBootCalibrationMode;
-  lastSavedXAccelOffset = currentXAccelOffset;
-  lastSavedYAccelOffset = currentYAccelOffset;
-  lastSavedZAccelOffset = currentZAccelOffset;
-  lastSavedXGyroOffset = currentXGyroOffset;
-  lastSavedYGyroOffset = currentYGyroOffset;
-  lastSavedZGyroOffset = currentZGyroOffset;
-  lastSavedEnabledPatternMask = currentEnabledPatternMask;
-  lastSavedInvertedPatternMask = currentInvertedPatternMask;
-  lastSavedAutoplayEnabled = currentAutoplayEnabled;
-  lastSavedAutoplayIntervalMs = currentAutoplayIntervalMs;
+  markCurrentConfigSaved();
 
-  if (magic != EEPROM_MAGIC)
+  if (magic != EEPROM_MAGIC || !loadedExtendedConfig)
   {
     saveConfigToEEPROM(false);
   }
@@ -1638,6 +2407,18 @@ void readConfigFromEEPROM(bool verbose)
     Serial.println(autoplayEnabledToString());
     Serial.print("Autoplay interval (s): ");
     Serial.println(currentAutoplayIntervalMs / 1000);
+    Serial.print("Firmware version: ");
+    Serial.println(FIRMWARE_VERSION);
+    Serial.print("Device UID: ");
+    Serial.println(currentDeviceUid);
+    Serial.print("Device name: ");
+    Serial.println(currentDeviceName);
+    Serial.print("Play mode: ");
+    Serial.println(playModeToString(currentPlayMode));
+    Serial.print("Sync role: ");
+    Serial.println(syncRoleToString(currentSyncRole));
+    Serial.print("Wireless profile: ");
+    Serial.println(wirelessProfileToString(currentWirelessProfile));
     Serial.print("Enabled patterns: ");
     printEnabledPatternsList();
     Serial.println();
@@ -1646,6 +2427,666 @@ void readConfigFromEEPROM(bool verbose)
     Serial.println();
     printOffsets();
   }
+}
+
+void nk4WriteOk(IResponseWriter& writer, const String& seq, const String& fields)
+{
+  writer.print("NK4 seq=");
+  writer.print(seq.length() > 0 ? seq : "0");
+  writer.print(" ok");
+  if (fields.length() > 0)
+  {
+    writer.print(" ");
+    writer.print(fields);
+  }
+  writer.println();
+}
+
+void nk4WriteError(IResponseWriter& writer, const String& seq, const char* code, const char* message)
+{
+  writer.print("NK4 seq=");
+  writer.print(seq.length() > 0 ? seq : "0");
+  writer.print(" err code=");
+  writer.print(code != NULL ? code : "internal_error");
+  writer.print(" msg=");
+  writer.print(message != NULL ? message : "error");
+  writer.println();
+}
+
+void emitNk4Event(const char* eventName, const String& fields)
+{
+  if (!SerialSessionActive || usbProtocolMode != USB_PROTOCOL_MACHINE)
+  {
+    return;
+  }
+  Serial.print("NK4 event=");
+  Serial.print(eventName != NULL ? eventName : "event");
+  if (fields.length() > 0)
+  {
+    Serial.print(" ");
+    Serial.print(fields);
+  }
+  Serial.println();
+}
+
+String nk4GetValue(const NkCommand& command, const char* key)
+{
+  for (uint8_t i = 0; i < command.pairCount; i++)
+  {
+    if (command.pairs[i].key == key)
+    {
+      return command.pairs[i].value;
+    }
+  }
+  return "";
+}
+
+bool nk4HasKey(const NkCommand& command, const char* key)
+{
+  for (uint8_t i = 0; i < command.pairCount; i++)
+  {
+    if (command.pairs[i].key == key)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool parseNk4Line(const String& line, NkCommand* outCommand, String* errorCode, String* errorMessage)
+{
+  if (outCommand == NULL)
+  {
+    return false;
+  }
+
+  *outCommand = NkCommand();
+  String input = line;
+  input.trim();
+  if (!input.startsWith("NK4"))
+  {
+    if (errorCode != NULL) *errorCode = "invalid_command";
+    if (errorMessage != NULL) *errorMessage = "expected_NK4";
+    return false;
+  }
+
+  int start = 3;
+  while (start < input.length())
+  {
+    while (start < input.length() && input[start] == ' ')
+    {
+      start++;
+    }
+    if (start >= input.length())
+    {
+      break;
+    }
+
+    int space = input.indexOf(' ', start);
+    String token = (space >= 0) ? input.substring(start, space) : input.substring(start);
+    int equals = token.indexOf('=');
+    if (equals <= 0 || equals == token.length() - 1)
+    {
+      if (errorCode != NULL) *errorCode = "invalid_key";
+      if (errorMessage != NULL) *errorMessage = "bad_token";
+      return false;
+    }
+
+    String key = token.substring(0, equals);
+    String value = token.substring(equals + 1);
+    key.toLowerCase();
+    if (key == "seq")
+    {
+      outCommand->seq = value;
+    }
+    else if (key == "cmd")
+    {
+      value.toLowerCase();
+      outCommand->command = value;
+    }
+    else
+    {
+      if (outCommand->pairCount >= (sizeof(outCommand->pairs) / sizeof(outCommand->pairs[0])))
+      {
+        if (errorCode != NULL) *errorCode = "range_error";
+        if (errorMessage != NULL) *errorMessage = "too_many_keys";
+        return false;
+      }
+      outCommand->pairs[outCommand->pairCount].key = key;
+      outCommand->pairs[outCommand->pairCount].value = value;
+      outCommand->pairCount++;
+    }
+
+    if (space < 0)
+    {
+      break;
+    }
+    start = space + 1;
+  }
+
+  if (outCommand->seq.length() == 0)
+  {
+    if (errorCode != NULL) *errorCode = "invalid_key";
+    if (errorMessage != NULL) *errorMessage = "missing_seq";
+    return false;
+  }
+  if (outCommand->command.length() == 0)
+  {
+    if (errorCode != NULL) *errorCode = "invalid_command";
+    if (errorMessage != NULL) *errorMessage = "missing_cmd";
+    return false;
+  }
+
+  return true;
+}
+
+void showPlayModeIndicatorTest()
+{
+  const CRGB colors[] = {
+      CRGB::Blue,
+      CRGB::Green,
+      CRGB::Cyan,
+      CRGB::Magenta,
+      CRGB::Red};
+  const size_t colorCount = sizeof(colors) / sizeof(colors[0]);
+  const uint8_t previousBrightness = BRIGHTNESS;
+  FastLED.setBrightness(BRIGHTNESS);
+  for (size_t i = 0; i < colorCount; i++)
+  {
+    fill_solid(Strip, TOTAL_LEDS, colors[i]);
+    clearInactiveLeds();
+    syncLogicalToPhysicalLeds();
+    FastLED.show();
+    delay(220);
+  }
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  clearInactiveLeds();
+  syncLogicalToPhysicalLeds();
+  FastLED.show();
+  FastLED.setBrightness(previousBrightness);
+}
+
+void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
+{
+  const String& seq = command.seq;
+
+  if (command.command == "hello")
+  {
+    String fields = "proto=";
+    fields += NK4_PROTOCOL_VERSION;
+    fields += " fw=";
+    fields += FIRMWARE_VERSION;
+    fields += " name=";
+    fields += currentDeviceName;
+    fields += " uid=";
+    fields += currentDeviceUid;
+    fields += " hw=";
+    fields += NIGHTKITE_HARDWARE;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "info")
+  {
+    String fields = "uid=";
+    fields += currentDeviceUid;
+    fields += " short_id=";
+    fields += currentShortId;
+    fields += " name=";
+    fields += currentDeviceName;
+    fields += " fw=";
+    fields += FIRMWARE_VERSION;
+    fields += " proto=";
+    fields += NK4_PROTOCOL_VERSION;
+    fields += " hw=";
+    fields += NIGHTKITE_HARDWARE;
+    fields += " ble_supported=";
+    fields += (NIGHTKITE_BLE ? 1 : 0);
+    fields += " sync_supported=1 patterns=";
+    fields += PATTERN_COUNT;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "caps")
+  {
+    String fields = "pattern_count=";
+    fields += PATTERN_COUNT;
+    fields += " brightness_levels=95,127,159,191,223,255 battery=1 imu=1 autoplay=1 sync=1 ble=";
+    fields += (NIGHTKITE_BLE ? 1 : 0);
+    fields += " wireless_profiles=long_range,balanced,fast_sync";
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "status")
+  {
+    RawVoltage = readBatteryRawValue();
+    Voltage = convertBatteryRawToVoltage(RawVoltage);
+    String fields = "pattern=";
+    fields += currentPattern;
+    fields += " brightness=";
+    fields += currentBrightness;
+    fields += " battery_percent=";
+    fields += estimateBatteryPercent(Voltage);
+    fields += " battery_voltage=";
+    fields += String(Voltage, 3);
+    fields += " usb=";
+    fields += (UsbPowerRaw == 1 ? 1 : 0);
+    fields += " imu=";
+    fields += (DMPReady ? 1 : 0);
+    fields += " fps=";
+    fields += FastLED.getFPS();
+    fields += " play_mode=";
+    fields += playModeToString(currentPlayMode);
+    fields += " autoplay=";
+    fields += currentAutoplayEnabled;
+    fields += " sync_state=";
+    fields += syncEngine.stateName();
+    fields += " sync_role=";
+    fields += syncRoleToString(currentSyncRole);
+    fields += " sync_group=";
+    fields += currentSyncGroupId;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "patterns")
+  {
+    nk4WriteOk(writer, seq, buildPatternMaskFields());
+    return;
+  }
+
+  if (command.command == "get")
+  {
+    String section = nk4GetValue(command, "section");
+    section.toLowerCase();
+    if (section == "sync")
+    {
+      String fields = "sync_enabled=";
+      fields += currentSyncEnabled;
+      fields += " sync_group=";
+      fields += currentSyncGroupId;
+      fields += " sync_role=";
+      fields += syncRoleToString(currentSyncRole);
+      fields += " sync_loss_behavior=";
+      fields += syncLossBehaviorToString(currentSyncLossBehavior);
+      fields += " master_uid=";
+      fields += strlen(currentSyncMasterUid) > 0 ? currentSyncMasterUid : "none";
+      nk4WriteOk(writer, seq, fields);
+      return;
+    }
+    if (section == "wireless")
+    {
+      String fields = "wireless_enabled=";
+      fields += currentWirelessEnabled;
+      fields += " wireless_profile=";
+      fields += wirelessProfileToString(currentWirelessProfile);
+      fields += " ble=";
+      fields += (NIGHTKITE_BLE ? 1 : 0);
+      fields += " rm2=";
+      fields += (NIGHTKITE_RM2 ? 1 : 0);
+      nk4WriteOk(writer, seq, fields);
+      return;
+    }
+    if (section == "play")
+    {
+      String fields = "play_mode=";
+      fields += playModeToString(currentPlayMode);
+      fields += " boot_mode=";
+      fields += bootModeToString(currentBootMode);
+      fields += " autoplay_enabled=";
+      fields += currentAutoplayEnabled;
+      fields += " autoplay_interval=";
+      fields += currentAutoplayIntervalMs / 1000;
+      fields += " pattern=";
+      fields += currentPattern;
+      fields += " brightness=";
+      fields += currentBrightness;
+      nk4WriteOk(writer, seq, fields);
+      return;
+    }
+    if (section == "patterns")
+    {
+      nk4WriteOk(writer, seq, buildPatternMaskFields());
+      return;
+    }
+    nk4WriteError(writer, seq, "invalid_value", "bad_section");
+    return;
+  }
+
+  if (command.command == "set")
+  {
+    for (uint8_t i = 0; i < command.pairCount; i++)
+    {
+      const String key = command.pairs[i].key;
+      const String value = command.pairs[i].value;
+      if (key == "name")
+      {
+        char sanitized[DEVICE_NAME_LENGTH + 1];
+        if (!sanitizeDeviceName(value, sanitized, sizeof(sanitized)))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_name");
+          return;
+        }
+        copyCString(currentDeviceName, sizeof(currentDeviceName), sanitized);
+      }
+      else if (key == "uid" || key == "device_uid")
+      {
+        nk4WriteError(writer, seq, "locked", "uid_locked");
+        return;
+      }
+      else if (key == "pattern")
+      {
+        int valueInt = value.toInt();
+        if (!isValidPatternId(valueInt))
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_pattern");
+          return;
+        }
+        switchToPattern((uint8_t)valueInt, true);
+      }
+      else if (key == "brightness")
+      {
+        int valueInt = value.toInt();
+        if (!isValidBrightnessLevel(valueInt))
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_brightness");
+          return;
+        }
+        currentBrightness = valueInt;
+        BRIGHTNESS = currentBrightness;
+        FastLED.setBrightness(BRIGHTNESS);
+      }
+      else if (key == "sync_enabled")
+      {
+        currentSyncEnabled = sanitizeBinaryFlag(value.toInt());
+      }
+      else if (key == "sync_group" || key == "sync_group_id")
+      {
+        int valueInt = value.toInt();
+        if (valueInt < 0 || valueInt > 255)
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_sync_group");
+          return;
+        }
+        currentSyncGroupId = valueInt;
+      }
+      else if (key == "sync_role")
+      {
+        int role = parseSyncRole(value);
+        if (role < 0)
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_sync_role");
+          return;
+        }
+        currentSyncRole = role;
+      }
+      else if (key == "sync_master_uid" || key == "master_uid")
+      {
+        if (value == "none" || value == "0")
+        {
+          currentSyncMasterUid[0] = '\0';
+        }
+        else
+        {
+          char sanitized[DEVICE_UID_LENGTH + 1];
+          if (!sanitizeUidString(value, sanitized, sizeof(sanitized)))
+          {
+            nk4WriteError(writer, seq, "invalid_value", "bad_master_uid");
+            return;
+          }
+          copyCString(currentSyncMasterUid, sizeof(currentSyncMasterUid), sanitized);
+        }
+      }
+      else if (key == "sync_loss_behavior")
+      {
+        int behavior = parseSyncLossBehavior(value);
+        if (behavior < 0)
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_sync_loss");
+          return;
+        }
+        currentSyncLossBehavior = behavior;
+      }
+      else if (key == "wireless_enabled")
+      {
+        currentWirelessEnabled = sanitizeBinaryFlag(value.toInt());
+      }
+      else if (key == "wireless_profile")
+      {
+        int profile = parseWirelessProfile(value);
+        if (profile < 0)
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_wireless_profile");
+          return;
+        }
+        currentWirelessProfile = profile;
+      }
+      else if (key == "play_mode")
+      {
+        int mode = parsePlayMode(value);
+        if (mode < 0)
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_play_mode");
+          return;
+        }
+        currentPlayMode = mode;
+        currentAutoplayEnabled = (mode == PLAY_MODE_AUTOPLAY) ? 1 : 0;
+        resetAutoplayTimer();
+      }
+      else if (key == "boot_mode")
+      {
+        int mode = parseBootMode(value);
+        if (mode < 0)
+        {
+          nk4WriteError(writer, seq, "unsupported", "bad_boot_mode");
+          return;
+        }
+        currentBootMode = mode;
+      }
+      else if (key == "autoplay" || key == "autoplay_enabled")
+      {
+        currentAutoplayEnabled = sanitizeBinaryFlag(value.toInt());
+        currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
+        resetAutoplayTimer();
+      }
+      else if (key == "autoplay_interval")
+      {
+        int intervalMs = value.toInt() * 1000;
+        if (intervalMs < MIN_AUTOPLAY_INTERVAL_MS || intervalMs > MAX_AUTOPLAY_INTERVAL_MS)
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_autoplay_interval");
+          return;
+        }
+        currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(intervalMs);
+        resetAutoplayTimer();
+      }
+      else if (key == "usb_mode" || key == "protocol")
+      {
+        String mode = value;
+        mode.toLowerCase();
+        if (mode == "human" || mode == "legacy")
+        {
+          usbProtocolMode = USB_PROTOCOL_HUMAN;
+        }
+        else if (mode == "machine" || mode == "nk4")
+        {
+          usbProtocolMode = USB_PROTOCOL_MACHINE;
+        }
+        else
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_usb_mode");
+          return;
+        }
+      }
+      else
+      {
+        nk4WriteError(writer, seq, "invalid_key", "unknown_key");
+        return;
+      }
+    }
+    normalizePersistentConfig();
+    String fields = "updated=1 play_mode=";
+    fields += playModeToString(currentPlayMode);
+    fields += " pattern=";
+    fields += currentPattern;
+    fields += " brightness=";
+    fields += currentBrightness;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "save")
+  {
+    if (!saveConfigToEEPROM(false))
+    {
+      nk4WriteError(writer, seq, "save_failed", "save_failed");
+      return;
+    }
+    nk4WriteOk(writer, seq, "saved=1");
+    return;
+  }
+
+  if (command.command == "load")
+  {
+    readConfigFromEEPROM(false);
+    applyPersistentConfig();
+    nk4WriteOk(writer, seq, "loaded=1");
+    return;
+  }
+
+  if (command.command == "defaults")
+  {
+    if (nk4GetValue(command, "confirm") != "1")
+    {
+      nk4WriteError(writer, seq, "locked", "confirm_required");
+      return;
+    }
+    currentPattern = FIRST_PATTERN_ID;
+    currentBrightness = MIN_BRIGHTNESS;
+    currentStripLength = DEFAULT_LEDS_PER_STRIP;
+    currentMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
+    currentAccelRange = DEFAULT_ACCEL_RANGE;
+    currentGyroRange = DEFAULT_GYRO_RANGE;
+    currentBootCalibrationMode = DEFAULT_BOOT_CALIBRATION_MODE;
+    currentXAccelOffset = DEFAULT_X_ACCEL_OFFSET;
+    currentYAccelOffset = DEFAULT_Y_ACCEL_OFFSET;
+    currentZAccelOffset = DEFAULT_Z_ACCEL_OFFSET;
+    currentXGyroOffset = DEFAULT_X_GYRO_OFFSET;
+    currentYGyroOffset = DEFAULT_Y_GYRO_OFFSET;
+    currentZGyroOffset = DEFAULT_Z_GYRO_OFFSET;
+    currentEnabledPatternMask = ALL_ENABLED_PATTERN_MASK;
+    currentInvertedPatternMask = 0;
+    currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
+    currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
+    applyDefaultExtendedConfig(true);
+    applyPersistentConfig();
+    nk4WriteOk(writer, seq, "defaults=1 saved=0");
+    return;
+  }
+
+  if (command.command == "reboot")
+  {
+    if (nk4GetValue(command, "confirm") != "1")
+    {
+      nk4WriteError(writer, seq, "locked", "confirm_required");
+      return;
+    }
+    nk4WriteOk(writer, seq, "rebooting=1");
+    Serial.flush();
+    delay(50);
+    rp2040.reboot();
+    return;
+  }
+
+  if (command.command == "sync_status")
+  {
+    String fields = "sync_enabled=";
+    fields += currentSyncEnabled;
+    fields += " sync_group=";
+    fields += currentSyncGroupId;
+    fields += " sync_role=";
+    fields += syncRoleToString(currentSyncRole);
+    fields += " sync_state=";
+    fields += syncEngine.stateName();
+    fields += " master_uid=";
+    fields += strlen(currentSyncMasterUid) > 0 ? currentSyncMasterUid : "none";
+    fields += " last_seq=";
+    fields += syncEngine.lastSeq;
+    fields += " locked=";
+    fields += syncEngine.locked ? 1 : 0;
+    fields += " drift_ms=";
+    fields += syncEngine.driftMs;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "sync_arm")
+  {
+    int group = nk4HasKey(command, "group") ? nk4GetValue(command, "group").toInt() : currentSyncGroupId;
+    int pattern = nk4HasKey(command, "pattern") ? nk4GetValue(command, "pattern").toInt() : currentPattern;
+    int brightness = nk4HasKey(command, "brightness") ? nk4GetValue(command, "brightness").toInt() : currentBrightness;
+    int startIn = nk4HasKey(command, "start_in") ? nk4GetValue(command, "start_in").toInt() : 0;
+    int phase = nk4HasKey(command, "phase") ? nk4GetValue(command, "phase").toInt() : 0;
+    if (group < 0 || group > 255 || !isValidPatternId(pattern) || !isValidBrightnessLevel(brightness) || startIn < 0 || startIn > 60000 || phase < 0)
+    {
+      nk4WriteError(writer, seq, "range_error", "bad_sync_arm");
+      return;
+    }
+    if (!syncEngine.arm((uint8_t)group, (uint8_t)pattern, (uint8_t)brightness, (uint32_t)startIn, (uint32_t)phase))
+    {
+      nk4WriteError(writer, seq, "sync_busy", "already_armed");
+      return;
+    }
+    patternClock.armStart(syncEngine.localStartMs, (uint32_t)phase);
+    currentSyncGroupId = group;
+    String fields = "sync=armed group=";
+    fields += group;
+    fields += " local_start_ms=";
+    fields += syncEngine.localStartMs;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "sync_cancel")
+  {
+    syncEngine.cancel();
+    patternClock.begin();
+    nk4WriteOk(writer, seq, "sync=idle");
+    return;
+  }
+
+  if (command.command == "test")
+  {
+    String indicator = nk4GetValue(command, "indicator");
+    indicator.toLowerCase();
+    if (indicator != "play_modes")
+    {
+      nk4WriteError(writer, seq, "invalid_value", "bad_indicator");
+      return;
+    }
+    showPlayModeIndicatorTest();
+    nk4WriteOk(writer, seq, "test=play_modes");
+    return;
+  }
+
+  nk4WriteError(writer, seq, "invalid_command", "unknown_cmd");
+}
+
+bool handleNk4Line(const String& line)
+{
+  SerialResponseWriter writer;
+  NkCommand command;
+  String errorCode;
+  String errorMessage;
+  if (!parseNk4Line(line, &command, &errorCode, &errorMessage))
+  {
+    nk4WriteError(writer, command.seq, errorCode.c_str(), errorMessage.c_str());
+    return false;
+  }
+  handleNk4Command(command, writer);
+  return true;
 }
 
 void printCliHelp()
@@ -1674,6 +3115,7 @@ void printCliHelp()
   Serial.println("  offsets");
   Serial.println("  calibrate quick");
   Serial.println("  calibrate precise");
+  Serial.println("  protocol machine");
   Serial.println("  reboot");
   Serial.println("  save");
   Serial.println("  load");
@@ -1900,6 +3342,7 @@ void onCliSet(cmd* cPtr)
     }
 
     currentAutoplayEnabled = sanitizeAutoplayEnabled(autoplayValue);
+    currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
     resetAutoplayTimer();
     Serial.print("OK autoplay=");
     Serial.println(autoplayEnabledToString());
@@ -1963,6 +3406,7 @@ void onCliDefaults(cmd* cPtr)
   currentInvertedPatternMask = 0;
   currentAutoplayEnabled = DEFAULT_AUTOPLAY_ENABLED;
   currentAutoplayIntervalMs = DEFAULT_AUTOPLAY_INTERVAL_MS;
+  applyDefaultExtendedConfig(true);
   applyPersistentConfig();
   resetAutoplayTimer();
   batteryViewLastInteractionMs = millis();
@@ -2066,6 +3510,32 @@ void onCliReboot(cmd* cPtr)
   Serial.flush();
   delay(50);
   rp2040.reboot();
+}
+
+void onCliProtocol(cmd* cPtr)
+{
+  Command cmd(cPtr);
+  String mode = cmd.getArgument("mode").getValue();
+  mode.toLowerCase();
+  mode.trim();
+
+  if (mode == "machine" || mode == "nk4")
+  {
+    Serial.println("OK protocol=machine");
+    Serial.flush();
+    usbProtocolMode = USB_PROTOCOL_MACHINE;
+    cliPromptShown = true;
+    return;
+  }
+
+  if (mode == "human" || mode == "legacy")
+  {
+    usbProtocolMode = USB_PROTOCOL_HUMAN;
+    Serial.println("OK protocol=human");
+    return;
+  }
+
+  Serial.println("ERR protocol mode must be 'machine' or 'human'");
 }
 
 void onCliPatterns(cmd* cPtr)
@@ -2197,6 +3667,8 @@ void setupCLI()
   (void)reboot;
   Command restart = cli.addCommand("restart", onCliReboot);
   (void)restart;
+  Command protocol = cli.addCommand("protocol", onCliProtocol);
+  protocol.addPositionalArgument("mode");
 
   cli.setOnError(onCliError);
 }
@@ -2217,10 +3689,13 @@ void handleCLI()
 
   if (!cliPromptShown && cliSessionBannerPending && (millis() - cliSessionBecameActiveMs >= CLI_CONNECT_BANNER_DELAY_MS))
   {
-    Serial.println();
-    Serial.println("[NightKite CLI] USB connected. Type 'help'.");
-    printCliPrompt();
-    Serial.flush();
+    if (usbProtocolMode == USB_PROTOCOL_HUMAN)
+    {
+      Serial.println();
+      Serial.println("[NightKite CLI] USB connected. Type 'help'.");
+      printCliPrompt();
+      Serial.flush();
+    }
     cliPromptShown = true;
     cliSessionBannerPending = false;
   }
@@ -2238,8 +3713,20 @@ void handleCLI()
       cliInputBuffer.trim();
       if (cliInputBuffer.length() > 0)
       {
-        cli.parse(cliInputBuffer);
-        commandExecuted = true;
+        if (cliInputBuffer.startsWith("NK4"))
+        {
+          handleNk4Line(cliInputBuffer);
+        }
+        else if (usbProtocolMode == USB_PROTOCOL_MACHINE)
+        {
+          SerialResponseWriter writer;
+          nk4WriteError(writer, "0", "invalid_command", "expected_NK4");
+        }
+        else
+        {
+          cli.parse(cliInputBuffer);
+          commandExecuted = true;
+        }
       }
       cliInputBuffer = "";
       continue;
@@ -2258,14 +3745,26 @@ void handleCLI()
     cliInputBuffer.trim();
     if (cliInputBuffer.length() > 0)
     {
-      cli.parse(cliInputBuffer);
-      commandExecuted = true;
+      if (cliInputBuffer.startsWith("NK4"))
+      {
+        handleNk4Line(cliInputBuffer);
+      }
+      else if (usbProtocolMode == USB_PROTOCOL_MACHINE)
+      {
+        SerialResponseWriter writer;
+        nk4WriteError(writer, "0", "invalid_command", "expected_NK4");
+      }
+      else
+      {
+        cli.parse(cliInputBuffer);
+        commandExecuted = true;
+      }
     }
     cliInputBuffer = "";
     cliLastInputMs = 0;
   }
 
-  if (commandExecuted)
+  if (commandExecuted && usbProtocolMode == USB_PROTOCOL_HUMAN)
   {
     printCliPrompt();
   }
@@ -3621,6 +5120,8 @@ void setup()
   applyConfiguredMotionSmoothing();
 
   applyPersistentConfig();
+  patternClock.begin();
+  syncEngine.begin();
   lastUpdateTime = millis();
 	
 // State machine init.
@@ -3665,32 +5166,25 @@ void loop()
         // Set timestamp for the next check.
         lastUpdateTime = currentTime;
 
-        Serial.println("5 minute interval reached. Checking values for changes...");
+        if (usbProtocolMode == USB_PROTOCOL_HUMAN)
+        {
+          Serial.println("5 minute interval reached. Checking values for changes...");
+        }
 
         // Save only when something actually changed.
-        if (currentPattern != lastSavedPattern ||
-            currentBrightness != lastSavedBrightness ||
-            currentStripLength != lastSavedStripLength ||
-            currentMotionSmoothingSize != lastSavedMotionSmoothingSize ||
-            currentAccelRange != lastSavedAccelRange ||
-            currentGyroRange != lastSavedGyroRange ||
-            currentBootCalibrationMode != lastSavedBootCalibrationMode ||
-            currentXAccelOffset != lastSavedXAccelOffset ||
-            currentYAccelOffset != lastSavedYAccelOffset ||
-            currentZAccelOffset != lastSavedZAccelOffset ||
-            currentXGyroOffset != lastSavedXGyroOffset ||
-            currentYGyroOffset != lastSavedYGyroOffset ||
-            currentZGyroOffset != lastSavedZGyroOffset ||
-            currentEnabledPatternMask != lastSavedEnabledPatternMask ||
-            currentInvertedPatternMask != lastSavedInvertedPatternMask ||
-            currentAutoplayEnabled != lastSavedAutoplayEnabled ||
-            currentAutoplayIntervalMs != lastSavedAutoplayIntervalMs) {
+        if (hasUnsavedConfigChanges()) {
             // At least one value changed.
-            Serial.println("Values have changed. Saving new values to EEPROM...");
-            saveConfigToEEPROM(true);
+            if (usbProtocolMode == USB_PROTOCOL_HUMAN)
+            {
+              Serial.println("Values have changed. Saving new values to EEPROM...");
+            }
+            saveConfigToEEPROM(usbProtocolMode == USB_PROTOCOL_HUMAN);
         } else {
             // No change.
-            Serial.println("Values are unchanged. No EEPROM update needed.");
+            if (usbProtocolMode == USB_PROTOCOL_HUMAN)
+            {
+              Serial.println("Values are unchanged. No EEPROM update needed.");
+            }
         }
     }
 
@@ -3725,10 +5219,20 @@ void loop()
     if (batteryViewActive)
     {
       currentAutoplayEnabled = isAutoplayEnabled() ? 0 : 1;
+      currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
       resetAutoplayTimer();
       batteryViewLastInteractionMs = millis();
-      Serial.print("INFO autoplay=");
-      Serial.println(autoplayEnabledToString());
+      if (usbProtocolMode == USB_PROTOCOL_MACHINE)
+      {
+        String fields = "autoplay=";
+        fields += autoplayEnabledToString();
+        emitNk4Event("autoplay_changed", fields);
+      }
+      else
+      {
+        Serial.print("INFO autoplay=");
+        Serial.println(autoplayEnabledToString());
+      }
     }
     else if (!UsbConnected)
     {
@@ -3744,6 +5248,8 @@ void loop()
   }
 
   handleCLI();
+  patternClock.tick();
+  syncEngine.tick();
 
   if (multiresponseButton.singleClick() && batteryViewActive)
   {

@@ -179,6 +179,45 @@ Hinweise:
 * `calibrate quick` und `calibrate precise` starten mit `OK calibrate_started=1 ...` und enden mit `OK calibrate_finished=1 ...` plus finaler Offset-Zeile.
 * `defaults` lädt nur Standardwerte in den Arbeitsspeicher. Für persistente Speicherung ist danach `save` nötig.
 
+### Firmware 4.0 Alpha / NK4-Protokoll
+
+Firmware `4.0.0-alpha.1` bereitet eine transportneutrale Kommando-Grundlage vor. Die bestehende USB-CLI bleibt der Human-/Legacy-Modus und damit der Fallback fuer Service, Diagnose und Kalibrierung. Zusaetzlich kann USB in einen maschinenlesbaren NK4-Modus wechseln:
+
+```text
+protocol machine
+```
+
+Danach antwortet die Firmware ohne Banner und Prompt nur noch mit NK4-Zeilen. NK4-Kommandos sind zeilenbasiert:
+
+```text
+NK4 seq=1 cmd=hello client=nightkite-link proto_min=4 proto_max=4
+NK4 seq=2 cmd=info
+NK4 seq=3 cmd=caps
+NK4 seq=4 cmd=status
+NK4 seq=10 cmd=get section=sync
+NK4 seq=11 cmd=get section=wireless
+NK4 seq=12 cmd=get section=play
+NK4 seq=13 cmd=get section=patterns
+NK4 seq=20 cmd=set name=NK-Left
+NK4 seq=21 cmd=set pattern=8 brightness=159
+NK4 seq=22 cmd=set sync_enabled=1 sync_group=1 sync_role=master
+NK4 seq=23 cmd=set wireless_profile=long_range
+NK4 seq=24 cmd=set play_mode=sync
+NK4 seq=30 cmd=save
+NK4 seq=40 cmd=patterns
+NK4 seq=50 cmd=sync_arm group=1 pattern=8 brightness=159 start_in=750 phase=0
+NK4 seq=51 cmd=sync_cancel
+NK4 seq=60 cmd=test indicator=play_modes
+```
+
+Antworten verwenden das Format `NK4 seq=<id> ok ...` oder `NK4 seq=<id> err code=<code> msg=<short_message>`. Schutzkommandos brauchen eine Bestaetigung, z. B. `NK4 seq=70 cmd=defaults confirm=1` und `NK4 seq=71 cmd=reboot confirm=1`.
+
+Die 4.0-Config erweitert die bestehende EEPROM-Konfiguration ohne die alten Adressen zu verschieben. Neu vorbereitet sind `device_uid`, `device_name`, `play_mode`, `boot_mode`, Sync-Einstellungen, Wireless-Einstellungen sowie kompakte Pattern-Masks. Beim ersten Start mit alter Config wird eine persistente UID erzeugt, daraus ein `short_id` abgeleitet und der Default-Name `NK-<short_id>` gesetzt. Die UID ist nicht per User-Kommando ueberschreibbar.
+
+PlayMode ist als Datenmodell mit `manual`, `autoplay` und `sync` vorhanden. `SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt bereits Sync-Zustaende, geplante lokale Starts und Pattern-Zeit, ohne die bestehenden Pattern breit umzubauen. Das vorbereitete Sync-Beacon-Modell uebertraegt nur Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC; es werden keine LED-Frames ueber Funk gestreamt.
+
+RM2/BLE-Pins und Build-Flags sind vorbereitet (`NIGHTKITE_RM2`, `NIGHTKITE_BLE`), bleiben in den Standard-Builds aber deaktiviert. WLAN wird nicht verwendet oder initialisiert.
+
 ### Hinweise zur Kalibrierung
 
 Es gibt zwei Kalibrierpfade:
