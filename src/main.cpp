@@ -30,6 +30,7 @@
 #include <EEPROM.h> //EEPROM Library
 #include <math.h> // Math library
 #include <string.h>
+#include "hardware/watchdog.h"
 
 // ============================================================================
 //  MOTION DATA
@@ -720,6 +721,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer);
 void nk4WriteOk(IResponseWriter& writer, const String& seq, const String& fields);
 void nk4WriteError(IResponseWriter& writer, const String& seq, const char* code, const char* message);
 void showPlayModeIndicatorTest();
+void rebootController();
 void printCliHelp();
 void printCliPrompt();
 void setupCLI();
@@ -2453,6 +2455,19 @@ void nk4WriteError(IResponseWriter& writer, const String& seq, const char* code,
   writer.println();
 }
 
+void rebootController()
+{
+  Serial.flush();
+  delay(50);
+  Serial.end();
+  delay(50);
+  watchdog_reboot(0, 0, 100);
+  while (true)
+  {
+    delay(1);
+  }
+}
+
 void emitNk4Event(const char* eventName, const String& fields)
 {
   if (!SerialSessionActive || usbProtocolMode != USB_PROTOCOL_MACHINE)
@@ -2994,9 +3009,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       return;
     }
     nk4WriteOk(writer, seq, "rebooting=1");
-    Serial.flush();
-    delay(50);
-    rp2040.reboot();
+    rebootController();
     return;
   }
 
@@ -3507,9 +3520,7 @@ void onCliReboot(cmd* cPtr)
 {
   (void)cPtr;
   Serial.println("OK rebooting");
-  Serial.flush();
-  delay(50);
-  rp2040.reboot();
+  rebootController();
 }
 
 void onCliProtocol(cmd* cPtr)
