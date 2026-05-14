@@ -183,6 +183,9 @@ const int PLAY_MODE_MANUAL = 0;
 const int PLAY_MODE_AUTOPLAY = 1;
 const int PLAY_MODE_SYNC = 2;
 const int BOOT_MODE_LAST = 0;
+const int BOOT_MODE_MANUAL = 1;
+const int BOOT_MODE_AUTOPLAY = 2;
+const int BOOT_MODE_SYNC = 3;
 const int SYNC_ROLE_STANDALONE = 0;
 const int SYNC_ROLE_MASTER = 1;
 const int SYNC_ROLE_FOLLOWER = 2;
@@ -532,6 +535,7 @@ public:
     localStartMs = 0;
     locked = false;
     driftMs = 0;
+    startEventPending = false;
   }
 
   bool arm(uint8_t group, uint8_t pattern, uint8_t brightness, uint32_t startInMs, uint32_t phase)
@@ -547,6 +551,7 @@ public:
     localStartMs = millis() + startInMs;
     state = ARMED;
     locked = false;
+    startEventPending = false;
     lastSeq++;
     return true;
   }
@@ -556,6 +561,7 @@ public:
     state = IDLE;
     locked = false;
     driftMs = 0;
+    startEventPending = false;
   }
 
   void tick()
@@ -564,7 +570,18 @@ public:
     {
       state = RUNNING;
       locked = true;
+      startEventPending = true;
     }
+  }
+
+  bool consumeStartEvent()
+  {
+    if (!startEventPending)
+    {
+      return false;
+    }
+    startEventPending = false;
+    return true;
   }
 
   const char* stateName() const
@@ -589,6 +606,7 @@ public:
   uint8_t armedBrightness = MIN_BRIGHTNESS;
   bool locked = false;
   int32_t driftMs = 0;
+  bool startEventPending = false;
 };
 
 class IResponseWriter
@@ -688,10 +706,22 @@ void resetAutoplayTimer();
 bool isAutoplayEnabled();
 const char* autoplayEnabledToString();
 int parseOnOffValue(String valueText);
+bool parseIntValue(String value, int* output);
+bool parseUint32Value(String value, uint32_t* output);
+bool parseBinaryValue(String value, int* output);
+void setPlayMode(int mode);
+void cyclePlayMode();
+CRGB playModeIndicatorColor(int mode, int syncRole, bool syncError);
+void applySyncStartIfDue();
 void announcePatternChange(const char* source);
 void printOffsets();
 void printOffsetsWithPrefix(const char* prefix);
 void printConfigSummaryWithPrefix(const char* prefix);
+String buildConfigFields();
+String buildBatteryFields();
+String buildSensorFields();
+String buildTimingFields();
+String buildOffsetsFields();
 void printEnabledPatternsList();
 void printInvertedPatternsList();
 void printPatternStates();
@@ -931,6 +961,19 @@ void applyPersistentConfig()
   applyConfiguredStripLength();
   currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
   currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
+  if (currentBootMode == BOOT_MODE_MANUAL)
+  {
+    currentPlayMode = PLAY_MODE_MANUAL;
+  }
+  else if (currentBootMode == BOOT_MODE_AUTOPLAY)
+  {
+    currentPlayMode = PLAY_MODE_AUTOPLAY;
+  }
+  else if (currentBootMode == BOOT_MODE_SYNC)
+  {
+    currentPlayMode = PLAY_MODE_SYNC;
+  }
+  setPlayMode(currentPlayMode);
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
   resetAutoplayTimer();
@@ -966,15 +1009,80 @@ int parseOnOffValue(String valueText)
 {
   valueText.trim();
   valueText.toLowerCase();
-  if (valueText == "on")
+  if (valueText == "on" || valueText == "1" || valueText == "true")
   {
     return 1;
   }
-  if (valueText == "off")
+  if (valueText == "off" || valueText == "0" || valueText == "false")
   {
     return 0;
   }
   return -1;
+}
+
+bool parseIntValue(String value, int* output)
+{
+  if (output == NULL)
+  {
+    return false;
+  }
+  value.trim();
+  if (value.length() == 0)
+  {
+    return false;
+  }
+
+  int start = (value[0] == '-' || value[0] == '+') ? 1 : 0;
+  if (start >= value.length())
+  {
+    return false;
+  }
+  for (int i = start; i < value.length(); i++)
+  {
+    if (!isDigit((int)value[i]))
+    {
+      return false;
+    }
+  }
+  *output = value.toInt();
+  return true;
+}
+
+bool parseUint32Value(String value, uint32_t* output)
+{
+  if (output == NULL)
+  {
+    return false;
+  }
+  value.trim();
+  if (value.length() == 0)
+  {
+    return false;
+  }
+  if (value[0] == '-')
+  {
+    return false;
+  }
+
+  char* endPtr = NULL;
+  unsigned long parsed = strtoul(value.c_str(), &endPtr, 0);
+  if (endPtr == value.c_str() || (endPtr != NULL && *endPtr != '\0'))
+  {
+    return false;
+  }
+  *output = (uint32_t)parsed;
+  return true;
+}
+
+bool parseBinaryValue(String value, int* output)
+{
+  const int parsed = parseOnOffValue(value);
+  if (parsed < 0 || output == NULL)
+  {
+    return false;
+  }
+  *output = parsed;
+  return true;
 }
 
 void bootMark(const char* stage)
@@ -1212,8 +1320,14 @@ int parsePlayMode(String value)
 
 const char* bootModeToString(int value)
 {
-  (void)value;
-  return "last";
+  switch (value)
+  {
+    case BOOT_MODE_MANUAL: return "manual";
+    case BOOT_MODE_AUTOPLAY: return "autoplay";
+    case BOOT_MODE_SYNC: return "sync";
+    case BOOT_MODE_LAST:
+    default: return "last";
+  }
 }
 
 int parseBootMode(String value)
@@ -1221,6 +1335,9 @@ int parseBootMode(String value)
   value.trim();
   value.toLowerCase();
   if (value == "last" || value == "0") return BOOT_MODE_LAST;
+  if (value == "manual") return BOOT_MODE_MANUAL;
+  if (value == "autoplay") return BOOT_MODE_AUTOPLAY;
+  if (value == "sync") return BOOT_MODE_SYNC;
   return -1;
 }
 
@@ -1312,6 +1429,199 @@ String buildPatternMaskFields()
   fields += " inverted_mask=";
   fields += formatHex32(currentInvertedPatternMask);
   return fields;
+}
+
+String buildConfigFields()
+{
+  String fields = "pattern=";
+  fields += currentPattern;
+  fields += " brightness=";
+  fields += currentBrightness;
+  fields += " strip_length=";
+  fields += currentStripLength;
+  fields += " smoothing=";
+  fields += currentMotionSmoothingSize;
+  fields += " accel_range=";
+  fields += currentAccelRange;
+  fields += " gyro_range=";
+  fields += currentGyroRange;
+  fields += " boot_calibration=";
+  fields += bootCalibrationModeToString(currentBootCalibrationMode);
+  fields += " autoplay=";
+  fields += currentAutoplayEnabled;
+  fields += " autoplay_interval=";
+  fields += currentAutoplayIntervalMs / 1000;
+  fields += " play_mode=";
+  fields += playModeToString(currentPlayMode);
+  fields += " boot_mode=";
+  fields += bootModeToString(currentBootMode);
+  fields += " config_valid=";
+  fields += configValid ? 1 : 0;
+  fields += " config_repaired=";
+  fields += configRepaired ? 1 : 0;
+  fields += " config_version=";
+  fields += currentConfigVersion;
+  fields += " safe_boot=";
+  fields += safeBootActive ? 1 : 0;
+  fields += " ";
+  fields += buildPatternMaskFields();
+  return fields;
+}
+
+String buildBatteryFields()
+{
+  RawVoltage = readBatteryRawValue();
+  Voltage = convertBatteryRawToVoltage(RawVoltage);
+  const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
+  String fields = "battery_raw=";
+  fields += RawVoltage;
+  fields += " battery_voltage=";
+  fields += String(Voltage, 3);
+  fields += " battery_percent=";
+  fields += estimateBatteryPercent(Voltage);
+  fields += " usb_power_raw=";
+  fields += usbSenseRaw;
+  fields += " serial_session_active=";
+  fields += SerialSessionActive ? 1 : 0;
+  return fields;
+}
+
+String buildSensorFields()
+{
+  const bool mpuConnected = !safeBootActive && (mpu.testConnection() == true);
+  const int activeAccelRange = imuReady ? accelRegisterValueToRange(mpu.getFullScaleAccelRange()) : -1;
+  const int activeGyroRange = imuReady ? gyroRegisterValueToRange(mpu.getFullScaleGyroRange()) : -1;
+  String fields = "mpu_connected=";
+  fields += mpuConnected ? 1 : 0;
+  fields += " dmp_ready=";
+  fields += DMPReady ? 1 : 0;
+  fields += " imu=";
+  fields += imuReady ? 1 : 0;
+  fields += " dev_status=";
+  fields += devStatus;
+  fields += " packet_size=";
+  fields += packetSize;
+  fields += " int_status=";
+  fields += MPUIntStatus;
+  fields += " smoothing_config=";
+  fields += currentMotionSmoothingSize;
+  fields += " smoothing_active=";
+  fields += activeMotionSmoothingSize;
+  fields += " accel_range_config=";
+  fields += currentAccelRange;
+  fields += " accel_range_active=";
+  fields += activeAccelRange;
+  fields += " gyro_range_config=";
+  fields += currentGyroRange;
+  fields += " gyro_range_active=";
+  fields += activeGyroRange;
+  return fields;
+}
+
+String buildTimingFields()
+{
+  uint32_t avgLoopDurationUs = 0;
+  uint32_t avgWorkDurationUs = 0;
+  if (loopTimingSamples > 0)
+  {
+    avgLoopDurationUs = (uint32_t)(totalLoopDurationUs / loopTimingSamples);
+    avgWorkDurationUs = (uint32_t)(totalWorkDurationUs / loopTimingSamples);
+  }
+
+  String fields = "fps=";
+  fields += FastLED.getFPS();
+  fields += " last_loop_us=";
+  fields += lastLoopDurationUs;
+  fields += " avg_loop_us=";
+  fields += avgLoopDurationUs;
+  fields += " max_loop_us=";
+  fields += maxLoopDurationUs;
+  fields += " last_work_us=";
+  fields += lastWorkDurationUs;
+  fields += " avg_work_us=";
+  fields += avgWorkDurationUs;
+  fields += " max_work_us=";
+  fields += maxWorkDurationUs;
+  fields += " frame_budget_us=";
+  fields += 1000000UL / FRAMES_PER_SECOND;
+  fields += " samples=";
+  fields += loopTimingSamples;
+  return fields;
+}
+
+String buildOffsetsFields()
+{
+  String fields = "x_accel_offset=";
+  fields += currentXAccelOffset;
+  fields += " y_accel_offset=";
+  fields += currentYAccelOffset;
+  fields += " z_accel_offset=";
+  fields += currentZAccelOffset;
+  fields += " x_gyro_offset=";
+  fields += currentXGyroOffset;
+  fields += " y_gyro_offset=";
+  fields += currentYGyroOffset;
+  fields += " z_gyro_offset=";
+  fields += currentZGyroOffset;
+  return fields;
+}
+
+void setPlayMode(int mode)
+{
+  if (mode < PLAY_MODE_MANUAL || mode > PLAY_MODE_SYNC)
+  {
+    mode = PLAY_MODE_MANUAL;
+  }
+  currentPlayMode = mode;
+  currentAutoplayEnabled = (currentPlayMode == PLAY_MODE_AUTOPLAY) ? 1 : 0;
+  resetAutoplayTimer();
+}
+
+void cyclePlayMode()
+{
+  if (currentPlayMode == PLAY_MODE_MANUAL)
+  {
+    setPlayMode(PLAY_MODE_AUTOPLAY);
+  }
+  else if (currentPlayMode == PLAY_MODE_AUTOPLAY)
+  {
+    setPlayMode(PLAY_MODE_SYNC);
+  }
+  else
+  {
+    setPlayMode(PLAY_MODE_MANUAL);
+  }
+}
+
+CRGB playModeIndicatorColor(int mode, int syncRole, bool syncError)
+{
+  if (syncError)
+  {
+    return CRGB::Red;
+  }
+  if (mode == PLAY_MODE_AUTOPLAY)
+  {
+    return CRGB::Green;
+  }
+  if (mode == PLAY_MODE_SYNC)
+  {
+    return (syncRole == SYNC_ROLE_MASTER) ? CRGB::Magenta : CRGB::Cyan;
+  }
+  return CRGB::Blue;
+}
+
+void applySyncStartIfDue()
+{
+  if (!syncEngine.consumeStartEvent())
+  {
+    return;
+  }
+
+  currentBrightness = syncEngine.armedBrightness;
+  BRIGHTNESS = currentBrightness;
+  FastLED.setBrightness(BRIGHTNESS);
+  switchToPattern(syncEngine.armedPattern, true);
+  setPlayMode(PLAY_MODE_SYNC);
 }
 
 void announcePatternChange(const char* source)
@@ -1874,7 +2184,8 @@ void normalizePersistentConfig()
   {
     currentPlayMode = DEFAULT_PLAY_MODE;
   }
-  if (currentBootMode != BOOT_MODE_LAST)
+  currentAutoplayEnabled = (currentPlayMode == PLAY_MODE_AUTOPLAY) ? 1 : 0;
+  if (currentBootMode < BOOT_MODE_LAST || currentBootMode > BOOT_MODE_SYNC)
   {
     currentBootMode = DEFAULT_BOOT_MODE;
   }
@@ -1929,7 +2240,7 @@ bool isCurrentConfigSane()
       isValidDeviceUid(currentDeviceUid) &&
       sanitizeDeviceName(String(currentDeviceName), scratchName, sizeof(scratchName)) &&
       currentPlayMode >= PLAY_MODE_MANUAL && currentPlayMode <= PLAY_MODE_SYNC &&
-      currentBootMode == BOOT_MODE_LAST &&
+      currentBootMode >= BOOT_MODE_LAST && currentBootMode <= BOOT_MODE_SYNC &&
       currentSyncEnabled >= 0 && currentSyncEnabled <= 1 &&
       currentSyncGroupId >= 1 && currentSyncGroupId <= 255 &&
       currentSyncRole >= SYNC_ROLE_STANDALONE && currentSyncRole <= SYNC_ROLE_FOLLOWER &&
@@ -2722,10 +3033,10 @@ bool parseNk4Line(const String& line, NkCommand* outCommand, String* errorCode, 
 void showPlayModeIndicatorTest()
 {
   const CRGB colors[] = {
-      CRGB::Blue,
-      CRGB::Green,
-      CRGB::Cyan,
-      CRGB::Magenta,
+      playModeIndicatorColor(PLAY_MODE_MANUAL, SYNC_ROLE_STANDALONE, false),
+      playModeIndicatorColor(PLAY_MODE_AUTOPLAY, SYNC_ROLE_STANDALONE, false),
+      playModeIndicatorColor(PLAY_MODE_SYNC, SYNC_ROLE_FOLLOWER, false),
+      playModeIndicatorColor(PLAY_MODE_SYNC, SYNC_ROLE_MASTER, false),
       CRGB::Red};
   const size_t colorCount = sizeof(colors) / sizeof(colors[0]);
   const uint8_t previousBrightness = BRIGHTNESS;
@@ -2737,6 +3048,19 @@ void showPlayModeIndicatorTest()
     syncLogicalToPhysicalLeds();
     FastLED.show();
     delay(220);
+    if (i == colorCount - 1)
+    {
+      fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+      clearInactiveLeds();
+      syncLogicalToPhysicalLeds();
+      FastLED.show();
+      delay(120);
+      fill_solid(Strip, TOTAL_LEDS, colors[i]);
+      clearInactiveLeds();
+      syncLogicalToPhysicalLeds();
+      FastLED.show();
+      delay(220);
+    }
   }
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
   clearInactiveLeds();
@@ -2838,6 +3162,8 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += syncRoleToString(currentSyncRole);
     fields += " sync_group=";
     fields += currentSyncGroupId;
+    fields += " pattern_time_ms=";
+    fields += patternClock.now();
     fields += " config_valid=";
     fields += configValid ? 1 : 0;
     fields += " config_repaired=";
@@ -2855,6 +3181,95 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
   if (command.command == "patterns")
   {
     nk4WriteOk(writer, seq, buildPatternMaskFields());
+    return;
+  }
+
+  if (command.command == "enable_pattern" || command.command == "disable_pattern" ||
+      command.command == "invert_pattern" || command.command == "normal_pattern")
+  {
+    uint32_t mask = 0;
+    String patternValue = nk4GetValue(command, "pattern");
+    if (patternValue.length() == 0)
+    {
+      patternValue = nk4GetValue(command, "patterns");
+    }
+    if (!parsePatternListMask(patternValue, &mask))
+    {
+      nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
+      return;
+    }
+
+    if (command.command == "enable_pattern")
+    {
+      updateEnabledPatternsFromMask(mask, true);
+    }
+    else if (command.command == "disable_pattern")
+    {
+      if (!updateEnabledPatternsFromMask(mask, false))
+      {
+        nk4WriteError(writer, seq, "locked", "last_pattern");
+        return;
+      }
+      if (!isPatternEnabled((uint8_t)currentPattern))
+      {
+        switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true);
+      }
+    }
+    else if (command.command == "invert_pattern")
+    {
+      updateInvertedPatternsFromMask(mask, true);
+    }
+    else
+    {
+      updateInvertedPatternsFromMask(mask, false);
+    }
+
+    nk4WriteOk(writer, seq, buildPatternMaskFields());
+    return;
+  }
+
+  if (command.command == "battery")
+  {
+    nk4WriteOk(writer, seq, buildBatteryFields());
+    return;
+  }
+
+  if (command.command == "sensor")
+  {
+    nk4WriteOk(writer, seq, buildSensorFields());
+    return;
+  }
+
+  if (command.command == "timing")
+  {
+    if (nk4GetValue(command, "reset") == "1")
+    {
+      resetTimingStats();
+    }
+    nk4WriteOk(writer, seq, buildTimingFields());
+    return;
+  }
+
+  if (command.command == "offsets")
+  {
+    nk4WriteOk(writer, seq, buildOffsetsFields());
+    return;
+  }
+
+  if (command.command == "cycle_play_mode")
+  {
+    cyclePlayMode();
+    String fields = "play_mode=";
+    fields += playModeToString(currentPlayMode);
+    fields += " autoplay=";
+    fields += currentAutoplayEnabled;
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
+  if (command.command == "config" || command.command == "boot")
+  {
+    nk4WriteOk(writer, seq, buildConfigFields());
     return;
   }
 
@@ -2912,6 +3327,31 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       nk4WriteOk(writer, seq, buildPatternMaskFields());
       return;
     }
+    if (section == "config" || section == "show")
+    {
+      nk4WriteOk(writer, seq, buildConfigFields());
+      return;
+    }
+    if (section == "battery")
+    {
+      nk4WriteOk(writer, seq, buildBatteryFields());
+      return;
+    }
+    if (section == "sensor")
+    {
+      nk4WriteOk(writer, seq, buildSensorFields());
+      return;
+    }
+    if (section == "timing")
+    {
+      nk4WriteOk(writer, seq, buildTimingFields());
+      return;
+    }
+    if (section == "offsets")
+    {
+      nk4WriteOk(writer, seq, buildOffsetsFields());
+      return;
+    }
     nk4WriteError(writer, seq, "invalid_value", "bad_section");
     return;
   }
@@ -2939,7 +3379,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       }
       else if (key == "pattern")
       {
-        int valueInt = value.toInt();
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_pattern");
+          return;
+        }
         if (!isValidPatternId(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_pattern");
@@ -2949,7 +3394,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       }
       else if (key == "brightness")
       {
-        int valueInt = value.toInt();
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_brightness");
+          return;
+        }
         if (!isValidBrightnessLevel(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_brightness");
@@ -2959,14 +3409,183 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         BRIGHTNESS = currentBrightness;
         FastLED.setBrightness(BRIGHTNESS);
       }
+      else if (key == "strip_length")
+      {
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_strip_length");
+          return;
+        }
+        if (!isValidStripLength(valueInt))
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_strip_length");
+          return;
+        }
+        currentStripLength = valueInt;
+        applyConfiguredStripLength();
+      }
+      else if (key == "smoothing")
+      {
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_smoothing");
+          return;
+        }
+        if (!isValidMotionSmoothingSize(valueInt))
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_smoothing");
+          return;
+        }
+        currentMotionSmoothingSize = valueInt;
+        applyConfiguredMotionSmoothing();
+      }
+      else if (key == "accel_range")
+      {
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_accel_range");
+          return;
+        }
+        if (!isValidAccelRange(valueInt))
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_accel_range");
+          return;
+        }
+        currentAccelRange = valueInt;
+        if (imuReady)
+        {
+          applyConfiguredSensorRanges();
+        }
+      }
+      else if (key == "gyro_range")
+      {
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_gyro_range");
+          return;
+        }
+        if (!isValidGyroRange(valueInt))
+        {
+          nk4WriteError(writer, seq, "range_error", "bad_gyro_range");
+          return;
+        }
+        currentGyroRange = valueInt;
+        if (imuReady)
+        {
+          applyConfiguredSensorRanges();
+        }
+      }
+      else if (key == "boot_calibration")
+      {
+        int mode = parseBootCalibrationMode(value);
+        if (!isValidBootCalibrationMode(mode))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_boot_calibration");
+          return;
+        }
+        currentBootCalibrationMode = mode;
+      }
+      else if (key == "enabled_mask")
+      {
+        uint32_t mask = 0;
+        if (!parseUint32Value(value, &mask))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_enabled_mask");
+          return;
+        }
+        mask &= ALL_ENABLED_PATTERN_MASK;
+        if (mask == 0)
+        {
+          nk4WriteError(writer, seq, "range_error", "empty_enabled_mask");
+          return;
+        }
+        currentEnabledPatternMask = mask;
+        if (!isPatternEnabled((uint8_t)currentPattern))
+        {
+          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true);
+        }
+      }
+      else if (key == "inverted_mask")
+      {
+        uint32_t mask = 0;
+        if (!parseUint32Value(value, &mask))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_inverted_mask");
+          return;
+        }
+        currentInvertedPatternMask = sanitizeInvertedPatternMask(mask);
+      }
+      else if (key == "enable_pattern")
+      {
+        uint32_t mask = 0;
+        if (!parsePatternListMask(value, &mask))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
+          return;
+        }
+        updateEnabledPatternsFromMask(mask, true);
+      }
+      else if (key == "disable_pattern")
+      {
+        uint32_t mask = 0;
+        if (!parsePatternListMask(value, &mask))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
+          return;
+        }
+        if (!updateEnabledPatternsFromMask(mask, false))
+        {
+          nk4WriteError(writer, seq, "locked", "last_pattern");
+          return;
+        }
+        if (!isPatternEnabled((uint8_t)currentPattern))
+        {
+          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true);
+        }
+      }
+      else if (key == "invert_pattern")
+      {
+        uint32_t mask = 0;
+        if (!parsePatternListMask(value, &mask))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
+          return;
+        }
+        updateInvertedPatternsFromMask(mask, true);
+      }
+      else if (key == "normal_pattern")
+      {
+        uint32_t mask = 0;
+        if (!parsePatternListMask(value, &mask))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
+          return;
+        }
+        updateInvertedPatternsFromMask(mask, false);
+      }
       else if (key == "sync_enabled")
       {
-        currentSyncEnabled = sanitizeBinaryFlag(value.toInt());
+        int flag = 0;
+        if (!parseBinaryValue(value, &flag))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_sync_enabled");
+          return;
+        }
+        currentSyncEnabled = flag;
       }
       else if (key == "sync_group" || key == "sync_group_id")
       {
-        int valueInt = value.toInt();
-        if (valueInt < 0 || valueInt > 255)
+        int valueInt = 0;
+        if (!parseIntValue(value, &valueInt))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_sync_group");
+          return;
+        }
+        if (valueInt < 1 || valueInt > 255)
         {
           nk4WriteError(writer, seq, "range_error", "bad_sync_group");
           return;
@@ -3012,7 +3631,13 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       }
       else if (key == "wireless_enabled")
       {
-        currentWirelessEnabled = sanitizeBinaryFlag(value.toInt());
+        int flag = 0;
+        if (!parseBinaryValue(value, &flag))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_wireless_enabled");
+          return;
+        }
+        currentWirelessEnabled = flag;
       }
       else if (key == "wireless_profile")
       {
@@ -3032,29 +3657,37 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "invalid_value", "bad_play_mode");
           return;
         }
-        currentPlayMode = mode;
-        currentAutoplayEnabled = (mode == PLAY_MODE_AUTOPLAY) ? 1 : 0;
-        resetAutoplayTimer();
+        setPlayMode(mode);
       }
       else if (key == "boot_mode")
       {
         int mode = parseBootMode(value);
         if (mode < 0)
         {
-          nk4WriteError(writer, seq, "unsupported", "bad_boot_mode");
+          nk4WriteError(writer, seq, "invalid_value", "bad_boot_mode");
           return;
         }
         currentBootMode = mode;
       }
       else if (key == "autoplay" || key == "autoplay_enabled")
       {
-        currentAutoplayEnabled = sanitizeBinaryFlag(value.toInt());
-        currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
-        resetAutoplayTimer();
+        int flag = 0;
+        if (!parseBinaryValue(value, &flag))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_autoplay");
+          return;
+        }
+        setPlayMode(flag ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL);
       }
       else if (key == "autoplay_interval")
       {
-        int intervalMs = value.toInt() * 1000;
+        int intervalSec = 0;
+        if (!parseIntValue(value, &intervalSec))
+        {
+          nk4WriteError(writer, seq, "invalid_value", "bad_autoplay_interval");
+          return;
+        }
+        int intervalMs = intervalSec * 1000;
         if (intervalMs < MIN_AUTOPLAY_INTERVAL_MS || intervalMs > MAX_AUTOPLAY_INTERVAL_MS)
         {
           nk4WriteError(writer, seq, "range_error", "bad_autoplay_interval");
@@ -3094,6 +3727,10 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += currentPattern;
     fields += " brightness=";
     fields += currentBrightness;
+    fields += " enabled_mask=";
+    fields += formatHex32(currentEnabledPatternMask);
+    fields += " inverted_mask=";
+    fields += formatHex32(currentInvertedPatternMask);
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -3179,18 +3816,37 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += syncEngine.locked ? 1 : 0;
     fields += " drift_ms=";
     fields += syncEngine.driftMs;
+    fields += " armed_group=";
+    fields += syncEngine.armedGroup;
+    fields += " armed_pattern=";
+    fields += syncEngine.armedPattern;
+    fields += " armed_brightness=";
+    fields += syncEngine.armedBrightness;
+    fields += " local_start_ms=";
+    fields += syncEngine.localStartMs;
+    fields += " pattern_time_ms=";
+    fields += patternClock.now();
     nk4WriteOk(writer, seq, fields);
     return;
   }
 
   if (command.command == "sync_arm")
   {
-    int group = nk4HasKey(command, "group") ? nk4GetValue(command, "group").toInt() : currentSyncGroupId;
-    int pattern = nk4HasKey(command, "pattern") ? nk4GetValue(command, "pattern").toInt() : currentPattern;
-    int brightness = nk4HasKey(command, "brightness") ? nk4GetValue(command, "brightness").toInt() : currentBrightness;
-    int startIn = nk4HasKey(command, "start_in") ? nk4GetValue(command, "start_in").toInt() : 0;
-    int phase = nk4HasKey(command, "phase") ? nk4GetValue(command, "phase").toInt() : 0;
-    if (group < 0 || group > 255 || !isValidPatternId(pattern) || !isValidBrightnessLevel(brightness) || startIn < 0 || startIn > 60000 || phase < 0)
+    int group = currentSyncGroupId;
+    int pattern = currentPattern;
+    int brightness = currentBrightness;
+    int startIn = 0;
+    int phase = 0;
+    if ((nk4HasKey(command, "group") && !parseIntValue(nk4GetValue(command, "group"), &group)) ||
+        (nk4HasKey(command, "pattern") && !parseIntValue(nk4GetValue(command, "pattern"), &pattern)) ||
+        (nk4HasKey(command, "brightness") && !parseIntValue(nk4GetValue(command, "brightness"), &brightness)) ||
+        (nk4HasKey(command, "start_in") && !parseIntValue(nk4GetValue(command, "start_in"), &startIn)) ||
+        (nk4HasKey(command, "phase") && !parseIntValue(nk4GetValue(command, "phase"), &phase)))
+    {
+      nk4WriteError(writer, seq, "invalid_value", "bad_sync_arm");
+      return;
+    }
+    if (group < 1 || group > 255 || !isValidPatternId(pattern) || !isValidBrightnessLevel(brightness) || startIn < 0 || startIn > 60000 || phase < 0)
     {
       nk4WriteError(writer, seq, "range_error", "bad_sync_arm");
       return;
@@ -3201,9 +3857,14 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       return;
     }
     patternClock.armStart(syncEngine.localStartMs, (uint32_t)phase);
-    currentSyncGroupId = group;
     String fields = "sync=armed group=";
     fields += group;
+    fields += " pattern=";
+    fields += pattern;
+    fields += " brightness=";
+    fields += brightness;
+    fields += " phase=";
+    fields += phase;
     fields += " local_start_ms=";
     fields += syncEngine.localStartMs;
     nk4WriteOk(writer, seq, fields);
@@ -4106,7 +4767,13 @@ void BatteryRunning()
   int autoplayStatusPixel = statusStart + 1 + brightnessPixels;
   if (autoplayStatusPixel < TOTAL_LEDS)
   {
-    CRGB statusColor = isAutoplayEnabled() ? CRGB::Green : CRGB::Red;
+    const bool syncError = (currentPlayMode == PLAY_MODE_SYNC &&
+        (currentSyncEnabled == 0 || currentSyncRole == SYNC_ROLE_STANDALONE));
+    CRGB statusColor = playModeIndicatorColor(currentPlayMode, currentSyncRole, syncError);
+    if (syncError && !blink)
+    {
+      statusColor = CRGB::Black;
+    }
     Strip[autoplayStatusPixel] = statusColor;
     if ((autoplayStatusPixel + 1) < TOTAL_LEDS)
     {
@@ -5359,14 +6026,20 @@ void loop()
           Serial.println("5 minute interval reached. Checking values for changes...");
         }
 
-        // Save only when something actually changed.
-        if (hasUnsavedConfigChanges()) {
+        const bool syncTimingActive = (syncEngine.state == SyncEngine::ARMED || syncEngine.state == SyncEngine::RUNNING);
+        // Save only when something actually changed and no local sync timing is active.
+        if (hasUnsavedConfigChanges() && !syncTimingActive) {
             // At least one value changed.
             if (usbProtocolMode == USB_PROTOCOL_HUMAN)
             {
               Serial.println("Values have changed. Saving new values to EEPROM...");
             }
             saveConfigToEEPROM(usbProtocolMode == USB_PROTOCOL_HUMAN);
+        } else if (syncTimingActive && hasUnsavedConfigChanges()) {
+            if (usbProtocolMode == USB_PROTOCOL_HUMAN)
+            {
+              Serial.println("Sync timing active. Deferring EEPROM update.");
+            }
         } else {
             // No change.
             if (usbProtocolMode == USB_PROTOCOL_HUMAN)
@@ -5406,19 +6079,21 @@ void loop()
   {
     if (batteryViewActive)
     {
-      currentAutoplayEnabled = isAutoplayEnabled() ? 0 : 1;
-      currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
-      resetAutoplayTimer();
+      cyclePlayMode();
       batteryViewLastInteractionMs = millis();
       if (usbProtocolMode == USB_PROTOCOL_MACHINE)
       {
-        String fields = "autoplay=";
-        fields += autoplayEnabledToString();
-        emitNk4Event("autoplay_changed", fields);
+        String fields = "play_mode=";
+        fields += playModeToString(currentPlayMode);
+        fields += " autoplay=";
+        fields += currentAutoplayEnabled;
+        emitNk4Event("play_mode_changed", fields);
       }
       else
       {
-        Serial.print("INFO autoplay=");
+        Serial.print("INFO play_mode=");
+        Serial.print(playModeToString(currentPlayMode));
+        Serial.print(" autoplay=");
         Serial.println(autoplayEnabledToString());
       }
     }
@@ -5438,6 +6113,7 @@ void loop()
   handleCLI();
   patternClock.tick();
   syncEngine.tick();
+  applySyncStartIfDue();
 
   if (multiresponseButton.singleClick() && batteryViewActive)
   {

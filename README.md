@@ -198,14 +198,22 @@ NK4 seq=10 cmd=get section=sync
 NK4 seq=11 cmd=get section=wireless
 NK4 seq=12 cmd=get section=play
 NK4 seq=13 cmd=get section=patterns
+NK4 seq=14 cmd=get section=config
 NK4 seq=20 cmd=set name=NK-Left
 NK4 seq=21 cmd=set pattern=8 brightness=159
 NK4 seq=22 cmd=set sync_enabled=1 sync_group=1 sync_role=master
 NK4 seq=23 cmd=set wireless_profile=long_range
 NK4 seq=24 cmd=set play_mode=sync
+NK4 seq=25 cmd=set strip_length=25 smoothing=100
+NK4 seq=26 cmd=set enabled_mask=0x003FFFFF inverted_mask=0x00000000
 NK4 seq=30 cmd=save
 NK4 seq=40 cmd=patterns
+NK4 seq=41 cmd=battery
+NK4 seq=42 cmd=sensor
+NK4 seq=43 cmd=timing
+NK4 seq=44 cmd=offsets
 NK4 seq=50 cmd=sync_arm group=1 pattern=8 brightness=159 start_in=750 phase=0
+NK4 seq=52 cmd=sync_status
 NK4 seq=51 cmd=sync_cancel
 NK4 seq=60 cmd=test indicator=play_modes
 ```
@@ -214,7 +222,11 @@ Antworten verwenden das Format `NK4 seq=<id> ok ...` oder `NK4 seq=<id> err code
 
 Die 4.0-Config erweitert die bestehende EEPROM-Konfiguration ohne die alten Adressen zu verschieben. Neu vorbereitet sind `device_uid`, `device_name`, `play_mode`, `boot_mode`, Sync-Einstellungen, Wireless-Einstellungen sowie kompakte Pattern-Masks. Beim ersten Start mit alter Config wird eine persistente UID erzeugt, daraus ein `short_id` abgeleitet und der Default-Name `NK-<short_id>` gesetzt. Die UID ist nicht per User-Kommando ueberschreibbar.
 
-PlayMode ist als Datenmodell mit `manual`, `autoplay` und `sync` vorhanden. `SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt bereits Sync-Zustaende, geplante lokale Starts und Pattern-Zeit, ohne die bestehenden Pattern breit umzubauen. Das vorbereitete Sync-Beacon-Modell uebertraegt nur Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC; es werden keine LED-Frames ueber Funk gestreamt.
+PlayMode ist jetzt als Steuerlogik mit `manual`, `autoplay` und `sync` angebunden. `manual` bleibt lokal auf dem aktuellen Pattern, `autoplay` nutzt das bestehende Autoplay-Verhalten, und `sync` bleibt lokal lauffaehig, auch wenn noch kein Funkmodul aktiv ist. Im Battery-View schaltet der vorhandene Mode-Button-Zyklus defensiv `manual -> autoplay -> sync -> manual`; der normale Pattern-Wechsel ausserhalb des Battery-Views bleibt erhalten. Die Status-Farben sind blau fuer manual, gruen fuer autoplay, cyan fuer sync follower, magenta fuer sync master und rot blinkend fuer sync error/no master. `NK4 cmd=test indicator=play_modes` zeigt diese Farben nacheinander auf dem Strip.
+
+`SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt lokale Sync-Zustaende, geplante lokale Starts, Pattern, Helligkeit, Phase und Pattern-Zeit. `sync_arm`, `sync_status` und `sync_cancel` funktionieren ohne Funktransport und loesen keine direkten EEPROM-Schreibvorgaenge aus; automatische Config-Saves werden waehrend aktivem lokalen Sync-Timing zurueckgestellt. Das vorbereitete Sync-Beacon-Modell uebertraegt nur Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC; es werden keine LED-Frames ueber Funk gestreamt.
+
+Zusaetzlich zu den Basis-Kommandos sind maschinenlesbare Diagnose- und Config-Kommandos verfuegbar: `battery`, `sensor`, `timing`, `offsets`, `get section=config`, `set strip_length`, `set smoothing`, `set accel_range`, `set gyro_range`, `set boot_calibration`, `set boot_mode`, `set enabled_mask`, `set inverted_mask`, `enable_pattern`, `disable_pattern`, `invert_pattern` und `normal_pattern`. Ungueltige Werte werden mit standardisierten `NK4 ... err code=...` Antworten abgewiesen.
 
 RM2/BLE-Pins und Build-Flags sind vorbereitet (`NIGHTKITE_RM2`, `NIGHTKITE_BLE`), bleiben in den Standard-Builds aber deaktiviert. WLAN wird nicht verwendet oder initialisiert.
 
