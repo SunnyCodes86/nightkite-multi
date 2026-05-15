@@ -31,6 +31,9 @@
 #include <math.h> // Math library
 #include <string.h>
 #include "hardware/watchdog.h"
+#include "app/PatternClock.h"
+#include "app/SyncEngine.h"
+#include "protocol/NkProtocol.h"
 
 // ============================================================================
 //  MOTION DATA
@@ -435,216 +438,6 @@ struct PatternDefinition
   PatternCallback exit;
 };
 
-struct NkSyncBeaconV1
-{
-  uint8_t magic0;
-  uint8_t magic1;
-  uint8_t version;
-  uint8_t groupId;
-  uint8_t flags;
-  uint16_t seq;
-  uint8_t pattern;
-  uint8_t brightness;
-  uint32_t phaseMs;
-  uint16_t beatMs;
-  uint16_t crc;
-} __attribute__((packed));
-
-class PatternClock
-{
-public:
-  void begin()
-  {
-    baseMs = millis();
-    phaseMs = 0;
-    running = true;
-    armed = false;
-  }
-
-  uint32_t now() const
-  {
-    if (!running)
-    {
-      return phaseMs;
-    }
-    return phaseMs + (millis() - baseMs);
-  }
-
-  void setPhase(uint32_t phase)
-  {
-    phaseMs = phase;
-    baseMs = millis();
-    running = true;
-    armed = false;
-  }
-
-  void armStart(uint32_t localStartMs, uint32_t phase)
-  {
-    armedStartMs = localStartMs;
-    armedPhaseMs = phase;
-    armed = true;
-    running = false;
-  }
-
-  void tick()
-  {
-    if (armed && (int32_t)(millis() - armedStartMs) >= 0)
-    {
-      phaseMs = armedPhaseMs;
-      baseMs = armedStartMs;
-      running = true;
-      armed = false;
-    }
-  }
-
-  bool isRunning() const
-  {
-    return running;
-  }
-
-  bool isArmed() const
-  {
-    return armed;
-  }
-
-private:
-  uint32_t baseMs = 0;
-  uint32_t phaseMs = 0;
-  uint32_t armedStartMs = 0;
-  uint32_t armedPhaseMs = 0;
-  bool running = false;
-  bool armed = false;
-};
-
-class SyncEngine
-{
-public:
-  enum State
-  {
-    IDLE,
-    ARMED,
-    RUNNING,
-    LOST,
-    ERROR
-  };
-
-  void begin()
-  {
-    state = IDLE;
-    lastSeq = 0;
-    localStartMs = 0;
-    locked = false;
-    driftMs = 0;
-    startEventPending = false;
-  }
-
-  bool arm(uint8_t group, uint8_t pattern, uint8_t brightness, uint32_t startInMs, uint32_t phase)
-  {
-    if (state == ARMED)
-    {
-      return false;
-    }
-    armedGroup = group;
-    armedPattern = pattern;
-    armedBrightness = brightness;
-    armedPhaseMs = phase;
-    localStartMs = millis() + startInMs;
-    state = ARMED;
-    locked = false;
-    startEventPending = false;
-    lastSeq++;
-    return true;
-  }
-
-  void cancel()
-  {
-    state = IDLE;
-    locked = false;
-    driftMs = 0;
-    startEventPending = false;
-  }
-
-  void tick()
-  {
-    if (state == ARMED && (int32_t)(millis() - localStartMs) >= 0)
-    {
-      state = RUNNING;
-      locked = true;
-      startEventPending = true;
-    }
-  }
-
-  bool consumeStartEvent()
-  {
-    if (!startEventPending)
-    {
-      return false;
-    }
-    startEventPending = false;
-    return true;
-  }
-
-  const char* stateName() const
-  {
-    switch (state)
-    {
-      case IDLE: return "idle";
-      case ARMED: return "armed";
-      case RUNNING: return "running";
-      case LOST: return "lost";
-      case ERROR: return "error";
-      default: return "error";
-    }
-  }
-
-  State state = IDLE;
-  uint16_t lastSeq = 0;
-  uint32_t localStartMs = 0;
-  uint32_t armedPhaseMs = 0;
-  uint8_t armedGroup = 1;
-  uint8_t armedPattern = 1;
-  uint8_t armedBrightness = MIN_BRIGHTNESS;
-  bool locked = false;
-  int32_t driftMs = 0;
-  bool startEventPending = false;
-};
-
-class IResponseWriter
-{
-public:
-  virtual void print(const char* value) = 0;
-  virtual void print(const String& value) = 0;
-  virtual void print(int value) = 0;
-  virtual void print(unsigned int value) = 0;
-  virtual void print(unsigned long value) = 0;
-  virtual void println() = 0;
-};
-
-class SerialResponseWriter : public IResponseWriter
-{
-public:
-  void print(const char* value) override { Serial.print(value); }
-  void print(const String& value) override { Serial.print(value); }
-  void print(int value) override { Serial.print(value); }
-  void print(unsigned int value) override { Serial.print(value); }
-  void print(unsigned long value) override { Serial.print(value); }
-  void println() override { Serial.println(); }
-};
-
-struct NkKeyValue
-{
-  String key;
-  String value;
-};
-
-struct NkCommand
-{
-  String seq;
-  String command;
-  NkKeyValue pairs[18];
-  uint8_t pairCount = 0;
-};
-
 PatternClock patternClock;
 SyncEngine syncEngine;
 
@@ -759,13 +552,8 @@ void resetTimingStats();
 void printTimingStatus();
 bool saveConfigToEEPROM(bool verbose);
 void readConfigFromEEPROM(bool verbose);
-bool parseNk4Line(const String& line, NkCommand* outCommand, String* errorCode, String* errorMessage);
-String nk4GetValue(const NkCommand& command, const char* key);
-bool nk4HasKey(const NkCommand& command, const char* key);
 bool handleNk4Line(const String& line);
 void handleNk4Command(const NkCommand& command, IResponseWriter& writer);
-void nk4WriteOk(IResponseWriter& writer, const String& seq, const String& fields);
-void nk4WriteError(IResponseWriter& writer, const String& seq, const char* code, const char* message);
 void showPlayModeIndicatorTest();
 void rebootController();
 void printCliHelp();
@@ -2866,30 +2654,6 @@ void readConfigFromEEPROM(bool verbose)
   }
 }
 
-void nk4WriteOk(IResponseWriter& writer, const String& seq, const String& fields)
-{
-  writer.print("NK4 seq=");
-  writer.print(seq.length() > 0 ? seq : "0");
-  writer.print(" ok");
-  if (fields.length() > 0)
-  {
-    writer.print(" ");
-    writer.print(fields);
-  }
-  writer.println();
-}
-
-void nk4WriteError(IResponseWriter& writer, const String& seq, const char* code, const char* message)
-{
-  writer.print("NK4 seq=");
-  writer.print(seq.length() > 0 ? seq : "0");
-  writer.print(" err code=");
-  writer.print(code != NULL ? code : "internal_error");
-  writer.print(" msg=");
-  writer.print(message != NULL ? message : "error");
-  writer.println();
-}
-
 void rebootController()
 {
   Serial.flush();
@@ -2917,117 +2681,6 @@ void emitNk4Event(const char* eventName, const String& fields)
     Serial.print(fields);
   }
   Serial.println();
-}
-
-String nk4GetValue(const NkCommand& command, const char* key)
-{
-  for (uint8_t i = 0; i < command.pairCount; i++)
-  {
-    if (command.pairs[i].key == key)
-    {
-      return command.pairs[i].value;
-    }
-  }
-  return "";
-}
-
-bool nk4HasKey(const NkCommand& command, const char* key)
-{
-  for (uint8_t i = 0; i < command.pairCount; i++)
-  {
-    if (command.pairs[i].key == key)
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool parseNk4Line(const String& line, NkCommand* outCommand, String* errorCode, String* errorMessage)
-{
-  if (outCommand == NULL)
-  {
-    return false;
-  }
-
-  *outCommand = NkCommand();
-  String input = line;
-  input.trim();
-  if (!input.startsWith("NK4"))
-  {
-    if (errorCode != NULL) *errorCode = "invalid_command";
-    if (errorMessage != NULL) *errorMessage = "expected_NK4";
-    return false;
-  }
-
-  int start = 3;
-  while (start < input.length())
-  {
-    while (start < input.length() && input[start] == ' ')
-    {
-      start++;
-    }
-    if (start >= input.length())
-    {
-      break;
-    }
-
-    int space = input.indexOf(' ', start);
-    String token = (space >= 0) ? input.substring(start, space) : input.substring(start);
-    int equals = token.indexOf('=');
-    if (equals <= 0 || equals == token.length() - 1)
-    {
-      if (errorCode != NULL) *errorCode = "invalid_key";
-      if (errorMessage != NULL) *errorMessage = "bad_token";
-      return false;
-    }
-
-    String key = token.substring(0, equals);
-    String value = token.substring(equals + 1);
-    key.toLowerCase();
-    if (key == "seq")
-    {
-      outCommand->seq = value;
-    }
-    else if (key == "cmd")
-    {
-      value.toLowerCase();
-      outCommand->command = value;
-    }
-    else
-    {
-      if (outCommand->pairCount >= (sizeof(outCommand->pairs) / sizeof(outCommand->pairs[0])))
-      {
-        if (errorCode != NULL) *errorCode = "range_error";
-        if (errorMessage != NULL) *errorMessage = "too_many_keys";
-        return false;
-      }
-      outCommand->pairs[outCommand->pairCount].key = key;
-      outCommand->pairs[outCommand->pairCount].value = value;
-      outCommand->pairCount++;
-    }
-
-    if (space < 0)
-    {
-      break;
-    }
-    start = space + 1;
-  }
-
-  if (outCommand->seq.length() == 0)
-  {
-    if (errorCode != NULL) *errorCode = "invalid_key";
-    if (errorMessage != NULL) *errorMessage = "missing_seq";
-    return false;
-  }
-  if (outCommand->command.length() == 0)
-  {
-    if (errorCode != NULL) *errorCode = "invalid_command";
-    if (errorMessage != NULL) *errorMessage = "missing_cmd";
-    return false;
-  }
-
-  return true;
 }
 
 void showPlayModeIndicatorTest()
