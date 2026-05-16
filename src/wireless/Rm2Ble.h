@@ -16,6 +16,9 @@ struct Rm2BleStatus
   bool gatt;
   bool rx;
   bool tx;
+  uint8_t txQueue;
+  unsigned long txDropped;
+  bool notifyReady;
   const char* name;
   const char* lastError;
 };

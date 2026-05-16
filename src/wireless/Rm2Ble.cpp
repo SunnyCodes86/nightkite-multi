@@ -38,7 +38,9 @@ constexpr size_t BLE_NAME_MAX = 24;
 constexpr size_t BLE_COMMAND_MAX = 192;
 constexpr size_t BLE_COMMAND_QUEUE_DEPTH = 4;
 constexpr size_t BLE_TX_BUFFER_MAX = 1024;
+constexpr size_t BLE_TX_QUEUE_DEPTH = 4;
 constexpr size_t BLE_NOTIFY_CHUNK_SIZE = 20;
+constexpr unsigned long BLE_NOTIFY_PACE_MS = 5;
 
 bool beginCalled = false;
 bool enabled = false;
@@ -51,6 +53,7 @@ bool txReady = false;
 char bleName[BLE_NAME_MAX] = "disabled";
 const char* lastError = "disabled";
 Rm2BleNk4Handler nk4Handler = nullptr;
+unsigned long txDroppedCount = 0;
 
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
 btstack_packet_callback_registration_t hciEventCallbackRegistration;
@@ -72,10 +75,13 @@ size_t commandQueueLen[BLE_COMMAND_QUEUE_DEPTH];
 uint8_t commandQueueHead = 0;
 uint8_t commandQueueTail = 0;
 uint8_t commandQueueCount = 0;
-char txBuffer[BLE_TX_BUFFER_MAX];
-size_t txLen = 0;
+char txQueue[BLE_TX_QUEUE_DEPTH][BLE_TX_BUFFER_MAX];
+size_t txQueueLen[BLE_TX_QUEUE_DEPTH];
+uint8_t txQueueHead = 0;
+uint8_t txQueueTail = 0;
+uint8_t txQueueCount = 0;
 size_t txOffset = 0;
-bool txActive = false;
+unsigned long lastNotifyChunkMs = 0;
 
 // 4e4b4000-6e69-6768-746b-000000000001
 const uint8_t NIGHTKITE_SERVICE_UUID[16] = {
@@ -175,35 +181,61 @@ bool dequeueCommandLine(String& lineOut)
   return true;
 }
 
-void enqueueTxBytes(const char* data, size_t dataLen)
+void resetTxQueue()
+{
+  txQueueHead = 0;
+  txQueueTail = 0;
+  txQueueCount = 0;
+  txOffset = 0;
+  txCanSendRequested = false;
+}
+
+void resetRxQueue()
+{
+  rxLineLen = 0;
+  rxDroppingLongLine = false;
+  rxRangeErrorPending = false;
+  rxQueueFullErrorPending = false;
+  commandQueueHead = 0;
+  commandQueueTail = 0;
+  commandQueueCount = 0;
+}
+
+bool enqueueTxLine(const char* data, size_t dataLen)
 {
   if (!txNotificationsEnabled || connectionHandle == HCI_CON_HANDLE_INVALID)
   {
     lastError = "notify_disabled";
-    return;
+    return false;
   }
+  if (txQueueCount >= BLE_TX_QUEUE_DEPTH)
+  {
+    txDroppedCount++;
+    lastError = "tx_queue_full";
+    return false;
+  }
+
   if (dataLen >= BLE_TX_BUFFER_MAX)
   {
     dataLen = BLE_TX_BUFFER_MAX - 1;
     lastError = "tx_truncated";
   }
-  if (txActive)
-  {
-    lastError = "tx_busy";
-    return;
-  }
 
-  memcpy(txBuffer, data, dataLen);
-  txBuffer[dataLen] = '\0';
-  txLen = dataLen;
-  txOffset = 0;
-  txActive = txLen > 0;
-  txCanSendRequested = false;
+  memcpy(txQueue[txQueueTail], data, dataLen);
+  txQueue[txQueueTail][dataLen] = '\0';
+  txQueueLen[txQueueTail] = dataLen;
+  txQueueTail = (uint8_t)((txQueueTail + 1) % BLE_TX_QUEUE_DEPTH);
+  txQueueCount++;
+  return true;
 }
 
 void requestTxCanSend()
 {
-  if (!txActive || txCanSendRequested || connectionHandle == HCI_CON_HANDLE_INVALID)
+  if (txQueueCount == 0 || txCanSendRequested || connectionHandle == HCI_CON_HANDLE_INVALID || !txNotificationsEnabled)
+  {
+    return;
+  }
+  if (millis() - lastNotifyChunkMs < BLE_NOTIFY_PACE_MS)
   {
     return;
   }
@@ -214,27 +246,25 @@ void requestTxCanSend()
 void sendNextTxChunk()
 {
   txCanSendRequested = false;
-  if (!txActive || !txNotificationsEnabled || connectionHandle == HCI_CON_HANDLE_INVALID)
+  if (txQueueCount == 0 || !txNotificationsEnabled || connectionHandle == HCI_CON_HANDLE_INVALID)
   {
-    txActive = false;
-    txLen = 0;
-    txOffset = 0;
+    resetTxQueue();
     return;
   }
 
+  const size_t txLen = txQueueLen[txQueueHead];
   const size_t remaining = txLen - txOffset;
   const size_t chunkLen = remaining > BLE_NOTIFY_CHUNK_SIZE ? BLE_NOTIFY_CHUNK_SIZE : remaining;
-  att_server_notify(connectionHandle, txValueHandle, (uint8_t*)&txBuffer[txOffset], (uint16_t)chunkLen);
+  att_server_notify(connectionHandle, txValueHandle, (uint8_t*)&txQueue[txQueueHead][txOffset], (uint16_t)chunkLen);
+  lastNotifyChunkMs = millis();
   txOffset += chunkLen;
   if (txOffset >= txLen)
   {
-    txActive = false;
-    txLen = 0;
+    txQueueHead = (uint8_t)((txQueueHead + 1) % BLE_TX_QUEUE_DEPTH);
+    txQueueCount--;
     txOffset = 0;
     lastError = "none";
-    return;
   }
-  requestTxCanSend();
 }
 
 void enqueueNk4ErrorLine(const char* code, const char* msg)
@@ -243,7 +273,7 @@ void enqueueNk4ErrorLine(const char* code, const char* msg)
   const int written = snprintf(line, sizeof(line), "NK4 seq=0 err code=%s msg=%s\n", code, msg);
   if (written > 0)
   {
-    enqueueTxBytes(line, (size_t)written);
+    enqueueTxLine(line, (size_t)written);
   }
 }
 
@@ -354,9 +384,8 @@ void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uin
     connectionHandle = HCI_CON_HANDLE_INVALID;
     txNotificationsEnabled = false;
     txCanSendRequested = false;
-    txActive = false;
-    txLen = 0;
-    txOffset = 0;
+    resetTxQueue();
+    resetRxQueue();
     gap_advertisements_enable(1);
     advertising = true;
     return;
@@ -433,7 +462,7 @@ public:
   {
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
     append("\n");
-    enqueueTxBytes(buffer, length);
+    enqueueTxLine(buffer, length);
 #endif
     reset();
   }
@@ -504,6 +533,8 @@ bool rm2BleBegin(const char* advertisedName)
   gattReady = false;
   rxReady = false;
   txReady = false;
+  resetTxQueue();
+  resetRxQueue();
   lastError = "starting";
 
   if (!configureRm2Pins())
@@ -575,18 +606,18 @@ void rm2BleTick()
     return;
   }
 
-  if (rxRangeErrorPending && !txActive)
+  if (rxRangeErrorPending && txQueueCount == 0)
   {
     rxRangeErrorPending = false;
     enqueueNk4ErrorLine("range_error", "line_too_long");
   }
-  if (rxQueueFullErrorPending && !txActive)
+  if (rxQueueFullErrorPending && txQueueCount == 0)
   {
     rxQueueFullErrorPending = false;
     enqueueNk4ErrorLine("busy", "rx_queue_full");
   }
 
-  if (!txActive && nk4Handler != nullptr)
+  if (txQueueCount == 0 && nk4Handler != nullptr)
   {
     String line;
     if (dequeueCommandLine(line))
@@ -612,6 +643,14 @@ Rm2BleStatus rm2BleStatus()
   status.gatt = gattReady;
   status.rx = rxReady;
   status.tx = txReady;
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  status.txQueue = txQueueCount;
+  status.notifyReady = txNotificationsEnabled && connectionHandle != HCI_CON_HANDLE_INVALID;
+#else
+  status.txQueue = 0;
+  status.notifyReady = false;
+#endif
+  status.txDropped = txDroppedCount;
   status.name = bleName;
   status.lastError = lastError;
   return status;
@@ -648,6 +687,12 @@ String rm2BleBuildStatusFields()
   fields += status.rx ? 1 : 0;
   fields += " ble_tx=";
   fields += status.tx ? 1 : 0;
+  fields += " ble_tx_queue=";
+  fields += status.txQueue;
+  fields += " ble_tx_dropped=";
+  fields += status.txDropped;
+  fields += " ble_notify_ready=";
+  fields += status.notifyReady ? 1 : 0;
   fields += " ble_name=";
   fields += status.name;
   fields += " last_error=";
