@@ -230,6 +230,19 @@ Zusaetzlich zu den Basis-Kommandos sind maschinenlesbare Diagnose- und Config-Ko
 
 RM2/BLE-Pins und Build-Flags sind vorbereitet (`NIGHTKITE_RM2`, `NIGHTKITE_BLE`), bleiben in den Standard-Builds aber deaktiviert. WLAN wird nicht verwendet oder initialisiert.
 
+Aktuelle RM2-Verkabelung am Pimoroni Pico LiPo 2:
+
+| Pico LiPo 2 | RM2 Breakout |
+| --- | --- |
+| GP17 | BL_ON/WL_ON |
+| GP18 | CS |
+| GP19 | CLK |
+| GP20 | DAT/WL_WAKE |
+| 3V3 | 3V3 |
+| GND | GND |
+
+Das RM2 Breakout ist hart an die Aussenpads geloetet und nicht ueber den SP/CE-JST-Stecker verbunden. BL_ON und WL_ON sind auf dem Breakout hardwareseitig gebrueckt und haengen gemeinsam an GP17. GPIO0, GPIO1 und GPIO2 des RM2 Breakouts sind nicht verbunden.
+
 ### Hinweise zur Kalibrierung
 
 Es gibt zwei Kalibrierpfade:

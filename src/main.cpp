@@ -65,16 +65,22 @@
 #define PIN_USB_SENSE 24
 #endif
 #ifndef PIN_RM2_WL_ON
-#define PIN_RM2_WL_ON 32
+#define PIN_RM2_WL_ON 17
+#endif
+#ifndef PIN_RM2_BL_ON
+#define PIN_RM2_BL_ON PIN_RM2_WL_ON
 #endif
 #ifndef PIN_RM2_WL_CS
-#define PIN_RM2_WL_CS 33
+#define PIN_RM2_WL_CS 18
 #endif
 #ifndef PIN_RM2_WL_CLK
-#define PIN_RM2_WL_CLK 34
+#define PIN_RM2_WL_CLK 19
 #endif
 #ifndef PIN_RM2_WL_DATA
-#define PIN_RM2_WL_DATA 35
+#define PIN_RM2_WL_DATA 20
+#endif
+#ifndef PIN_RM2_WL_WAKE
+#define PIN_RM2_WL_WAKE PIN_RM2_WL_DATA
 #endif
 #ifndef NIGHTKITE_BLE
 #define NIGHTKITE_BLE 0
