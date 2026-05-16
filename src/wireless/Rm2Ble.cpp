@@ -478,6 +478,16 @@ bool configureGattDatabase()
   txReady = txValueHandle != 0;
   return rxReady && txReady;
 }
+
+void configureGattAdvertisingParams()
+{
+  bd_addr_t nullAddress;
+  memset(nullAddress, 0, sizeof(nullAddress));
+  const uint16_t advIntervalMin = 0x00A0; // 100 ms
+  const uint16_t advIntervalMax = 0x00F0; // 150 ms
+  const uint8_t advType = 0; // ADV_IND: connectable undirected advertising.
+  gap_advertisements_set_params(advIntervalMin, advIntervalMax, advType, 0, nullAddress, 0x07, 0x00);
+}
 #endif
 
 class BleResponseWriter : public IResponseWriter
@@ -596,12 +606,7 @@ bool rm2BleBegin(const char* advertisedName)
   hciEventCallbackRegistration.callback = &hciPacketHandler;
   hci_add_event_handler(&hciEventCallbackRegistration);
 
-  bd_addr_t nullAddress;
-  memset(nullAddress, 0, sizeof(nullAddress));
-  const uint16_t advIntervalMin = 0x00A0; // 100 ms
-  const uint16_t advIntervalMax = 0x00F0; // 150 ms
-  const uint8_t advType = 0; // ADV_IND: connectable undirected advertising.
-  gap_advertisements_set_params(advIntervalMin, advIntervalMax, advType, 0, nullAddress, 0x07, 0x00);
+  configureGattAdvertisingParams();
   gap_advertisements_set_data(advDataLen, advData);
   gap_set_local_name(bleName);
 
@@ -740,4 +745,56 @@ String rm2BleBuildStatusFields()
   fields += status.lastError;
   fields += " wifi=0";
   return fields;
+}
+
+bool rm2BleUseSyncAdvertising(const uint8_t* data, uint8_t dataLen, uint16_t intervalMin, uint16_t intervalMax, uint8_t advType)
+{
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!initialized || connected || data == nullptr || dataLen == 0 || dataLen > 31)
+  {
+    lastError = connected ? "gatt_connected" : "sync_adv_unavailable";
+    return false;
+  }
+
+  bd_addr_t nullAddress;
+  memset(nullAddress, 0, sizeof(nullAddress));
+  gap_advertisements_enable(0);
+  gap_advertisements_set_params(intervalMin, intervalMax, advType, 0, nullAddress, 0x07, 0x00);
+  gap_advertisements_set_data(dataLen, (uint8_t*)data);
+  gap_advertisements_enable(1);
+  advertising = true;
+  return true;
+#else
+  (void)data;
+  (void)dataLen;
+  (void)intervalMin;
+  (void)intervalMax;
+  (void)advType;
+  return false;
+#endif
+}
+
+void rm2BleStopAdvertising()
+{
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (initialized)
+  {
+    gap_advertisements_enable(0);
+    advertising = false;
+  }
+#endif
+}
+
+void rm2BleRestoreGattAdvertising()
+{
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!initialized || connected || advDataLen == 0)
+  {
+    return;
+  }
+  configureGattAdvertisingParams();
+  gap_advertisements_set_data(advDataLen, advData);
+  gap_advertisements_enable(1);
+  advertising = true;
+#endif
 }

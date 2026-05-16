@@ -35,6 +35,7 @@
 #include "app/SyncEngine.h"
 #include "protocol/NkProtocol.h"
 #include "wireless/Rm2Ble.h"
+#include "wireless/SyncBeaconRadio.h"
 
 // ============================================================================
 //  MOTION DATA
@@ -513,11 +514,15 @@ void setPlayMode(int mode);
 void cyclePlayMode();
 CRGB playModeIndicatorColor(int mode, int syncRole, bool syncError);
 void applySyncStartIfDue();
+SyncBeaconRuntime buildSyncBeaconRuntime();
+void tickSyncBeaconRadio();
+void applyReceivedSyncBeacon();
 void announcePatternChange(const char* source);
 void printOffsets();
 void printOffsetsWithPrefix(const char* prefix);
 void printConfigSummaryWithPrefix(const char* prefix);
 String buildConfigFields();
+String buildSyncFields(bool detailed);
 String buildWirelessFields();
 String buildBatteryFields();
 String buildSensorFields();
@@ -1265,6 +1270,44 @@ String buildConfigFields()
   return fields;
 }
 
+String buildSyncFields(bool detailed)
+{
+  String fields = "sync_enabled=";
+  fields += currentSyncEnabled;
+  fields += " sync_group=";
+  fields += currentSyncGroupId;
+  fields += " sync_role=";
+  fields += syncRoleToString(currentSyncRole);
+  fields += " sync_state=";
+  fields += syncEngine.stateName();
+  fields += " sync_loss_behavior=";
+  fields += syncLossBehaviorToString(currentSyncLossBehavior);
+  fields += " master_uid=";
+  fields += strlen(currentSyncMasterUid) > 0 ? currentSyncMasterUid : "none";
+  fields += " last_seq=";
+  fields += syncEngine.lastSeq;
+  fields += " locked=";
+  fields += syncEngine.locked ? 1 : 0;
+  fields += " drift_ms=";
+  fields += syncEngine.driftMs;
+  if (detailed)
+  {
+    fields += " armed_group=";
+    fields += syncEngine.armedGroup;
+    fields += " armed_pattern=";
+    fields += syncEngine.armedPattern;
+    fields += " armed_brightness=";
+    fields += syncEngine.armedBrightness;
+    fields += " local_start_ms=";
+    fields += syncEngine.localStartMs;
+    fields += " pattern_time_ms=";
+    fields += patternClock.now();
+  }
+  fields += " ";
+  fields += syncBeaconRadioBuildStatusFields();
+  return fields;
+}
+
 String buildWirelessFields()
 {
   String fields = "wireless_enabled=";
@@ -1277,6 +1320,8 @@ String buildWirelessFields()
   fields += (NIGHTKITE_RM2 ? 1 : 0);
   fields += " ";
   fields += rm2BleBuildStatusFields();
+  fields += " ";
+  fields += syncBeaconRadioBuildStatusFields();
   return fields;
 }
 
@@ -1434,6 +1479,77 @@ void applySyncStartIfDue()
   FastLED.setBrightness(BRIGHTNESS);
   switchToPattern(syncEngine.armedPattern, true);
   setPlayMode(PLAY_MODE_SYNC);
+}
+
+SyncBeaconRuntime buildSyncBeaconRuntime()
+{
+  SyncBeaconRuntime runtime;
+  runtime.syncEnabled = currentSyncEnabled == 1;
+  runtime.playMode = (uint8_t)currentPlayMode;
+  runtime.syncRole = (uint8_t)currentSyncRole;
+  runtime.groupId = (uint8_t)currentSyncGroupId;
+  runtime.pattern = (uint8_t)currentPattern;
+  runtime.brightness = (uint8_t)currentBrightness;
+  runtime.wirelessProfile = (uint8_t)currentWirelessProfile;
+  runtime.phaseMs = patternClock.now();
+  runtime.beatMs = NK_SYNC_BEACON_BEAT_MS;
+  return runtime;
+}
+
+void applyReceivedSyncBeacon()
+{
+  NkSyncBeaconV1 beacon;
+  while (syncBeaconRadioConsumeBeacon(&beacon))
+  {
+    if (currentPlayMode != PLAY_MODE_SYNC || currentSyncEnabled != 1 ||
+        currentSyncRole != SYNC_ROLE_FOLLOWER || beacon.groupId != currentSyncGroupId)
+    {
+      continue;
+    }
+
+    const uint32_t localPhaseBeforeUpdate = patternClock.now();
+    syncEngine.state = SyncEngine::RUNNING;
+    syncEngine.locked = true;
+    syncEngine.lastSeq = beacon.seq;
+    syncEngine.armedGroup = beacon.groupId;
+    syncEngine.armedPattern = beacon.pattern;
+    syncEngine.armedBrightness = beacon.brightness;
+    syncEngine.armedPhaseMs = beacon.phaseMs;
+    syncEngine.localStartMs = millis();
+    syncEngine.driftMs = (int32_t)beacon.phaseMs - (int32_t)localPhaseBeforeUpdate;
+
+    if (isValidBrightnessLevel(beacon.brightness))
+    {
+      currentBrightness = beacon.brightness;
+      BRIGHTNESS = currentBrightness;
+      FastLED.setBrightness(BRIGHTNESS);
+    }
+    if (isValidPatternId(beacon.pattern) && isPatternEnabled(beacon.pattern) && currentPattern != beacon.pattern)
+    {
+      switchToPattern(beacon.pattern, true);
+    }
+    patternClock.setPhase(beacon.phaseMs);
+  }
+}
+
+void tickSyncBeaconRadio()
+{
+  syncBeaconRadioTick(buildSyncBeaconRuntime());
+  applyReceivedSyncBeacon();
+
+  const SyncBeaconRadioStatus radioStatus = syncBeaconRadioStatus();
+  if (currentPlayMode == PLAY_MODE_SYNC && currentSyncEnabled == 1 && currentSyncRole == SYNC_ROLE_MASTER && radioStatus.beaconTx)
+  {
+    syncEngine.state = SyncEngine::RUNNING;
+    syncEngine.locked = true;
+    syncEngine.lastSeq = radioStatus.beaconSeq;
+  }
+  else if (currentPlayMode == PLAY_MODE_SYNC && currentSyncEnabled == 1 && currentSyncRole == SYNC_ROLE_FOLLOWER &&
+      syncEngine.locked && radioStatus.beaconRx && !radioStatus.locked)
+  {
+    syncEngine.state = SyncEngine::LOST;
+    syncEngine.locked = false;
+  }
 }
 
 void announcePatternChange(const char* source)
@@ -2861,6 +2977,10 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += rm2BleStatus().initialized ? 1 : 0;
     fields += " ble_advertising=";
     fields += rm2BleStatus().advertising ? 1 : 0;
+    fields += " radio_mode=";
+    fields += syncBeaconRadioStatus().mode;
+    fields += " sync_locked=";
+    fields += syncEngine.locked ? 1 : 0;
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -2972,17 +3092,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     section.toLowerCase();
     if (section == "sync")
     {
-      String fields = "sync_enabled=";
-      fields += currentSyncEnabled;
-      fields += " sync_group=";
-      fields += currentSyncGroupId;
-      fields += " sync_role=";
-      fields += syncRoleToString(currentSyncRole);
-      fields += " sync_loss_behavior=";
-      fields += syncLossBehaviorToString(currentSyncLossBehavior);
-      fields += " master_uid=";
-      fields += strlen(currentSyncMasterUid) > 0 ? currentSyncMasterUid : "none";
-      nk4WriteOk(writer, seq, fields);
+      nk4WriteOk(writer, seq, buildSyncFields(false));
       return;
     }
     if (section == "wireless")
@@ -3485,33 +3595,13 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
 
   if (command.command == "sync_status")
   {
-    String fields = "sync_enabled=";
-    fields += currentSyncEnabled;
-    fields += " sync_group=";
-    fields += currentSyncGroupId;
-    fields += " sync_role=";
-    fields += syncRoleToString(currentSyncRole);
-    fields += " sync_state=";
-    fields += syncEngine.stateName();
-    fields += " master_uid=";
-    fields += strlen(currentSyncMasterUid) > 0 ? currentSyncMasterUid : "none";
-    fields += " last_seq=";
-    fields += syncEngine.lastSeq;
-    fields += " locked=";
-    fields += syncEngine.locked ? 1 : 0;
-    fields += " drift_ms=";
-    fields += syncEngine.driftMs;
-    fields += " armed_group=";
-    fields += syncEngine.armedGroup;
-    fields += " armed_pattern=";
-    fields += syncEngine.armedPattern;
-    fields += " armed_brightness=";
-    fields += syncEngine.armedBrightness;
-    fields += " local_start_ms=";
-    fields += syncEngine.localStartMs;
-    fields += " pattern_time_ms=";
-    fields += patternClock.now();
-    nk4WriteOk(writer, seq, fields);
+    nk4WriteOk(writer, seq, buildSyncFields(true));
+    return;
+  }
+
+  if (command.command == "sync_radio_status")
+  {
+    nk4WriteOk(writer, seq, syncBeaconRadioBuildStatusFields());
     return;
   }
 
@@ -5669,6 +5759,7 @@ void setup()
     bleName += currentShortId;
     rm2BleSetNk4Handler(handleNk4LineWithWriter);
     const bool bleStartRequested = rm2BleBegin(bleName.c_str());
+    syncBeaconRadioBegin();
     if (!bleStartRequested)
     {
       bootMark("rm2_unavailable");
@@ -5830,6 +5921,7 @@ void loop()
   rm2BleTick();
   patternClock.tick();
   syncEngine.tick();
+  tickSyncBeaconRadio();
   applySyncStartIfDue();
 
   if (multiresponseButton.singleClick() && batteryViewActive)

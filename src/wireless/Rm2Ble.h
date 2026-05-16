@@ -31,3 +31,6 @@ bool rm2BleBegin(const char* advertisedName);
 void rm2BleTick();
 Rm2BleStatus rm2BleStatus();
 String rm2BleBuildStatusFields();
+bool rm2BleUseSyncAdvertising(const uint8_t* data, uint8_t dataLen, uint16_t intervalMin, uint16_t intervalMax, uint8_t advType);
+void rm2BleStopAdvertising();
+void rm2BleRestoreGattAdvertising();

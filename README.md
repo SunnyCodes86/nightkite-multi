@@ -224,7 +224,7 @@ Die 4.0-Config erweitert die bestehende EEPROM-Konfiguration ohne die alten Adre
 
 PlayMode ist jetzt als Steuerlogik mit `manual`, `autoplay` und `sync` angebunden. `manual` bleibt lokal auf dem aktuellen Pattern, `autoplay` nutzt das bestehende Autoplay-Verhalten, und `sync` bleibt lokal lauffaehig, auch wenn noch kein Funkmodul aktiv ist. Im Battery-View schaltet der vorhandene Mode-Button-Zyklus defensiv `manual -> autoplay -> sync -> manual`; der normale Pattern-Wechsel ausserhalb des Battery-Views bleibt erhalten. Die Status-Farben sind blau fuer manual, gruen fuer autoplay, cyan fuer sync follower, magenta fuer sync master und rot blinkend fuer sync error/no master. `NK4 cmd=test indicator=play_modes` zeigt diese Farben nacheinander auf dem Strip.
 
-`SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt lokale Sync-Zustaende, geplante lokale Starts, Pattern, Helligkeit, Phase und Pattern-Zeit. `sync_arm`, `sync_status` und `sync_cancel` funktionieren ohne Funktransport und loesen keine direkten EEPROM-Schreibvorgaenge aus; automatische Config-Saves werden waehrend aktivem lokalen Sync-Timing zurueckgestellt. Das vorbereitete Sync-Beacon-Modell uebertraegt nur Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC; es werden keine LED-Frames ueber Funk gestreamt.
+`SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt lokale Sync-Zustaende, geplante lokale Starts, Pattern, Helligkeit, Phase und Pattern-Zeit. `sync_arm`, `sync_status` und `sync_cancel` funktionieren lokal und loesen keine direkten EEPROM-Schreibvorgaenge aus; automatische Config-Saves werden waehrend aktivem lokalen Sync-Timing zurueckgestellt. Das experimentelle Sync-Beacon-Modell uebertraegt nur Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC; es werden keine LED-Frames ueber Funk gestreamt.
 
 Zusaetzlich zu den Basis-Kommandos sind maschinenlesbare Diagnose- und Config-Kommandos verfuegbar: `battery`, `sensor`, `timing`, `offsets`, `get section=config`, `set strip_length`, `set smoothing`, `set accel_range`, `set gyro_range`, `set boot_calibration`, `set boot_mode`, `set enabled_mask`, `set inverted_mask`, `enable_pattern`, `disable_pattern`, `invert_pattern` und `normal_pattern`. Ungueltige Werte werden mit standardisierten `NK4 ... err code=...` Antworten abgewiesen.
 
@@ -250,7 +250,7 @@ platformio run -e pico2350_rm2_ble
 platformio run -e pico2350_rm2_ble -t upload
 ```
 
-Dieses Environment aktiviert `NIGHTKITE_BLE=1`, `NIGHTKITE_RM2=1`, den Arduino-Pico-Bluetooth-Stack und die dynamische CYW43/RM2-Pinbelegung fuer GP17-GP20. Der Build startet BLE-Advertising mit einem kompakten Namen wie `NK-<short_id>` und stellt experimentell einen NK4-over-BLE-GATT-Transport bereit. Sync-Beacons, Gruppensteuerung und Master/Follower-Funk sind noch nicht aktiv. WLAN wird nicht verwendet.
+Dieses Environment aktiviert `NIGHTKITE_BLE=1`, `NIGHTKITE_RM2=1`, den Arduino-Pico-Bluetooth-Stack und die dynamische CYW43/RM2-Pinbelegung fuer GP17-GP20. Der Build startet BLE-Advertising mit einem kompakten Namen wie `NK-<short_id>`, stellt experimentell einen NK4-over-BLE-GATT-Transport bereit und enthaelt einen ersten autonomen Sync-Beacon-Radio. WLAN wird nicht verwendet.
 
 NightKite BLE-GATT:
 
@@ -268,6 +268,14 @@ NK4 seq=5 cmd=ble_status
 ```
 
 Wichtige Felder sind `ble_supported`, `ble_enabled`, `rm2_enabled`, `rm2_pins`, `ble_initialized`, `ble_advertising`, `ble_connected`, `ble_gatt`, `ble_rx`, `ble_tx`, `ble_tx_queue`, `ble_tx_dropped`, `ble_notify_ready`, `ble_tx_active`, `ble_tx_offset`, `ble_tx_chunks_sent`, `ble_name`, `last_error` und `wifi=0`. Ein BLE-Scan mit nRF Connect oder einem Smartphone sollte im Erfolgsfall `NK-<short_id>` anzeigen.
+
+Experimenteller Sync-Beacon-Radio:
+
+- `standalone`: kein Beacon-Radio aktiv.
+- `master`: wenn `play_mode=sync` und `sync_enabled=1`, sendet der Controller kleine nicht-connectable BLE-Advertising-Pakete mit Herstellerdaten-Payload. Die Beacon-Rate richtet sich nach `wireless_profile`: `long_range` ca. 5 Hz, `balanced` ca. 10 Hz, `fast_sync` ca. 20 Hz.
+- `follower`: wenn `play_mode=sync` und `sync_enabled=1`, scannt der Controller nach gueltigen NightKite-Beacons derselben `sync_group`. Beacons mit falscher Gruppe oder CRC werden ignoriert und gezaehlt.
+
+GATT/NK4 bleibt der Konfigurations- und Diagnosepfad. Der Beacon-Radio nutzt keine GATT-Kommandos fuer Echtzeit-Sync und sendet keine Acknowledgements. Wenn ein BLE-GATT-Client verbunden ist, hat der Config/GATT-Modus Vorrang und der Beacon-Radio meldet `radio_mode=gatt`; USB bleibt immer als Fallback verfuegbar. Diagnosefelder sind in `NK4 cmd=get section=sync`, `NK4 cmd=sync_status`, `NK4 cmd=sync_radio_status` und `NK4 cmd=get section=wireless` sichtbar, darunter `sync_radio`, `sync_radio_active`, `beacon_tx`, `beacon_rx`, `beacon_seq`, `beacon_tx_count`, `beacon_rx_count`, `beacon_crc_errors`, `beacon_group_mismatch`, `last_beacon_ms`, `beacon_age_ms`, `sync_locked` und `radio_mode`.
 
 Manueller nRF-Connect-Test:
 
