@@ -228,7 +228,7 @@ PlayMode ist jetzt als Steuerlogik mit `manual`, `autoplay` und `sync` angebunde
 
 Zusaetzlich zu den Basis-Kommandos sind maschinenlesbare Diagnose- und Config-Kommandos verfuegbar: `battery`, `sensor`, `timing`, `offsets`, `get section=config`, `set strip_length`, `set smoothing`, `set accel_range`, `set gyro_range`, `set boot_calibration`, `set boot_mode`, `set enabled_mask`, `set inverted_mask`, `enable_pattern`, `disable_pattern`, `invert_pattern` und `normal_pattern`. Ungueltige Werte werden mit standardisierten `NK4 ... err code=...` Antworten abgewiesen.
 
-RM2/BLE-Pins und Build-Flags sind vorbereitet (`NIGHTKITE_RM2`, `NIGHTKITE_BLE`), bleiben in den Standard-Builds aber deaktiviert. WLAN wird nicht verwendet oder initialisiert.
+RM2/BLE-Pins und Build-Flags sind vorbereitet (`NIGHTKITE_RM2`, `NIGHTKITE_BLE`), bleiben in den Standard-Builds aber deaktiviert. WLAN wird nicht als Firmware-Feature verwendet: kein `WiFi.begin`, kein Scan, kein Webserver.
 
 Aktuelle RM2-Verkabelung am Pimoroni Pico LiPo 2:
 
@@ -242,6 +242,22 @@ Aktuelle RM2-Verkabelung am Pimoroni Pico LiPo 2:
 | GND | GND |
 
 Das RM2 Breakout ist hart an die Aussenpads geloetet und nicht ueber den SP/CE-JST-Stecker verbunden. BL_ON und WL_ON sind auf dem Breakout hardwareseitig gebrueckt und haengen gemeinsam an GP17. GPIO0, GPIO1 und GPIO2 des RM2 Breakouts sind nicht verbunden.
+
+Experimenteller erster Bring-up:
+
+```bash
+platformio run -e pico2350_rm2_ble
+platformio run -e pico2350_rm2_ble -t upload
+```
+
+Dieses Environment aktiviert `NIGHTKITE_BLE=1`, `NIGHTKITE_RM2=1`, den Arduino-Pico-Bluetooth-Stack und die dynamische CYW43/RM2-Pinbelegung fuer GP17-GP20. Der Build versucht nur BLE-Advertising mit einem kompakten Namen wie `NK-<short_id>` zu starten. NK4-over-BLE, BLE RX/TX Characteristics, Sync-Beacons und Master/Follower-Funk sind noch nicht aktiv. Der Status ist ueber USB/NK4 sichtbar:
+
+```text
+NK4 seq=4 cmd=get section=wireless
+NK4 seq=5 cmd=ble_status
+```
+
+Wichtige Felder sind `ble_supported`, `ble_enabled`, `rm2_enabled`, `rm2_pins`, `ble_initialized`, `ble_advertising`, `ble_name`, `last_error` und `wifi=0`. Ein BLE-Scan mit nRF Connect oder einem Smartphone sollte im Erfolgsfall `NK-<short_id>` anzeigen.
 
 ### Hinweise zur Kalibrierung
 

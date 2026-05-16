@@ -34,6 +34,7 @@
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
 #include "protocol/NkProtocol.h"
+#include "wireless/Rm2Ble.h"
 
 // ============================================================================
 //  MOTION DATA
@@ -517,6 +518,7 @@ void printOffsets();
 void printOffsetsWithPrefix(const char* prefix);
 void printConfigSummaryWithPrefix(const char* prefix);
 String buildConfigFields();
+String buildWirelessFields();
 String buildBatteryFields();
 String buildSensorFields();
 String buildTimingFields();
@@ -1259,6 +1261,21 @@ String buildConfigFields()
   fields += safeBootActive ? 1 : 0;
   fields += " ";
   fields += buildPatternMaskFields();
+  return fields;
+}
+
+String buildWirelessFields()
+{
+  String fields = "wireless_enabled=";
+  fields += currentWirelessEnabled;
+  fields += " wireless_profile=";
+  fields += wirelessProfileToString(currentWirelessProfile);
+  fields += " ble=";
+  fields += (NIGHTKITE_BLE ? 1 : 0);
+  fields += " rm2=";
+  fields += (NIGHTKITE_RM2 ? 1 : 0);
+  fields += " ";
+  fields += rm2BleBuildStatusFields();
   return fields;
 }
 
@@ -2764,6 +2781,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += NIGHTKITE_HARDWARE;
     fields += " ble_supported=";
     fields += (NIGHTKITE_BLE ? 1 : 0);
+    fields += " rm2_enabled=";
+    fields += rm2BleStatus().rm2Enabled ? 1 : 0;
+    fields += " ble_initialized=";
+    fields += rm2BleStatus().initialized ? 1 : 0;
+    fields += " ble_advertising=";
+    fields += rm2BleStatus().advertising ? 1 : 0;
     fields += " sync_supported=1 patterns=";
     fields += PATTERN_COUNT;
     fields += " config_valid=";
@@ -2833,6 +2856,10 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += safeBootActive ? 1 : 0;
     fields += " boot_stage=";
     fields += bootStage;
+    fields += " ble_initialized=";
+    fields += rm2BleStatus().initialized ? 1 : 0;
+    fields += " ble_advertising=";
+    fields += rm2BleStatus().advertising ? 1 : 0;
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -2932,6 +2959,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     return;
   }
 
+  if (command.command == "ble_status")
+  {
+    nk4WriteOk(writer, seq, buildWirelessFields());
+    return;
+  }
+
   if (command.command == "get")
   {
     String section = nk4GetValue(command, "section");
@@ -2953,15 +2986,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     }
     if (section == "wireless")
     {
-      String fields = "wireless_enabled=";
-      fields += currentWirelessEnabled;
-      fields += " wireless_profile=";
-      fields += wirelessProfileToString(currentWirelessProfile);
-      fields += " ble=";
-      fields += (NIGHTKITE_BLE ? 1 : 0);
-      fields += " rm2=";
-      fields += (NIGHTKITE_RM2 ? 1 : 0);
-      nk4WriteOk(writer, seq, fields);
+      nk4WriteOk(writer, seq, buildWirelessFields());
       return;
     }
     if (section == "play")
@@ -5630,6 +5655,27 @@ void setup()
   patternClock.begin();
   syncEngine.begin();
   lastUpdateTime = millis();
+
+#if NIGHTKITE_BLE && NIGHTKITE_RM2
+  bootMark("rm2_begin");
+  {
+    String bleName = "NK-";
+    bleName += currentShortId;
+    const bool bleStartRequested = rm2BleBegin(bleName.c_str());
+    if (!bleStartRequested)
+    {
+      bootMark("rm2_unavailable");
+    }
+    else if (rm2BleStatus().advertising)
+    {
+      bootMark("ble_advertising");
+    }
+    else
+    {
+      bootMark("ble_begin");
+    }
+  }
+#endif
 	
 // State machine init.
   fsm.add(timedTransitions, num_timed);
@@ -5770,6 +5816,7 @@ void loop()
   }
 
   handleCLI();
+  rm2BleTick();
   patternClock.tick();
   syncEngine.tick();
   applySyncStartIfDue();
