@@ -27,6 +27,7 @@
 
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
 #include <btstack.h>
+#include <ble/att_db_util.h>
 #include <pico/cyw43_arch.h>
 #include <pico/cyw43_driver.h>
 #endif
@@ -34,18 +35,63 @@
 namespace
 {
 constexpr size_t BLE_NAME_MAX = 24;
+constexpr size_t BLE_COMMAND_MAX = 192;
+constexpr size_t BLE_COMMAND_QUEUE_DEPTH = 4;
+constexpr size_t BLE_TX_BUFFER_MAX = 1024;
+constexpr size_t BLE_NOTIFY_CHUNK_SIZE = 20;
 
 bool beginCalled = false;
 bool enabled = false;
 bool initialized = false;
 bool advertising = false;
+bool connected = false;
+bool gattReady = false;
+bool rxReady = false;
+bool txReady = false;
 char bleName[BLE_NAME_MAX] = "disabled";
 const char* lastError = "disabled";
+Rm2BleNk4Handler nk4Handler = nullptr;
 
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
 btstack_packet_callback_registration_t hciEventCallbackRegistration;
 uint8_t advData[31];
 uint8_t advDataLen = 0;
+hci_con_handle_t connectionHandle = HCI_CON_HANDLE_INVALID;
+uint16_t rxValueHandle = 0;
+uint16_t txValueHandle = 0;
+uint16_t txClientConfigHandle = 0;
+bool txNotificationsEnabled = false;
+bool txCanSendRequested = false;
+char rxLineBuffer[BLE_COMMAND_MAX];
+size_t rxLineLen = 0;
+bool rxDroppingLongLine = false;
+bool rxRangeErrorPending = false;
+bool rxQueueFullErrorPending = false;
+char commandQueue[BLE_COMMAND_QUEUE_DEPTH][BLE_COMMAND_MAX];
+size_t commandQueueLen[BLE_COMMAND_QUEUE_DEPTH];
+uint8_t commandQueueHead = 0;
+uint8_t commandQueueTail = 0;
+uint8_t commandQueueCount = 0;
+char txBuffer[BLE_TX_BUFFER_MAX];
+size_t txLen = 0;
+size_t txOffset = 0;
+bool txActive = false;
+
+// 4e4b4000-6e69-6768-746b-000000000001
+const uint8_t NIGHTKITE_SERVICE_UUID[16] = {
+  0x4e, 0x4b, 0x40, 0x00, 0x6e, 0x69, 0x67, 0x68,
+  0x74, 0x6b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
+};
+// 4e4b4000-6e69-6768-746b-000000000002
+const uint8_t NIGHTKITE_RX_UUID[16] = {
+  0x4e, 0x4b, 0x40, 0x00, 0x6e, 0x69, 0x67, 0x68,
+  0x74, 0x6b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02
+};
+// 4e4b4000-6e69-6768-746b-000000000003
+const uint8_t NIGHTKITE_TX_UUID[16] = {
+  0x4e, 0x4b, 0x40, 0x00, 0x6e, 0x69, 0x67, 0x68,
+  0x74, 0x6b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03
+};
 
 void setLastError(const char* error)
 {
@@ -65,6 +111,14 @@ bool appendAdvField(uint8_t type, const uint8_t* value, uint8_t len)
   return true;
 }
 
+void reverseUuid128(const uint8_t* input, uint8_t* output)
+{
+  for (uint8_t i = 0; i < 16; i++)
+  {
+    output[i] = input[15 - i];
+  }
+}
+
 bool buildAdvertisingData(const char* name)
 {
   advDataLen = 0;
@@ -80,13 +134,186 @@ bool buildAdvertisingData(const char* name)
     return false;
   }
 
-  // NightKite service UUID placeholder. GATT command characteristics are added in a later firmware step.
-  const uint8_t serviceUuid[16] = {
-    0x01, 0x40, 0x4b, 0x4e, 0x10, 0x00, 0x40, 0x00,
-    0x80, 0x00, 0x4e, 0x69, 0x67, 0x68, 0x74, 0x4b
-  };
-  appendAdvField(BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS, serviceUuid, sizeof(serviceUuid));
+  uint8_t advServiceUuid[16];
+  reverseUuid128(NIGHTKITE_SERVICE_UUID, advServiceUuid);
+  appendAdvField(BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS, advServiceUuid, sizeof(advServiceUuid));
   return true;
+}
+
+bool enqueueCommandLine(const char* line, size_t lineLen)
+{
+  if (commandQueueCount >= BLE_COMMAND_QUEUE_DEPTH)
+  {
+    rxQueueFullErrorPending = true;
+    lastError = "rx_queue_full";
+    return false;
+  }
+  if (lineLen >= BLE_COMMAND_MAX)
+  {
+    rxRangeErrorPending = true;
+    lastError = "rx_line_too_long";
+    return false;
+  }
+
+  memcpy(commandQueue[commandQueueTail], line, lineLen);
+  commandQueue[commandQueueTail][lineLen] = '\0';
+  commandQueueLen[commandQueueTail] = lineLen;
+  commandQueueTail = (uint8_t)((commandQueueTail + 1) % BLE_COMMAND_QUEUE_DEPTH);
+  commandQueueCount++;
+  return true;
+}
+
+bool dequeueCommandLine(String& lineOut)
+{
+  if (commandQueueCount == 0)
+  {
+    return false;
+  }
+  lineOut = String(commandQueue[commandQueueHead]);
+  commandQueueHead = (uint8_t)((commandQueueHead + 1) % BLE_COMMAND_QUEUE_DEPTH);
+  commandQueueCount--;
+  return true;
+}
+
+void enqueueTxBytes(const char* data, size_t dataLen)
+{
+  if (!txNotificationsEnabled || connectionHandle == HCI_CON_HANDLE_INVALID)
+  {
+    lastError = "notify_disabled";
+    return;
+  }
+  if (dataLen >= BLE_TX_BUFFER_MAX)
+  {
+    dataLen = BLE_TX_BUFFER_MAX - 1;
+    lastError = "tx_truncated";
+  }
+  if (txActive)
+  {
+    lastError = "tx_busy";
+    return;
+  }
+
+  memcpy(txBuffer, data, dataLen);
+  txBuffer[dataLen] = '\0';
+  txLen = dataLen;
+  txOffset = 0;
+  txActive = txLen > 0;
+  txCanSendRequested = false;
+}
+
+void requestTxCanSend()
+{
+  if (!txActive || txCanSendRequested || connectionHandle == HCI_CON_HANDLE_INVALID)
+  {
+    return;
+  }
+  att_server_request_can_send_now_event(connectionHandle);
+  txCanSendRequested = true;
+}
+
+void sendNextTxChunk()
+{
+  txCanSendRequested = false;
+  if (!txActive || !txNotificationsEnabled || connectionHandle == HCI_CON_HANDLE_INVALID)
+  {
+    txActive = false;
+    txLen = 0;
+    txOffset = 0;
+    return;
+  }
+
+  const size_t remaining = txLen - txOffset;
+  const size_t chunkLen = remaining > BLE_NOTIFY_CHUNK_SIZE ? BLE_NOTIFY_CHUNK_SIZE : remaining;
+  att_server_notify(connectionHandle, txValueHandle, (uint8_t*)&txBuffer[txOffset], (uint16_t)chunkLen);
+  txOffset += chunkLen;
+  if (txOffset >= txLen)
+  {
+    txActive = false;
+    txLen = 0;
+    txOffset = 0;
+    lastError = "none";
+    return;
+  }
+  requestTxCanSend();
+}
+
+void enqueueNk4ErrorLine(const char* code, const char* msg)
+{
+  char line[96];
+  const int written = snprintf(line, sizeof(line), "NK4 seq=0 err code=%s msg=%s\n", code, msg);
+  if (written > 0)
+  {
+    enqueueTxBytes(line, (size_t)written);
+  }
+}
+
+void consumeRxBytes(const uint8_t* data, uint16_t dataLen)
+{
+  for (uint16_t i = 0; i < dataLen; i++)
+  {
+    const char ch = (char)data[i];
+    if (rxDroppingLongLine)
+    {
+      if (ch == '\n')
+      {
+        rxDroppingLongLine = false;
+        rxRangeErrorPending = true;
+      }
+      continue;
+    }
+
+    if (ch == '\r')
+    {
+      continue;
+    }
+    if (ch == '\n')
+    {
+      if (rxLineLen > 0)
+      {
+        enqueueCommandLine(rxLineBuffer, rxLineLen);
+        rxLineLen = 0;
+      }
+      continue;
+    }
+    if (rxLineLen >= BLE_COMMAND_MAX - 1)
+    {
+      rxLineLen = 0;
+      rxDroppingLongLine = true;
+      lastError = "rx_line_too_long";
+      continue;
+    }
+    rxLineBuffer[rxLineLen++] = ch;
+  }
+}
+
+uint16_t attReadCallback(hci_con_handle_t conHandle, uint16_t attHandle, uint16_t offset, uint8_t* buffer, uint16_t bufferSize)
+{
+  (void)conHandle;
+  if (attHandle == txValueHandle)
+  {
+    const char* ready = "NK4 BLE TX notify";
+    return att_read_callback_handle_blob((const uint8_t*)ready, (uint16_t)strlen(ready), offset, buffer, bufferSize);
+  }
+  return 0;
+}
+
+int attWriteCallback(hci_con_handle_t conHandle, uint16_t attHandle, uint16_t transactionMode, uint16_t offset, uint8_t* buffer, uint16_t bufferSize)
+{
+  (void)transactionMode;
+  (void)offset;
+  if (attHandle == txClientConfigHandle)
+  {
+    txNotificationsEnabled = little_endian_read_16(buffer, 0) == GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
+    connectionHandle = conHandle;
+    return 0;
+  }
+  if (attHandle == rxValueHandle)
+  {
+    connectionHandle = conHandle;
+    consumeRxBytes(buffer, bufferSize);
+    return 0;
+  }
+  return 0;
 }
 
 void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uint16_t size)
@@ -110,10 +337,42 @@ void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uin
     return;
   }
 
+  if (hci_event_packet_get_type(packet) == HCI_EVENT_LE_META)
+  {
+    if (hci_event_le_meta_get_subevent_code(packet) == HCI_SUBEVENT_LE_CONNECTION_COMPLETE)
+    {
+      connectionHandle = gap_subevent_le_connection_complete_get_connection_handle(packet);
+      connected = true;
+      advertising = false;
+      return;
+    }
+  }
+
   if (hci_event_packet_get_type(packet) == HCI_EVENT_DISCONNECTION_COMPLETE)
   {
+    connected = false;
+    connectionHandle = HCI_CON_HANDLE_INVALID;
+    txNotificationsEnabled = false;
+    txCanSendRequested = false;
+    txActive = false;
+    txLen = 0;
+    txOffset = 0;
     gap_advertisements_enable(1);
     advertising = true;
+    return;
+  }
+
+  if (hci_event_packet_get_type(packet) == ATT_EVENT_CONNECTED)
+  {
+    connectionHandle = att_event_connected_get_handle(packet);
+    connected = true;
+    advertising = false;
+    return;
+  }
+
+  if (hci_event_packet_get_type(packet) == ATT_EVENT_CAN_SEND_NOW)
+  {
+    sendNextTxChunk();
   }
 }
 
@@ -143,7 +402,79 @@ bool configureRm2Pins()
   }
   return true;
 }
+
+bool configureGattDatabase()
+{
+  att_db_util_init();
+  att_db_util_add_service_uuid16(GAP_SERVICE_UUID);
+  att_db_util_add_characteristic_uuid16(GAP_DEVICE_NAME_UUID, ATT_PROPERTY_READ, ATT_SECURITY_NONE, ATT_SECURITY_NONE, (uint8_t*)bleName, (uint16_t)strlen(bleName));
+  att_db_util_add_service_uuid128(NIGHTKITE_SERVICE_UUID);
+  rxValueHandle = att_db_util_add_characteristic_uuid128(NIGHTKITE_RX_UUID, ATT_PROPERTY_WRITE | ATT_PROPERTY_WRITE_WITHOUT_RESPONSE | ATT_PROPERTY_DYNAMIC, ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
+  txValueHandle = att_db_util_add_characteristic_uuid128(NIGHTKITE_TX_UUID, ATT_PROPERTY_READ | ATT_PROPERTY_NOTIFY | ATT_PROPERTY_DYNAMIC, ATT_SECURITY_NONE, ATT_SECURITY_NONE, NULL, 0);
+  txClientConfigHandle = txValueHandle + 1;
+  att_server_init(att_db_util_get_address(), attReadCallback, attWriteCallback);
+  att_server_register_packet_handler(hciPacketHandler);
+  gattReady = true;
+  rxReady = rxValueHandle != 0;
+  txReady = txValueHandle != 0;
+  return rxReady && txReady;
+}
 #endif
+
+class BleResponseWriter : public IResponseWriter
+{
+public:
+  void print(const char* value) override { append(value != nullptr ? value : ""); }
+  void print(const String& value) override { append(value.c_str()); }
+  void print(int value) override { append(String(value).c_str()); }
+  void print(unsigned int value) override { append(String(value).c_str()); }
+  void print(unsigned long value) override { append(String(value).c_str()); }
+  void println() override
+  {
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+    append("\n");
+    enqueueTxBytes(buffer, length);
+#endif
+    reset();
+  }
+
+private:
+  char buffer[BLE_TX_BUFFER_MAX] = {0};
+  size_t length = 0;
+
+  void reset()
+  {
+    length = 0;
+    buffer[0] = '\0';
+  }
+
+  void append(const char* value)
+  {
+    if (value == nullptr)
+    {
+      return;
+    }
+    const size_t available = (length < sizeof(buffer)) ? (sizeof(buffer) - length - 1) : 0;
+    if (available == 0)
+    {
+      lastError = "tx_line_too_long";
+      return;
+    }
+    const size_t copyLen = strnlen(value, available);
+    memcpy(&buffer[length], value, copyLen);
+    length += copyLen;
+    buffer[length] = '\0';
+    if (value[copyLen] != '\0')
+    {
+      lastError = "tx_line_too_long";
+    }
+  }
+};
+}
+
+void rm2BleSetNk4Handler(Rm2BleNk4Handler handler)
+{
+  nk4Handler = handler;
 }
 
 bool rm2BleBegin(const char* advertisedName)
@@ -169,6 +500,10 @@ bool rm2BleBegin(const char* advertisedName)
   enabled = true;
   initialized = false;
   advertising = false;
+  connected = false;
+  gattReady = false;
+  rxReady = false;
+  txReady = false;
   lastError = "starting";
 
   if (!configureRm2Pins())
@@ -191,6 +526,11 @@ bool rm2BleBegin(const char* advertisedName)
 
   l2cap_init();
   sm_init();
+  if (!configureGattDatabase())
+  {
+    lastError = "gatt_init_failed";
+    return false;
+  }
 
   hciEventCallbackRegistration.callback = &hciPacketHandler;
   hci_add_event_handler(&hciEventCallbackRegistration);
@@ -199,7 +539,7 @@ bool rm2BleBegin(const char* advertisedName)
   memset(nullAddress, 0, sizeof(nullAddress));
   const uint16_t advIntervalMin = 0x00A0; // 100 ms
   const uint16_t advIntervalMax = 0x00F0; // 150 ms
-  const uint8_t advType = 3; // ADV_NONCONN_IND: discoverable, no command transport yet.
+  const uint8_t advType = 0; // ADV_IND: connectable undirected advertising.
   gap_advertisements_set_params(advIntervalMin, advIntervalMax, advType, 0, nullAddress, 0x07, 0x00);
   gap_advertisements_set_data(advDataLen, advData);
   gap_set_local_name(bleName);
@@ -214,6 +554,10 @@ bool rm2BleBegin(const char* advertisedName)
   enabled = false;
   initialized = false;
   advertising = false;
+  connected = false;
+  gattReady = false;
+  rxReady = false;
+  txReady = false;
 #if NIGHTKITE_BLE && NIGHTKITE_RM2
   lastError = "btstack_not_enabled";
 #else
@@ -225,7 +569,35 @@ bool rm2BleBegin(const char* advertisedName)
 
 void rm2BleTick()
 {
-  // The Arduino-Pico BTstack port runs from the CYW43 async context.
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!txNotificationsEnabled)
+  {
+    return;
+  }
+
+  if (rxRangeErrorPending && !txActive)
+  {
+    rxRangeErrorPending = false;
+    enqueueNk4ErrorLine("range_error", "line_too_long");
+  }
+  if (rxQueueFullErrorPending && !txActive)
+  {
+    rxQueueFullErrorPending = false;
+    enqueueNk4ErrorLine("busy", "rx_queue_full");
+  }
+
+  if (!txActive && nk4Handler != nullptr)
+  {
+    String line;
+    if (dequeueCommandLine(line))
+    {
+      BleResponseWriter writer;
+      nk4Handler(line, writer);
+    }
+  }
+
+  requestTxCanSend();
+#endif
 }
 
 Rm2BleStatus rm2BleStatus()
@@ -236,6 +608,10 @@ Rm2BleStatus rm2BleStatus()
   status.rm2Enabled = NIGHTKITE_RM2 ? true : false;
   status.initialized = initialized;
   status.advertising = advertising;
+  status.connected = connected;
+  status.gatt = gattReady;
+  status.rx = rxReady;
+  status.tx = txReady;
   status.name = bleName;
   status.lastError = lastError;
   return status;
@@ -264,6 +640,14 @@ String rm2BleBuildStatusFields()
   fields += status.initialized ? 1 : 0;
   fields += " ble_advertising=";
   fields += status.advertising ? 1 : 0;
+  fields += " ble_connected=";
+  fields += status.connected ? 1 : 0;
+  fields += " ble_gatt=";
+  fields += status.gatt ? 1 : 0;
+  fields += " ble_rx=";
+  fields += status.rx ? 1 : 0;
+  fields += " ble_tx=";
+  fields += status.tx ? 1 : 0;
   fields += " ble_name=";
   fields += status.name;
   fields += " last_error=";

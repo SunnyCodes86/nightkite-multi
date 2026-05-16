@@ -243,21 +243,50 @@ Aktuelle RM2-Verkabelung am Pimoroni Pico LiPo 2:
 
 Das RM2 Breakout ist hart an die Aussenpads geloetet und nicht ueber den SP/CE-JST-Stecker verbunden. BL_ON und WL_ON sind auf dem Breakout hardwareseitig gebrueckt und haengen gemeinsam an GP17. GPIO0, GPIO1 und GPIO2 des RM2 Breakouts sind nicht verbunden.
 
-Experimenteller erster Bring-up:
+Experimenteller BLE/RM2-Build:
 
 ```bash
 platformio run -e pico2350_rm2_ble
 platformio run -e pico2350_rm2_ble -t upload
 ```
 
-Dieses Environment aktiviert `NIGHTKITE_BLE=1`, `NIGHTKITE_RM2=1`, den Arduino-Pico-Bluetooth-Stack und die dynamische CYW43/RM2-Pinbelegung fuer GP17-GP20. Der Build versucht nur BLE-Advertising mit einem kompakten Namen wie `NK-<short_id>` zu starten. NK4-over-BLE, BLE RX/TX Characteristics, Sync-Beacons und Master/Follower-Funk sind noch nicht aktiv. Der Status ist ueber USB/NK4 sichtbar:
+Dieses Environment aktiviert `NIGHTKITE_BLE=1`, `NIGHTKITE_RM2=1`, den Arduino-Pico-Bluetooth-Stack und die dynamische CYW43/RM2-Pinbelegung fuer GP17-GP20. Der Build startet BLE-Advertising mit einem kompakten Namen wie `NK-<short_id>` und stellt experimentell einen NK4-over-BLE-GATT-Transport bereit. Sync-Beacons, Gruppensteuerung und Master/Follower-Funk sind noch nicht aktiv. WLAN wird nicht verwendet.
+
+NightKite BLE-GATT:
+
+```text
+Service UUID: 4e4b4000-6e69-6768-746b-000000000001
+RX UUID:      4e4b4000-6e69-6768-746b-000000000002  write/write-without-response
+TX UUID:      4e4b4000-6e69-6768-746b-000000000003  notify
+```
+
+Der BLE-Transport nutzt dieselben zeilenbasierten NK4-Kommandos wie USB. Newline `\n` beendet ein Kommando; Antworten kommen ueber TX Notify in kleinen Chunks zurueck. Der Status ist ueber USB/NK4 sichtbar:
 
 ```text
 NK4 seq=4 cmd=get section=wireless
 NK4 seq=5 cmd=ble_status
 ```
 
-Wichtige Felder sind `ble_supported`, `ble_enabled`, `rm2_enabled`, `rm2_pins`, `ble_initialized`, `ble_advertising`, `ble_name`, `last_error` und `wifi=0`. Ein BLE-Scan mit nRF Connect oder einem Smartphone sollte im Erfolgsfall `NK-<short_id>` anzeigen.
+Wichtige Felder sind `ble_supported`, `ble_enabled`, `rm2_enabled`, `rm2_pins`, `ble_initialized`, `ble_advertising`, `ble_connected`, `ble_gatt`, `ble_rx`, `ble_tx`, `ble_name`, `last_error` und `wifi=0`. Ein BLE-Scan mit nRF Connect oder einem Smartphone sollte im Erfolgsfall `NK-<short_id>` anzeigen.
+
+Manueller nRF-Connect-Test:
+
+1. Nach `NK-<short_id>` scannen und verbinden.
+2. TX Characteristic Notifications aktivieren.
+3. In die RX Characteristic schreiben:
+
+```text
+NK4 seq=10 cmd=hello client=nrf proto_min=4 proto_max=4\n
+```
+
+4. Auf TX Notify eine Antwort wie `NK4 seq=10 ok ...` erwarten.
+5. Danach weitere Kommandos testen:
+
+```text
+NK4 seq=11 cmd=info\n
+NK4 seq=12 cmd=status\n
+NK4 seq=13 cmd=get section=wireless\n
+```
 
 ### Hinweise zur Kalibrierung
 

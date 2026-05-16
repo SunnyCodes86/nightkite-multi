@@ -561,6 +561,7 @@ void printTimingStatus();
 bool saveConfigToEEPROM(bool verbose);
 void readConfigFromEEPROM(bool verbose);
 bool handleNk4Line(const String& line);
+bool handleNk4LineWithWriter(const String& line, IResponseWriter& writer);
 void handleNk4Command(const NkCommand& command, IResponseWriter& writer);
 void showPlayModeIndicatorTest();
 void rebootController();
@@ -3583,6 +3584,11 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
 bool handleNk4Line(const String& line)
 {
   SerialResponseWriter writer;
+  return handleNk4LineWithWriter(line, writer);
+}
+
+bool handleNk4LineWithWriter(const String& line, IResponseWriter& writer)
+{
   NkCommand command;
   String errorCode;
   String errorMessage;
@@ -5661,10 +5667,15 @@ void setup()
   {
     String bleName = "NK-";
     bleName += currentShortId;
+    rm2BleSetNk4Handler(handleNk4LineWithWriter);
     const bool bleStartRequested = rm2BleBegin(bleName.c_str());
     if (!bleStartRequested)
     {
       bootMark("rm2_unavailable");
+    }
+    else if (rm2BleStatus().gatt)
+    {
+      bootMark("ble_gatt");
     }
     else if (rm2BleStatus().advertising)
     {
