@@ -19,6 +19,9 @@ struct Rm2BleStatus
   uint8_t txQueue;
   unsigned long txDropped;
   bool notifyReady;
+  bool txActive;
+  uint16_t txOffset;
+  unsigned long txChunksSent;
   const char* name;
   const char* lastError;
 };

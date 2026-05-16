@@ -267,7 +267,7 @@ NK4 seq=4 cmd=get section=wireless
 NK4 seq=5 cmd=ble_status
 ```
 
-Wichtige Felder sind `ble_supported`, `ble_enabled`, `rm2_enabled`, `rm2_pins`, `ble_initialized`, `ble_advertising`, `ble_connected`, `ble_gatt`, `ble_rx`, `ble_tx`, `ble_tx_queue`, `ble_tx_dropped`, `ble_notify_ready`, `ble_name`, `last_error` und `wifi=0`. Ein BLE-Scan mit nRF Connect oder einem Smartphone sollte im Erfolgsfall `NK-<short_id>` anzeigen.
+Wichtige Felder sind `ble_supported`, `ble_enabled`, `rm2_enabled`, `rm2_pins`, `ble_initialized`, `ble_advertising`, `ble_connected`, `ble_gatt`, `ble_rx`, `ble_tx`, `ble_tx_queue`, `ble_tx_dropped`, `ble_notify_ready`, `ble_tx_active`, `ble_tx_offset`, `ble_tx_chunks_sent`, `ble_name`, `last_error` und `wifi=0`. Ein BLE-Scan mit nRF Connect oder einem Smartphone sollte im Erfolgsfall `NK-<short_id>` anzeigen.
 
 Manueller nRF-Connect-Test:
 
