@@ -23,6 +23,13 @@ struct Rm2BleStatus
   bool txActive;
   uint16_t txOffset;
   unsigned long txChunksSent;
+  bool gattAdvSuppressed;
+  unsigned long advEnableCount;
+  unsigned long advDisableCount;
+  unsigned long syncAdvStartCount;
+  unsigned long syncAdvRefreshCount;
+  const char* advOwner;
+  const char* advType;
   const char* name;
   const char* lastError;
 };

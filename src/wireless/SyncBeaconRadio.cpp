@@ -560,6 +560,7 @@ void syncBeaconRadioStop()
 
 SyncBeaconRadioStatus syncBeaconRadioStatus()
 {
+  const Rm2BleStatus ble = rm2BleStatus();
   SyncBeaconRadioStatus status;
   status.supported = NIGHTKITE_BLE && NIGHTKITE_RM2;
   status.active = currentMode == RADIO_MODE_BEACON_MASTER || currentMode == RADIO_MODE_BEACON_FOLLOWER;
@@ -569,6 +570,8 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   status.codecSelftest = codecSelftestOk;
   status.scanActive = scanning;
   status.advActive = advActive;
+  status.gattAdvSuppressed = ble.gattAdvSuppressed;
+  status.beaconAdvStarted = ble.syncAdvStartCount > 0;
   status.advPayloadLen = advPayloadLen;
   status.advMfgLen = advMfgLen;
   status.advCompany = advCompany;
@@ -576,7 +579,10 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   status.advVersion = advVersion;
   status.advGroup = advGroup;
   status.advCrc = advCrc;
+  status.advEnableCount = ble.advEnableCount;
+  status.advDisableCount = ble.advDisableCount;
   status.advSetCount = advSetCount;
+  status.beaconAdvRefreshes = ble.syncAdvRefreshCount;
   status.beaconSeq = beaconSeq;
   status.txCount = txCount;
   status.rxCount = rxCount;
@@ -604,6 +610,8 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   status.scanLastGroup = scanLastGroup;
   status.scanLastVersion = scanLastVersion;
   status.advMfgHead = advMfgHead;
+  status.advOwner = ble.advOwner;
+  status.advType = ble.advType;
   status.mode = modeName(currentMode);
   status.lastError = lastError;
   status.scanLastError = scanLastError;
@@ -629,6 +637,14 @@ String syncBeaconRadioBuildStatusFields()
   fields += status.scanActive ? 1 : 0;
   fields += " adv_active=";
   fields += status.advActive ? 1 : 0;
+  fields += " adv_owner=";
+  fields += status.advOwner;
+  fields += " adv_type=";
+  fields += status.advType;
+  fields += " gatt_adv_suppressed=";
+  fields += status.gattAdvSuppressed ? 1 : 0;
+  fields += " beacon_adv_started=";
+  fields += status.beaconAdvStarted ? 1 : 0;
   fields += " adv_payload_len=";
   fields += status.advPayloadLen;
   fields += " adv_mfg_len=";
@@ -645,8 +661,14 @@ String syncBeaconRadioBuildStatusFields()
   fields += formatHex16(status.advCrc);
   fields += " adv_sig=";
   fields += status.advMfgHead;
+  fields += " adv_enable_count=";
+  fields += status.advEnableCount;
+  fields += " adv_disable_count=";
+  fields += status.advDisableCount;
   fields += " adv_set_count=";
   fields += status.advSetCount;
+  fields += " beacon_adv_refreshes=";
+  fields += status.beaconAdvRefreshes;
   fields += " adv_last_error=";
   fields += status.lastError;
   fields += " beacon_seq=";

@@ -48,6 +48,8 @@ struct SyncBeaconRadioStatus
   bool codecSelftest;
   bool scanActive;
   bool advActive;
+  bool gattAdvSuppressed;
+  bool beaconAdvStarted;
   uint8_t advPayloadLen;
   uint8_t advMfgLen;
   uint16_t advCompany;
@@ -55,7 +57,10 @@ struct SyncBeaconRadioStatus
   uint8_t advVersion;
   uint8_t advGroup;
   uint16_t advCrc;
+  unsigned long advEnableCount;
+  unsigned long advDisableCount;
   unsigned long advSetCount;
+  unsigned long beaconAdvRefreshes;
   uint16_t beaconSeq;
   unsigned long txCount;
   unsigned long rxCount;
@@ -83,6 +88,8 @@ struct SyncBeaconRadioStatus
   uint8_t scanLastGroup;
   uint8_t scanLastVersion;
   const char* advMfgHead;
+  const char* advOwner;
+  const char* advType;
   const char* mode;
   const char* lastError;
   const char* scanLastError;
