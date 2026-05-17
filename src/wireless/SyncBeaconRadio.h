@@ -45,9 +45,17 @@ struct SyncBeaconRadioStatus
   bool beaconTx;
   bool beaconRx;
   bool locked;
+  bool codecSelftest;
   bool scanActive;
   bool advActive;
   uint8_t advPayloadLen;
+  uint8_t advMfgLen;
+  uint16_t advCompany;
+  uint16_t advMagic;
+  uint8_t advVersion;
+  uint8_t advGroup;
+  uint16_t advCrc;
+  unsigned long advSetCount;
   uint16_t beaconSeq;
   unsigned long txCount;
   unsigned long rxCount;
@@ -61,16 +69,25 @@ struct SyncBeaconRadioStatus
   unsigned long scanDecodeFail;
   unsigned long scanCrcFail;
   unsigned long scanGroupMismatch;
+  unsigned long scanRejectCompany;
+  unsigned long scanRejectMagic;
+  unsigned long scanRejectLen;
+  unsigned long scanRejectVersion;
   unsigned long lastBeaconMs;
   unsigned long beaconAgeMs;
   int8_t scanLastRssi;
   uint8_t scanLastLen;
   uint8_t scanLastMfgLen;
+  uint8_t scanLastAdType;
+  uint16_t scanLastCompany;
   uint8_t scanLastGroup;
   uint8_t scanLastVersion;
+  const char* advMfgHead;
   const char* mode;
   const char* lastError;
   const char* scanLastError;
+  const char* scanLastMfgHead;
+  const char* scanLastCandidateReason;
 };
 
 enum SyncBeaconDecodeResult : uint8_t
@@ -87,6 +104,13 @@ enum SyncBeaconDecodeResult : uint8_t
 
 constexpr uint8_t NK_SYNC_BEACON_VERSION = 1;
 constexpr uint16_t NK_SYNC_BEACON_BEAT_MS = 1000;
+constexpr uint8_t NK_SYNC_BEACON_MAGIC0 = 'N';
+constexpr uint8_t NK_SYNC_BEACON_MAGIC1 = 'K';
+constexpr uint16_t NK_SYNC_BEACON_COMPANY_ID = 0xFFFF;
+constexpr size_t NK_SYNC_BEACON_PACKET_SIZE = sizeof(NkSyncBeaconV1);
+constexpr uint8_t NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET = 2;
+constexpr size_t NK_SYNC_BEACON_MFG_LEN = NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET + NK_SYNC_BEACON_PACKET_SIZE;
+constexpr size_t NK_SYNC_BEACON_ADV_LEN = 3 + 2 + NK_SYNC_BEACON_MFG_LEN;
 
 void syncBeaconRadioBegin();
 void syncBeaconRadioTick(const SyncBeaconRuntime& runtime);
