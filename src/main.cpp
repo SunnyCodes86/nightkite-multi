@@ -505,6 +505,10 @@ int sanitizeAutoplayEnabled(int value);
 int sanitizeAutoplayIntervalMs(int value);
 void resetAutoplayTimer();
 bool isAutoplayEnabled();
+bool isSyncMasterAutoplayActive();
+bool shouldRunAutoplayTick();
+unsigned long autoplayNextDueMs();
+void setAutoplayEnabledFlag(int enabled);
 const char* autoplayEnabledToString();
 int parseOnOffValue(String valueText);
 bool parseIntValue(String value, int* output);
@@ -800,6 +804,47 @@ void resetAutoplayTimer()
 bool isAutoplayEnabled()
 {
   return currentAutoplayEnabled != 0;
+}
+
+bool isSyncMasterAutoplayActive()
+{
+  return isAutoplayEnabled() &&
+      currentPlayMode == PLAY_MODE_SYNC &&
+      currentSyncEnabled == 1 &&
+      currentSyncRole == SYNC_ROLE_MASTER;
+}
+
+bool shouldRunAutoplayTick()
+{
+  if (!isAutoplayEnabled())
+  {
+    return false;
+  }
+  return currentPlayMode == PLAY_MODE_AUTOPLAY || isSyncMasterAutoplayActive();
+}
+
+unsigned long autoplayNextDueMs()
+{
+  if (!shouldRunAutoplayTick())
+  {
+    return 0;
+  }
+  const unsigned long elapsedMs = millis() - autoplayLastSwitchMs;
+  if (elapsedMs >= (unsigned long)currentAutoplayIntervalMs)
+  {
+    return 0;
+  }
+  return (unsigned long)currentAutoplayIntervalMs - elapsedMs;
+}
+
+void setAutoplayEnabledFlag(int enabled)
+{
+  currentAutoplayEnabled = sanitizeAutoplayEnabled(enabled);
+  if (currentPlayMode != PLAY_MODE_SYNC)
+  {
+    currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
+  }
+  resetAutoplayTimer();
 }
 
 const char* autoplayEnabledToString()
@@ -1253,6 +1298,12 @@ String buildConfigFields()
   fields += currentAutoplayEnabled;
   fields += " autoplay_interval=";
   fields += currentAutoplayIntervalMs / 1000;
+  fields += " sync_autoplay=";
+  fields += (currentPlayMode == PLAY_MODE_SYNC && isAutoplayEnabled()) ? 1 : 0;
+  fields += " master_autoplay=";
+  fields += isSyncMasterAutoplayActive() ? 1 : 0;
+  fields += " autoplay_next_ms=";
+  fields += autoplayNextDueMs();
   fields += " play_mode=";
   fields += playModeToString(currentPlayMode);
   fields += " boot_mode=";
@@ -1290,6 +1341,10 @@ String buildSyncFields(bool detailed)
   fields += syncEngine.locked ? 1 : 0;
   fields += " drift_ms=";
   fields += syncEngine.driftMs;
+  fields += " sync_autoplay=";
+  fields += (currentPlayMode == PLAY_MODE_SYNC && isAutoplayEnabled()) ? 1 : 0;
+  fields += " master_autoplay=";
+  fields += isSyncMasterAutoplayActive() ? 1 : 0;
   if (detailed)
   {
     fields += " armed_group=";
@@ -1430,7 +1485,14 @@ void setPlayMode(int mode)
     mode = PLAY_MODE_MANUAL;
   }
   currentPlayMode = mode;
-  currentAutoplayEnabled = (currentPlayMode == PLAY_MODE_AUTOPLAY) ? 1 : 0;
+  if (currentPlayMode == PLAY_MODE_AUTOPLAY)
+  {
+    currentAutoplayEnabled = 1;
+  }
+  else if (currentPlayMode == PLAY_MODE_MANUAL)
+  {
+    currentAutoplayEnabled = 0;
+  }
   resetAutoplayTimer();
 }
 
@@ -2113,7 +2175,6 @@ void normalizePersistentConfig()
   {
     currentPlayMode = DEFAULT_PLAY_MODE;
   }
-  currentAutoplayEnabled = (currentPlayMode == PLAY_MODE_AUTOPLAY) ? 1 : 0;
   if (currentBootMode < BOOT_MODE_LAST || currentBootMode > BOOT_MODE_SYNC)
   {
     currentBootMode = DEFAULT_BOOT_MODE;
@@ -2956,6 +3017,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += playModeToString(currentPlayMode);
     fields += " autoplay=";
     fields += currentAutoplayEnabled;
+    fields += " sync_autoplay=";
+    fields += (currentPlayMode == PLAY_MODE_SYNC && isAutoplayEnabled()) ? 1 : 0;
+    fields += " master_autoplay=";
+    fields += isSyncMasterAutoplayActive() ? 1 : 0;
+    fields += " autoplay_next_ms=";
+    fields += autoplayNextDueMs();
     fields += " sync_state=";
     fields += syncEngine.stateName();
     fields += " sync_role=";
@@ -3111,6 +3178,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       fields += currentAutoplayEnabled;
       fields += " autoplay_interval=";
       fields += currentAutoplayIntervalMs / 1000;
+      fields += " sync_autoplay=";
+      fields += (currentPlayMode == PLAY_MODE_SYNC && isAutoplayEnabled()) ? 1 : 0;
+      fields += " master_autoplay=";
+      fields += isSyncMasterAutoplayActive() ? 1 : 0;
+      fields += " autoplay_next_ms=";
+      fields += autoplayNextDueMs();
       fields += " pattern=";
       fields += currentPattern;
       fields += " brightness=";
@@ -3473,7 +3546,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "invalid_value", "bad_autoplay");
           return;
         }
-        setPlayMode(flag ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL);
+        setAutoplayEnabledFlag(flag);
       }
       else if (key == "autoplay_interval")
       {
@@ -3944,9 +4017,7 @@ void onCliSet(cmd* cPtr)
       return;
     }
 
-    currentAutoplayEnabled = sanitizeAutoplayEnabled(autoplayValue);
-    currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
-    resetAutoplayTimer();
+    setAutoplayEnabledFlag(autoplayValue);
     Serial.print("OK autoplay=");
     Serial.println(autoplayEnabledToString());
     return;
@@ -5938,7 +6009,7 @@ void loop()
   }
 
   const bool autoplayPaused = batteryViewActive || UsbConnected;
-  if (isAutoplayEnabled())
+  if (shouldRunAutoplayTick())
   {
     if (autoplayPaused)
     {
