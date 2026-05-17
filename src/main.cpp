@@ -208,7 +208,8 @@ const int WIRELESS_PROFILE_BALANCED = 1;
 const int WIRELESS_PROFILE_FAST_SYNC = 2;
 const int PATTERN_SYNC_UNKNOWN = 0;
 const int PATTERN_SYNC_READY = 1;
-const int PATTERN_SYNC_LOCAL_REACTIVE = 2;
+const int PATTERN_SYNC_PARTIAL = 2;
+const int PATTERN_SYNC_LOCAL_REACTIVE = 3;
 
 // Persisted configuration values.
 int currentPattern = 1;
@@ -517,6 +518,7 @@ String formatHex32(uint32_t value);
 String buildPatternMaskFields();
 int patternSyncClass(uint8_t patternId);
 bool isSyncReadyPattern(uint8_t patternId);
+bool isPartialSyncPattern(uint8_t patternId);
 uint32_t buildPatternClassMask(int syncClass);
 bool hasUnsavedConfigChanges();
 void markCurrentConfigSaved();
@@ -643,6 +645,26 @@ int sumPulse(int time_shift)
   int pulse1 = pulseWave8(phase + time_shift, cycleLength, pulseLength);
   int pulse2 = pulseWave8(phase + time_shift + pulseOffset, cycleLength, pulseLength);
   return qadd8(pulse1, pulse2); // Add pulses together without overflow
+}
+
+uint16_t clockBeat16(uint16_t bpm)
+{
+  return (uint16_t)(((uint64_t)patternClock.phaseMs() * (uint64_t)bpm * 65536ULL) / 60000ULL);
+}
+
+uint8_t clockBeat8(uint16_t bpm)
+{
+  return (uint8_t)(clockBeat16(bpm) >> 8);
+}
+
+uint16_t clockSin16(uint16_t bpm)
+{
+  return (uint16_t)((int32_t)sin16(clockBeat16(bpm)) + 32768L);
+}
+
+uint8_t clockSin8(uint16_t bpm, uint8_t low, uint8_t high)
+{
+  return (uint8_t)map(sin8(clockBeat8(bpm)), 0, 255, low, high);
 }
 
 inline uint32_t smoothedMotion() {
@@ -1291,26 +1313,27 @@ int patternSyncClass(uint8_t patternId)
   switch (patternId)
   {
     case 1:
+      return PATTERN_SYNC_READY;
     case 4:
     case 7:
-      return PATTERN_SYNC_READY;
+    case 8:
+    case 10:
+    case 15:
+    case 16:
+    case 19:
+    case 20:
+      return PATTERN_SYNC_PARTIAL;
     case 2:
     case 3:
     case 5:
     case 6:
-    case 8:
     case 9:
-    case 10:
     case 11:
     case 12:
     case 13:
     case 14:
-    case 15:
-    case 16:
     case 17:
     case 18:
-    case 19:
-    case 20:
     case 21:
     case 22:
       return PATTERN_SYNC_LOCAL_REACTIVE;
@@ -1322,6 +1345,11 @@ int patternSyncClass(uint8_t patternId)
 bool isSyncReadyPattern(uint8_t patternId)
 {
   return patternSyncClass(patternId) == PATTERN_SYNC_READY;
+}
+
+bool isPartialSyncPattern(uint8_t patternId)
+{
+  return patternSyncClass(patternId) == PATTERN_SYNC_PARTIAL;
 }
 
 uint32_t buildPatternClassMask(int syncClass)
@@ -1349,6 +1377,8 @@ String buildPatternMaskFields()
   fields += formatHex32(currentInvertedPatternMask);
   fields += " sync_ready_mask=";
   fields += formatHex32(buildPatternClassMask(PATTERN_SYNC_READY));
+  fields += " partial_sync_mask=";
+  fields += formatHex32(buildPatternClassMask(PATTERN_SYNC_PARTIAL));
   fields += " local_reactive_mask=";
   fields += formatHex32(buildPatternClassMask(PATTERN_SYNC_LOCAL_REACTIVE));
   return fields;
@@ -1453,6 +1483,8 @@ String buildSyncFields(bool detailed)
   fields += lastPatternChangeSource;
   fields += " sync_ready_pattern=";
   fields += isSyncReadyPattern((uint8_t)currentPattern) ? 1 : 0;
+  fields += " partial_sync_pattern=";
+  fields += isPartialSyncPattern((uint8_t)currentPattern) ? 1 : 0;
   fields += " sync_autoplay=";
   fields += (currentPlayMode == PLAY_MODE_SYNC && isAutoplayEnabled()) ? 1 : 0;
   fields += " master_autoplay=";
@@ -4970,7 +5002,7 @@ void running8()
   fade = map(accel, 20, 160, 48, 6);
   fade = constrain(fade, 6, 48);
 
-  uint8_t pos = map(beatsin16(80, 0), 0, 65535, 0, NUM_LEDS - 1);
+  uint8_t pos = map(clockSin16(80), 0, 65535, 0, NUM_LEDS - 1);
   if (getPatternDirectionFactor(8) < 0)
   {
     pos = (uint8_t)((NUM_LEDS - 1) - pos);
@@ -5074,7 +5106,7 @@ void running10()
 
   if (m < 3500) {
     // Calm mode: soft breathing.
-    uint8_t breath = beatsin8(10, 40, 180);
+    uint8_t breath = clockSin8(10, 40, 180);
     fill_solid(Strip, TOTAL_LEDS, CHSV(hue, 255, breath));
   } else {
     // Storm mode: spark count grows with movement.
@@ -5328,7 +5360,7 @@ void running15()
     nblendPaletteTowardPalette(currentPaletteB, targetPaletteB, 2);
   }
 
-  uint8_t beat = beat8(bpm);
+  uint8_t beat = clockBeat8(bpm);
   uint8_t mixer = ease8InOutCubic(cubicwave8(beat));
   blend(currentPaletteA, currentPaletteB, beatPalette, 16, mixer);
 
@@ -5342,7 +5374,7 @@ void running15()
     flowDirection = -baseDirection;
   }
 
-  const unsigned long now = millis();
+  const unsigned long now = patternClock.phaseMs();
   if (now - lastScrollMs >= 50)
   {
     lastScrollMs = now;
@@ -5357,7 +5389,7 @@ void running15()
   fill_palette(frameBuffer, TOTAL_LEDS, scrollIndex, paletteSpread, beatPalette, 255, LINEARBLEND);
   blur1d(frameBuffer, TOTAL_LEDS, 72);
 
-  const uint8_t pulseValue = beatsin8(bpm, 84, 156);
+  const uint8_t pulseValue = clockSin8(bpm, 84, 156);
   const uint8_t pulseWidth = constrain(map(filteredMotionInt, 2000, 20000, 2, 5), 2, 6);
   int center = TOTAL_LEDS / 2;
   for (int offset = 0; offset < pulseWidth; ++offset)
@@ -5403,17 +5435,16 @@ void RunEntry16()
 
 void running16()
 {
-  static uint16_t waveA = 0;
-  static uint16_t waveB = 0;
-  static uint16_t waveC = 0;
-
   const uint32_t motion = smoothedMotion();
   const uint8_t baseHue = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
   const uint8_t whitecap = constrain(map((int)motion, 2000, 20000, 24, 110), 16, 120);
-
-  waveA += 10 + constrain(map((int)motion, 2000, 20000, 0, 18), 0, 20);
-  waveB += 7 + constrain(map((int)motion, 2000, 20000, 0, 12), 0, 14);
-  waveC += 4 + constrain(map((int)motion, 2000, 20000, 0, 8), 0, 10);
+  const uint16_t waveStepA = 10 + constrain(map((int)motion, 2000, 20000, 0, 18), 0, 20);
+  const uint16_t waveStepB = 7 + constrain(map((int)motion, 2000, 20000, 0, 12), 0, 14);
+  const uint16_t waveStepC = 4 + constrain(map((int)motion, 2000, 20000, 0, 8), 0, 10);
+  const uint32_t phase = patternClock.phaseMs();
+  const uint16_t waveA = (uint16_t)((phase * waveStepA) / 20UL);
+  const uint16_t waveB = (uint16_t)((phase * waveStepB) / 20UL);
+  const uint16_t waveC = (uint16_t)((phase * waveStepC) / 20UL);
 
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
 
@@ -5531,8 +5562,6 @@ void RunEntry19()
 
 void running19()
 {
-  static uint16_t noiseTime = 0;
-  static float noiseTimeAccumulator = 0.0f;
   static uint8_t smoothedHue = 0;
   static CRGB frameBuffer[MAX_TOTAL_LEDS];
   const uint32_t motion = smoothedMotion();
@@ -5540,13 +5569,8 @@ void running19()
   smoothedHue = lerp8by8(smoothedHue, targetHue, 24);
 
   const uint8_t scale = constrain(map((int)motion, 2000, 20000, 22, 12), 10, 28);
-  const float timeStep = (float)constrain(map((int)motion, 2000, 20000, 2, 10), 1, 12) / 10.0f;
-  noiseTimeAccumulator += timeStep;
-  while (noiseTimeAccumulator >= 1.0f)
-  {
-    noiseTimeAccumulator -= 1.0f;
-    ++noiseTime;
-  }
+  const uint8_t timeStepTenths = constrain(map((int)motion, 2000, 20000, 2, 10), 1, 12);
+  const uint16_t noiseTime = (uint16_t)((patternClock.phaseMs() * (uint32_t)timeStepTenths) / 200UL);
 
   CRGBPalette16 noisePalette(
       CHSV(smoothedHue, 210, 28),
@@ -5579,12 +5603,11 @@ void RunEntry20()
 
 void running20()
 {
-  static uint16_t phase = 0;
   const uint32_t motion = smoothedMotion();
   const uint8_t hueBase = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
   const uint8_t sat = constrain(map((int)motion, 2000, 20000, 180, 255), 170, 255);
   const uint8_t waveSpeed = constrain(map((int)motion, 2000, 20000, 2, 8), 1, 10);
-  phase += waveSpeed;
+  const uint16_t phase = (uint16_t)((patternClock.phaseMs() * (uint32_t)waveSpeed) / 20UL);
 
   for (int i = 0; i < TOTAL_LEDS; ++i)
   {
