@@ -178,6 +178,8 @@ Hinweise:
 * `calibrate precise` nutzt den langsameren `IMU_Zero`-basierten Kalibrierpfad und speichert die Offsets.
 * `calibrate quick` und `calibrate precise` starten mit `OK calibrate_started=1 ...` und enden mit `OK calibrate_finished=1 ...` plus finaler Offset-Zeile.
 * `defaults` lädt nur Standardwerte in den Arbeitsspeicher. Für persistente Speicherung ist danach `save` nötig.
+* Persistente Werte sind Device-Name, Pattern, Helligkeit, Strip-Laenge, Smoothing, Sensor-Ranges, Boot-Kalibrierung, Autoplay-/PlayMode-/BootMode-Einstellungen, Pattern-Masks, Sync- und Wireless-Einstellungen. Laufzeitdiagnosen wie Beacon-/Scan-Zaehler, `radio_mode`, `sync_locked`, Drift-/Phasenwerte, Battery-/USB-/BLE-Connection-Status und Timing-Counter werden bewusst nicht gespeichert.
+* Live-Aenderungen wirken sofort. `save` speichert sie direkt persistent; der bestehende defensive Auto-Save kann geaenderte Werte spaeter ebenfalls sichern, sofern kein lokales Sync-Timing aktiv ist.
 
 ### Firmware 4.0 Alpha / NK4-Protokoll
 
@@ -497,6 +499,8 @@ Notes:
 * `calibrate precise` runs the slower `IMU_Zero`-style calibration path and saves the resulting offsets.
 * `calibrate quick` and `calibrate precise` start with `OK calibrate_started=1 ...` and finish with `OK calibrate_finished=1 ...` plus a final offsets line.
 * `defaults` only loads factory defaults into working memory. Run `save` afterwards if you want to keep them permanently.
+* Persistent values are device name, pattern, brightness, strip length, smoothing, sensor ranges, boot calibration, autoplay/play mode/boot mode settings, pattern masks, sync settings, and wireless settings. Runtime diagnostics such as beacon/scan counters, `radio_mode`, `sync_locked`, drift/phase values, battery/USB/BLE connection state, and timing counters are intentionally not stored.
+* Live changes take effect immediately. `save` stores them persistently right away; the existing defensive auto-save may also persist changed values later when no local sync timing is active.
 
 ### Calibration Notes
 
