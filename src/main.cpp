@@ -1485,6 +1485,7 @@ SyncBeaconRuntime buildSyncBeaconRuntime()
 {
   SyncBeaconRuntime runtime;
   runtime.syncEnabled = currentSyncEnabled == 1;
+  runtime.wirelessEnabled = currentWirelessEnabled == 1;
   runtime.playMode = (uint8_t)currentPlayMode;
   runtime.syncRole = (uint8_t)currentSyncRole;
   runtime.groupId = (uint8_t)currentSyncGroupId;

@@ -27,6 +27,7 @@ constexpr size_t BEACON_PACKET_SIZE = sizeof(NkSyncBeaconV1);
 constexpr uint16_t BEACON_COMPANY_ID = 0xFFFF; // Experimental manufacturer-specific payload.
 constexpr uint8_t ADV_TYPE_NONCONNECTABLE = 3; // ADV_NONCONN_IND.
 constexpr unsigned long FOLLOWER_LOST_MS = 1500;
+constexpr uint8_t LEGACY_ADV_MAX_LEN = 31;
 
 enum RadioMode : uint8_t
 {
@@ -39,6 +40,8 @@ enum RadioMode : uint8_t
 RadioMode currentMode = RADIO_MODE_OFF;
 bool beginCalled = false;
 bool scanning = false;
+bool advActive = false;
+uint8_t advPayloadLen = 0;
 uint8_t activeGroup = 1;
 uint16_t beaconSeq = 0;
 unsigned long nextTxMs = 0;
@@ -47,14 +50,23 @@ unsigned long rxCount = 0;
 unsigned long crcErrors = 0;
 unsigned long groupMismatch = 0;
 unsigned long invalidPackets = 0;
+unsigned long scanReports = 0;
+unsigned long scanMfgReports = 0;
+unsigned long scanNkCandidates = 0;
+unsigned long scanDecodeOk = 0;
+unsigned long scanDecodeFail = 0;
+unsigned long scanCrcFail = 0;
+unsigned long scanGroupMismatch = 0;
 unsigned long lastBeaconMs = 0;
+int8_t scanLastRssi = 0;
+uint8_t scanLastLen = 0;
+uint8_t scanLastMfgLen = 0;
+uint8_t scanLastGroup = 0;
+uint8_t scanLastVersion = 0;
 const char* lastError = "disabled";
+const char* scanLastError = "none";
 NkSyncBeaconV1 pendingBeacon;
 bool pendingBeaconAvailable = false;
-
-#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
-btstack_packet_callback_registration_t syncRadioHciCallbackRegistration;
-#endif
 
 const char* modeName(RadioMode mode)
 {
@@ -135,7 +147,8 @@ uint16_t advIntervalUnitsForProfile(uint8_t profile)
 
 bool buildBeaconAdvertisingData(const NkSyncBeaconV1& beacon, uint8_t* output, uint8_t outputSize, uint8_t* outputLen)
 {
-  if (output == nullptr || outputLen == nullptr || outputSize < 24)
+  const uint8_t requiredLen = (uint8_t)(3 + 2 + 2 + BEACON_PACKET_SIZE);
+  if (output == nullptr || outputLen == nullptr || outputSize < requiredLen || requiredLen > LEGACY_ADV_MAX_LEN)
   {
     return false;
   }
@@ -175,16 +188,36 @@ void startScan()
   }
 }
 
-void handleAdvertisementData(const uint8_t* advData, uint8_t advLen)
+void handleGapReport(const uint8_t* advData, uint8_t advLen, int8_t rssi)
 {
+  if (currentMode != RADIO_MODE_BEACON_FOLLOWER)
+  {
+    return;
+  }
+
+  scanReports++;
+  scanLastRssi = rssi;
+  scanLastLen = advLen;
+  scanLastMfgLen = 0;
+
   ad_context_t context;
   for (ad_iterator_init(&context, advLen, (uint8_t*)advData); ad_iterator_has_more(&context); ad_iterator_next(&context))
   {
     const uint8_t dataType = ad_iterator_get_data_type(&context);
     const uint8_t dataLen = ad_iterator_get_data_len(&context);
     const uint8_t* data = ad_iterator_get_data(&context);
-    if (dataType != BLUETOOTH_DATA_TYPE_MANUFACTURER_SPECIFIC_DATA || dataLen < BEACON_PACKET_SIZE + 2)
+    if (dataType != BLUETOOTH_DATA_TYPE_MANUFACTURER_SPECIFIC_DATA)
     {
+      continue;
+    }
+    scanMfgReports++;
+    scanLastMfgLen = dataLen;
+    if (dataLen < 2)
+    {
+      scanDecodeFail++;
+      invalidPackets++;
+      scanLastError = "mfg_too_short";
+      lastError = "mfg_too_short";
       continue;
     }
     const uint16_t companyId = little_endian_read_16(data, 0);
@@ -192,6 +225,17 @@ void handleAdvertisementData(const uint8_t* advData, uint8_t advLen)
     {
       continue;
     }
+    scanNkCandidates++;
+    if (dataLen < BEACON_PACKET_SIZE + 2)
+    {
+      scanDecodeFail++;
+      invalidPackets++;
+      scanLastError = "candidate_too_short";
+      lastError = "candidate_too_short";
+      continue;
+    }
+    scanLastGroup = data[2 + 3];
+    scanLastVersion = data[2 + 2];
 
     NkSyncBeaconV1 beacon;
     const SyncBeaconDecodeResult result = syncBeaconDecode(&data[2], dataLen - 2, activeGroup, &beacon);
@@ -200,40 +244,44 @@ void handleAdvertisementData(const uint8_t* advData, uint8_t advLen)
       pendingBeacon = beacon;
       pendingBeaconAvailable = true;
       rxCount++;
+      scanDecodeOk++;
       lastBeaconMs = millis();
       lastError = "none";
+      scanLastError = "ok";
     }
     else if (result == SYNC_BEACON_DECODE_BAD_GROUP)
     {
       groupMismatch++;
+      scanGroupMismatch++;
+      scanDecodeFail++;
+      scanLastError = "bad_group";
+      lastError = "bad_group";
     }
     else if (result == SYNC_BEACON_DECODE_BAD_CRC)
     {
       crcErrors++;
+      scanCrcFail++;
+      scanDecodeFail++;
       lastError = "crc";
+      scanLastError = "crc";
     }
     else
     {
       invalidPackets++;
+      scanDecodeFail++;
       lastError = syncBeaconDecodeResultName(result);
+      scanLastError = lastError;
     }
   }
 }
-
-void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uint16_t size)
-{
-  (void)channel;
-  (void)size;
-  if (packetType != HCI_EVENT_PACKET || hci_event_packet_get_type(packet) != GAP_EVENT_ADVERTISING_REPORT)
-  {
-    return;
-  }
-  const uint8_t advLen = gap_event_advertising_report_get_data_length(packet);
-  const uint8_t* advData = gap_event_advertising_report_get_data(packet);
-  handleAdvertisementData(advData, advLen);
-}
 #else
 void stopScan() {}
+void handleGapReport(const uint8_t* advData, uint8_t advLen, int8_t rssi)
+{
+  (void)advData;
+  (void)advLen;
+  (void)rssi;
+}
 #endif
 
 void leaveBeaconMode()
@@ -246,6 +294,7 @@ void leaveBeaconMode()
   }
 #endif
   currentMode = RADIO_MODE_OFF;
+  advActive = false;
   nextTxMs = 0;
 }
 
@@ -269,17 +318,28 @@ void sendMasterBeacon(const SyncBeaconRuntime& runtime)
   uint8_t advLen = 0;
   if (!buildBeaconAdvertisingData(beacon, advData, sizeof(advData), &advLen))
   {
-    lastError = "adv_payload";
+    advActive = false;
+    advPayloadLen = advLen;
+    lastError = "adv_payload_too_long";
+    return;
+  }
+  advPayloadLen = advLen;
+  if (advLen > LEGACY_ADV_MAX_LEN)
+  {
+    advActive = false;
+    lastError = "adv_payload_too_long";
     return;
   }
 
   const uint16_t interval = advIntervalUnitsForProfile(runtime.wirelessProfile);
   if (!rm2BleUseSyncAdvertising(advData, advLen, interval, (uint16_t)(interval + 16), ADV_TYPE_NONCONNECTABLE))
   {
+    advActive = false;
     lastError = "adv_failed";
     return;
   }
 
+  advActive = true;
   txCount++;
   lastBeaconMs = millis();
   lastError = "none";
@@ -297,10 +357,7 @@ void syncBeaconRadioBegin()
   }
   beginCalled = true;
   lastError = "none";
-#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
-  syncRadioHciCallbackRegistration.callback = &hciPacketHandler;
-  hci_add_event_handler(&syncRadioHciCallbackRegistration);
-#endif
+  rm2BleSetGapReportHandler(handleGapReport);
 }
 
 void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
@@ -317,12 +374,13 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
   }
 
   const bool syncActive = runtime.syncEnabled &&
+      runtime.wirelessEnabled &&
       runtime.playMode == SYNC_BEACON_PLAY_SYNC &&
       (runtime.syncRole == SYNC_BEACON_ROLE_MASTER || runtime.syncRole == SYNC_BEACON_ROLE_FOLLOWER);
   if (!syncActive)
   {
     leaveBeaconMode();
-    lastError = "none";
+    lastError = runtime.wirelessEnabled ? "none" : "wireless_disabled";
     return;
   }
 
@@ -331,6 +389,7 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
     stopScan();
 #endif
+    advActive = false;
     currentMode = RADIO_MODE_GATT;
     lastError = "gatt_connected";
     return;
@@ -352,6 +411,7 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
   }
 
   currentMode = RADIO_MODE_BEACON_FOLLOWER;
+  advActive = false;
   nextTxMs = 0;
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
   rm2BleStopAdvertising();
@@ -375,16 +435,32 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   status.beaconTx = currentMode == RADIO_MODE_BEACON_MASTER;
   status.beaconRx = currentMode == RADIO_MODE_BEACON_FOLLOWER;
   status.locked = status.beaconTx || (status.beaconRx && lastBeaconMs > 0 && (millis() - lastBeaconMs) <= FOLLOWER_LOST_MS);
+  status.scanActive = scanning;
+  status.advActive = advActive;
+  status.advPayloadLen = advPayloadLen;
   status.beaconSeq = beaconSeq;
   status.txCount = txCount;
   status.rxCount = rxCount;
   status.crcErrors = crcErrors;
   status.groupMismatch = groupMismatch;
   status.invalidPackets = invalidPackets;
+  status.scanReports = scanReports;
+  status.scanMfgReports = scanMfgReports;
+  status.scanNkCandidates = scanNkCandidates;
+  status.scanDecodeOk = scanDecodeOk;
+  status.scanDecodeFail = scanDecodeFail;
+  status.scanCrcFail = scanCrcFail;
+  status.scanGroupMismatch = scanGroupMismatch;
   status.lastBeaconMs = lastBeaconMs;
   status.beaconAgeMs = lastBeaconMs == 0 ? 0 : millis() - lastBeaconMs;
+  status.scanLastRssi = scanLastRssi;
+  status.scanLastLen = scanLastLen;
+  status.scanLastMfgLen = scanLastMfgLen;
+  status.scanLastGroup = scanLastGroup;
+  status.scanLastVersion = scanLastVersion;
   status.mode = modeName(currentMode);
   status.lastError = lastError;
+  status.scanLastError = scanLastError;
   return status;
 }
 
@@ -399,6 +475,12 @@ String syncBeaconRadioBuildStatusFields()
   fields += status.beaconTx ? 1 : 0;
   fields += " beacon_rx=";
   fields += status.beaconRx ? 1 : 0;
+  fields += " scan_active=";
+  fields += status.scanActive ? 1 : 0;
+  fields += " adv_active=";
+  fields += status.advActive ? 1 : 0;
+  fields += " adv_payload_len=";
+  fields += status.advPayloadLen;
   fields += " beacon_seq=";
   fields += status.beaconSeq;
   fields += " beacon_tx_count=";
@@ -411,6 +493,32 @@ String syncBeaconRadioBuildStatusFields()
   fields += status.groupMismatch;
   fields += " beacon_invalid=";
   fields += status.invalidPackets;
+  fields += " scan_reports=";
+  fields += status.scanReports;
+  fields += " scan_mfg_reports=";
+  fields += status.scanMfgReports;
+  fields += " scan_nk_candidates=";
+  fields += status.scanNkCandidates;
+  fields += " scan_decode_ok=";
+  fields += status.scanDecodeOk;
+  fields += " scan_decode_fail=";
+  fields += status.scanDecodeFail;
+  fields += " scan_crc_fail=";
+  fields += status.scanCrcFail;
+  fields += " scan_group_mismatch=";
+  fields += status.scanGroupMismatch;
+  fields += " scan_last_rssi=";
+  fields += status.scanLastRssi;
+  fields += " scan_last_len=";
+  fields += status.scanLastLen;
+  fields += " scan_last_mfg_len=";
+  fields += status.scanLastMfgLen;
+  fields += " scan_last_group=";
+  fields += status.scanLastGroup;
+  fields += " scan_last_version=";
+  fields += status.scanLastVersion;
+  fields += " scan_last_error=";
+  fields += status.scanLastError;
   fields += " last_beacon_ms=";
   fields += status.lastBeaconMs;
   fields += " beacon_age_ms=";
@@ -420,6 +528,8 @@ String syncBeaconRadioBuildStatusFields()
   fields += " radio_mode=";
   fields += status.mode;
   fields += " sync_radio_error=";
+  fields += status.lastError;
+  fields += " radio_last_error=";
   fields += status.lastError;
   return fields;
 }

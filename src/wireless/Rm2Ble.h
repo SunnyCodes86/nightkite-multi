@@ -4,6 +4,7 @@
 #include "protocol/NkProtocol.h"
 
 using Rm2BleNk4Handler = bool (*)(const String& line, IResponseWriter& writer);
+using Rm2BleGapReportHandler = void (*)(const uint8_t* advData, uint8_t advLen, int8_t rssi);
 
 struct Rm2BleStatus
 {
@@ -27,6 +28,7 @@ struct Rm2BleStatus
 };
 
 void rm2BleSetNk4Handler(Rm2BleNk4Handler handler);
+void rm2BleSetGapReportHandler(Rm2BleGapReportHandler handler);
 bool rm2BleBegin(const char* advertisedName);
 void rm2BleTick();
 Rm2BleStatus rm2BleStatus();

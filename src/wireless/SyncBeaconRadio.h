@@ -27,6 +27,7 @@ enum SyncBeaconWirelessProfile : uint8_t
 struct SyncBeaconRuntime
 {
   bool syncEnabled;
+  bool wirelessEnabled;
   uint8_t playMode;
   uint8_t syncRole;
   uint8_t groupId;
@@ -44,16 +45,32 @@ struct SyncBeaconRadioStatus
   bool beaconTx;
   bool beaconRx;
   bool locked;
+  bool scanActive;
+  bool advActive;
+  uint8_t advPayloadLen;
   uint16_t beaconSeq;
   unsigned long txCount;
   unsigned long rxCount;
   unsigned long crcErrors;
   unsigned long groupMismatch;
   unsigned long invalidPackets;
+  unsigned long scanReports;
+  unsigned long scanMfgReports;
+  unsigned long scanNkCandidates;
+  unsigned long scanDecodeOk;
+  unsigned long scanDecodeFail;
+  unsigned long scanCrcFail;
+  unsigned long scanGroupMismatch;
   unsigned long lastBeaconMs;
   unsigned long beaconAgeMs;
+  int8_t scanLastRssi;
+  uint8_t scanLastLen;
+  uint8_t scanLastMfgLen;
+  uint8_t scanLastGroup;
+  uint8_t scanLastVersion;
   const char* mode;
   const char* lastError;
+  const char* scanLastError;
 };
 
 enum SyncBeaconDecodeResult : uint8_t

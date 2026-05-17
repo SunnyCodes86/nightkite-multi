@@ -54,6 +54,7 @@ bool txReady = false;
 char bleName[BLE_NAME_MAX] = "disabled";
 const char* lastError = "disabled";
 Rm2BleNk4Handler nk4Handler = nullptr;
+Rm2BleGapReportHandler gapReportHandler = nullptr;
 unsigned long txDroppedCount = 0;
 unsigned long txChunksSentCount = 0;
 
@@ -409,6 +410,18 @@ void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uin
     }
   }
 
+  if (hci_event_packet_get_type(packet) == GAP_EVENT_ADVERTISING_REPORT)
+  {
+    if (gapReportHandler != nullptr)
+    {
+      gapReportHandler(
+          gap_event_advertising_report_get_data(packet),
+          gap_event_advertising_report_get_data_length(packet),
+          gap_event_advertising_report_get_rssi(packet));
+    }
+    return;
+  }
+
   if (hci_event_packet_get_type(packet) == HCI_EVENT_DISCONNECTION_COMPLETE)
   {
     connected = false;
@@ -544,6 +557,11 @@ private:
 void rm2BleSetNk4Handler(Rm2BleNk4Handler handler)
 {
   nk4Handler = handler;
+}
+
+void rm2BleSetGapReportHandler(Rm2BleGapReportHandler handler)
+{
+  gapReportHandler = handler;
 }
 
 bool rm2BleBegin(const char* advertisedName)
