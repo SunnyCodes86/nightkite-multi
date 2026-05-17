@@ -3,7 +3,7 @@
 void PatternClock::begin()
 {
   baseMs = millis();
-  phaseMs = 0;
+  currentPhaseMs = 0;
   running = true;
   armed = false;
 }
@@ -12,17 +12,32 @@ uint32_t PatternClock::now() const
 {
   if (!running)
   {
-    return phaseMs;
+    return currentPhaseMs;
   }
-  return phaseMs + (millis() - baseMs);
+  return currentPhaseMs + (millis() - baseMs);
+}
+
+uint32_t PatternClock::phaseMs() const
+{
+  return now();
 }
 
 void PatternClock::setPhase(uint32_t phase)
 {
-  phaseMs = phase;
+  currentPhaseMs = phase;
   baseMs = millis();
   running = true;
   armed = false;
+}
+
+void PatternClock::syncToBeaconPhase(uint32_t phase)
+{
+  setPhase(phase);
+}
+
+void PatternClock::markPatternChange()
+{
+  setPhase(0);
 }
 
 void PatternClock::armStart(uint32_t localStartMs, uint32_t phase)
@@ -37,7 +52,7 @@ void PatternClock::tick()
 {
   if (armed && (int32_t)(millis() - armedStartMs) >= 0)
   {
-    phaseMs = armedPhaseMs;
+    currentPhaseMs = armedPhaseMs;
     baseMs = armedStartMs;
     running = true;
     armed = false;

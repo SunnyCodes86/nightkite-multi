@@ -206,6 +206,9 @@ const int SYNC_LOSS_WARNING_ONLY = 2;
 const int WIRELESS_PROFILE_LONG_RANGE = 0;
 const int WIRELESS_PROFILE_BALANCED = 1;
 const int WIRELESS_PROFILE_FAST_SYNC = 2;
+const int PATTERN_SYNC_UNKNOWN = 0;
+const int PATTERN_SYNC_READY = 1;
+const int PATTERN_SYNC_LOCAL_REACTIVE = 2;
 
 // Persisted configuration values.
 int currentPattern = 1;
@@ -238,6 +241,20 @@ char currentSyncMasterUid[DEVICE_UID_LENGTH + 1] = "";
 int currentSyncLossBehavior = SYNC_LOSS_CONTINUE_LOCAL;
 int currentWirelessEnabled = 0;
 int currentWirelessProfile = WIRELESS_PROFILE_BALANCED;
+uint8_t lastBeaconPattern = 0;
+uint8_t lastBeaconBrightness = 0;
+uint16_t lastBeaconSeq = 0;
+uint16_t lastAppliedSeq = 0;
+uint32_t lastBeaconPhaseMs = 0;
+unsigned long syncApplyCount = 0;
+unsigned long syncApplySkipped = 0;
+const char* syncApplyReason = "none";
+unsigned long patternChangeCount = 0;
+unsigned long lastPatternChangeMs = 0;
+unsigned long lastPatternChangeLatencyMs = 0;
+uint8_t lastPatternFrom = 0;
+uint8_t lastPatternTo = 0;
+const char* lastPatternChangeSource = "none";
 
 // Last values written to EEPROM.
 // Used to avoid unnecessary flash writes.
@@ -498,6 +515,9 @@ int sanitizeBinaryFlag(int value);
 int estimateBatteryPercent(float voltage);
 String formatHex32(uint32_t value);
 String buildPatternMaskFields();
+int patternSyncClass(uint8_t patternId);
+bool isSyncReadyPattern(uint8_t patternId);
+uint32_t buildPatternClassMask(int syncClass);
 bool hasUnsavedConfigChanges();
 void markCurrentConfigSaved();
 void emitNk4Event(const char* eventName, const String& fields);
@@ -558,7 +578,7 @@ const PatternDefinition* getPatternDefinition(uint8_t patternId);
 void runPatternEntry(uint8_t patternId);
 void runPatternFrame(uint8_t patternId);
 void runPatternExit(uint8_t patternId);
-void switchToPattern(uint8_t patternId, bool activatePatternState);
+void switchToPattern(uint8_t patternId, bool activatePatternState, const char* source = NULL, uint32_t latencyMs = 0);
 bool batteryViewTimedOut();
 bool chargingUsbDisconnected();
 int readBatteryRawValue();
@@ -619,8 +639,9 @@ uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 
 int sumPulse(int time_shift)
 {
-  int pulse1 = pulseWave8(millis() + time_shift, cycleLength, pulseLength);
-  int pulse2 = pulseWave8(millis() + time_shift + pulseOffset, cycleLength, pulseLength);
+  const uint32_t phase = patternClock.phaseMs();
+  int pulse1 = pulseWave8(phase + time_shift, cycleLength, pulseLength);
+  int pulse2 = pulseWave8(phase + time_shift + pulseOffset, cycleLength, pulseLength);
   return qadd8(pulse1, pulse2); // Add pulses together without overflow
 }
 
@@ -1265,6 +1286,57 @@ String formatHex32(uint32_t value)
   return String(buffer);
 }
 
+int patternSyncClass(uint8_t patternId)
+{
+  switch (patternId)
+  {
+    case 1:
+    case 4:
+    case 7:
+      return PATTERN_SYNC_READY;
+    case 2:
+    case 3:
+    case 5:
+    case 6:
+    case 8:
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 20:
+    case 21:
+    case 22:
+      return PATTERN_SYNC_LOCAL_REACTIVE;
+    default:
+      return PATTERN_SYNC_UNKNOWN;
+  }
+}
+
+bool isSyncReadyPattern(uint8_t patternId)
+{
+  return patternSyncClass(patternId) == PATTERN_SYNC_READY;
+}
+
+uint32_t buildPatternClassMask(int syncClass)
+{
+  uint32_t mask = 0;
+  for (uint8_t patternId = FIRST_PATTERN_ID; patternId <= LAST_PATTERN_ID; ++patternId)
+  {
+    if (patternSyncClass(patternId) == syncClass)
+    {
+      mask |= (uint32_t)(1ul << (patternId - FIRST_PATTERN_ID));
+    }
+  }
+  return mask;
+}
+
 String buildPatternMaskFields()
 {
   String fields = "count=";
@@ -1275,6 +1347,10 @@ String buildPatternMaskFields()
   fields += formatHex32(currentEnabledPatternMask);
   fields += " inverted_mask=";
   fields += formatHex32(currentInvertedPatternMask);
+  fields += " sync_ready_mask=";
+  fields += formatHex32(buildPatternClassMask(PATTERN_SYNC_READY));
+  fields += " local_reactive_mask=";
+  fields += formatHex32(buildPatternClassMask(PATTERN_SYNC_LOCAL_REACTIVE));
   return fields;
 }
 
@@ -1341,6 +1417,42 @@ String buildSyncFields(bool detailed)
   fields += syncEngine.locked ? 1 : 0;
   fields += " drift_ms=";
   fields += syncEngine.driftMs;
+  fields += " sync_pattern=";
+  fields += currentPattern;
+  fields += " local_pattern=";
+  fields += currentPattern;
+  fields += " last_beacon_pattern=";
+  fields += lastBeaconPattern;
+  fields += " last_beacon_brightness=";
+  fields += lastBeaconBrightness;
+  fields += " last_beacon_seq=";
+  fields += lastBeaconSeq;
+  fields += " last_applied_seq=";
+  fields += lastAppliedSeq;
+  fields += " phase_ms=";
+  fields += patternClock.phaseMs();
+  fields += " beacon_phase_ms=";
+  fields += lastBeaconPhaseMs;
+  fields += " sync_apply_count=";
+  fields += syncApplyCount;
+  fields += " sync_apply_skipped=";
+  fields += syncApplySkipped;
+  fields += " sync_apply_reason=";
+  fields += syncApplyReason;
+  fields += " pattern_change_count=";
+  fields += patternChangeCount;
+  fields += " last_pattern_change_ms=";
+  fields += lastPatternChangeMs;
+  fields += " last_pattern_change_latency_ms=";
+  fields += lastPatternChangeLatencyMs;
+  fields += " last_pattern_from=";
+  fields += lastPatternFrom;
+  fields += " last_pattern_to=";
+  fields += lastPatternTo;
+  fields += " last_pattern_change_source=";
+  fields += lastPatternChangeSource;
+  fields += " sync_ready_pattern=";
+  fields += isSyncReadyPattern((uint8_t)currentPattern) ? 1 : 0;
   fields += " sync_autoplay=";
   fields += (currentPlayMode == PLAY_MODE_SYNC && isAutoplayEnabled()) ? 1 : 0;
   fields += " master_autoplay=";
@@ -1539,8 +1651,18 @@ void applySyncStartIfDue()
   currentBrightness = syncEngine.armedBrightness;
   BRIGHTNESS = currentBrightness;
   FastLED.setBrightness(BRIGHTNESS);
-  switchToPattern(syncEngine.armedPattern, true);
+  switchToPattern(syncEngine.armedPattern, true, "sync_arm");
   setPlayMode(PLAY_MODE_SYNC);
+}
+
+void recordPatternChange(uint8_t fromPattern, uint8_t toPattern, const char* source, uint32_t latencyMs)
+{
+  patternChangeCount++;
+  lastPatternChangeMs = millis();
+  lastPatternChangeLatencyMs = latencyMs;
+  lastPatternFrom = fromPattern;
+  lastPatternTo = toPattern;
+  lastPatternChangeSource = source != NULL ? source : "local";
 }
 
 SyncBeaconRuntime buildSyncBeaconRuntime()
@@ -1564,9 +1686,18 @@ void applyReceivedSyncBeacon()
   NkSyncBeaconV1 beacon;
   while (syncBeaconRadioConsumeBeacon(&beacon))
   {
+    const SyncBeaconRadioStatus radioStatus = syncBeaconRadioStatus();
+    const unsigned long receiveMs = millis();
+    lastBeaconPattern = beacon.pattern;
+    lastBeaconBrightness = beacon.brightness;
+    lastBeaconSeq = beacon.seq;
+    lastBeaconPhaseMs = beacon.phaseMs;
+
     if (currentPlayMode != PLAY_MODE_SYNC || currentSyncEnabled != 1 ||
         currentSyncRole != SYNC_ROLE_FOLLOWER || beacon.groupId != currentSyncGroupId)
     {
+      syncApplySkipped++;
+      syncApplyReason = "not_follower";
       continue;
     }
 
@@ -1580,6 +1711,9 @@ void applyReceivedSyncBeacon()
     syncEngine.armedPhaseMs = beacon.phaseMs;
     syncEngine.localStartMs = millis();
     syncEngine.driftMs = (int32_t)beacon.phaseMs - (int32_t)localPhaseBeforeUpdate;
+    syncApplyCount++;
+    lastAppliedSeq = beacon.seq;
+    syncApplyReason = "ok";
 
     if (isValidBrightnessLevel(beacon.brightness))
     {
@@ -1587,11 +1721,28 @@ void applyReceivedSyncBeacon()
       BRIGHTNESS = currentBrightness;
       FastLED.setBrightness(BRIGHTNESS);
     }
-    if (isValidPatternId(beacon.pattern) && isPatternEnabled(beacon.pattern) && currentPattern != beacon.pattern)
+    else
     {
-      switchToPattern(beacon.pattern, true);
+      syncApplySkipped++;
+      syncApplyReason = "bad_brightness";
     }
-    patternClock.setPhase(beacon.phaseMs);
+
+    if (!isValidPatternId(beacon.pattern))
+    {
+      syncApplySkipped++;
+      syncApplyReason = "bad_pattern";
+    }
+    else if (!isPatternEnabled(beacon.pattern))
+    {
+      syncApplySkipped++;
+      syncApplyReason = "pattern_disabled";
+    }
+    else if (currentPattern != beacon.pattern)
+    {
+      const uint32_t latencyMs = radioStatus.lastBeaconMs == 0 ? 0 : receiveMs - radioStatus.lastBeaconMs;
+      switchToPattern(beacon.pattern, true, "sync_beacon", latencyMs);
+    }
+    patternClock.syncToBeaconPhase(beacon.phaseMs);
   }
 }
 
@@ -3087,7 +3238,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       }
       if (!isPatternEnabled((uint8_t)currentPattern))
       {
-        switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true);
+        switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
       }
     }
     else if (command.command == "invert_pattern")
@@ -3259,7 +3410,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "range_error", "bad_pattern");
           return;
         }
-        switchToPattern((uint8_t)valueInt, true);
+        switchToPattern((uint8_t)valueInt, true, "nk4_set");
       }
       else if (key == "brightness")
       {
@@ -3375,7 +3526,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         currentEnabledPatternMask = mask;
         if (!isPatternEnabled((uint8_t)currentPattern))
         {
-          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true);
+          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
         }
       }
       else if (key == "inverted_mask")
@@ -3413,7 +3564,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         }
         if (!isPatternEnabled((uint8_t)currentPattern))
         {
-          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true);
+          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
         }
       }
       else if (key == "invert_pattern")
@@ -3908,7 +4059,7 @@ void onCliSet(cmd* cPtr)
       Serial.println("ERR pattern range 1..22");
       return;
     }
-    switchToPattern((uint8_t)value, true);
+    switchToPattern((uint8_t)value, true, "cli");
     announcePatternChange("cli");
     Serial.print("OK pattern=");
     Serial.println(currentPattern);
@@ -4643,7 +4794,7 @@ void RunEntry()
 
 void running()
 {
-  fill_rainbow(Strip, NUM_LEDS * 2, gHue, 7);
+  fill_rainbow(Strip, NUM_LEDS * 2, (uint8_t)(patternClock.phaseMs() / 20), 7);
 }
 
 void RunEntry2()
@@ -4695,7 +4846,12 @@ void RunEntry4()
 void running4()
 {
   color = map(color, -180, 180, 0, 255);
-  uint8_t pos = map(beat16(40, 0), 0, 65535, 0, NUM_LEDS - 1);
+  const uint32_t phaseInCycle = patternClock.phaseMs() % 1500UL; // 40 BPM.
+  uint8_t pos = (uint8_t)((phaseInCycle * (uint32_t)NUM_LEDS) / 1500UL);
+  if (pos >= NUM_LEDS)
+  {
+    pos = NUM_LEDS - 1;
+  }
   if (getPatternDirectionFactor(4) < 0)
   {
     pos = (uint8_t)((NUM_LEDS - 1) - pos);
@@ -5590,7 +5746,7 @@ void runPatternExit(uint8_t patternId)
   }
 }
 
-void switchToPattern(uint8_t patternId, bool activatePatternState)
+void switchToPattern(uint8_t patternId, bool activatePatternState, const char* source, uint32_t latencyMs)
 {
   if (!isValidPatternId(patternId))
   {
@@ -5615,6 +5771,8 @@ void switchToPattern(uint8_t patternId, bool activatePatternState)
   }
 
   currentPattern = patternId;
+  patternClock.markPatternChange();
+  recordPatternChange(previousPattern, patternId, source, latencyMs);
   resetAutoplayTimer();
   batteryViewLastInteractionMs = millis();
 
@@ -5978,7 +6136,7 @@ void loop()
     }
     else if (!UsbConnected)
     {
-      switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
+      switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false, "button");
       announcePatternChange("button");
     }
   }
@@ -6023,7 +6181,7 @@ void loop()
       }
       if (millis() - autoplayLastSwitchMs >= (unsigned long)currentAutoplayIntervalMs)
       {
-        switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false);
+        switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), false, "autoplay");
         announcePatternChange("autoplay");
       }
     }
