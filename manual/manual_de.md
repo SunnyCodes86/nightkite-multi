@@ -120,17 +120,16 @@ Der rechte Button ist ein **Multifunktions-Button**:
     Auf dem zweiten Strip blinkt eine blaue LED-Marke; zusätzlich zeigen gelbe LEDs die aktuelle Helligkeitsstufe (6 Stufen) an, und zwei weitere Status-LEDs dahinter zeigen den Autoplay-Status (`grün/grün` = an, `rot/rot` = aus).  
     Die Rückkehr zum zuletzt aktiven Muster erfolgt 5 Sekunden nach der letzten Interaktion in der Akkuanzeige.
 
-**Skala der Akkuanzeige (Spannungsbasiert):**
+**Skala der Akkuanzeige (prozentbasiert):**
 
-| Anzeige | Spannung | Farbe |
-|----------|-----------|--------|
-| 5 LEDs  | ≥ 4.05 V | Blau |
-| 4 LEDs  | 4.05 – 3.92 V | Grün |
-| 3 LEDs  | 3.92 – 3.80 V | Grün |
-| 2 LEDs  | 3.80 – 3.68 V | Gelb |
-| 1 LED   | 3.68 – 3.55 V | Gelb |
-| 1 LED   | 3.55 – 3.40 V | Rot |
-| Keine LED | < 3.40 V | (sehr leer) |
+| Anzeige | Ladezustand | Farbe |
+|----------|-------------|--------|
+| 5 LEDs  | ≥ 80% | Blau |
+| 4 LEDs  | ≥ 60% | Grün |
+| 3 LEDs  | ≥ 40% | Grün |
+| 2 LEDs  | ≥ 20% | Gelb |
+| 1 LED   | ≥ 8% | Gelb |
+| 1 LED blinkend | < 8% | Rot |
 
 ---
 
@@ -200,6 +199,7 @@ Hinweise:
 - Autoplay kann persistent gespeichert werden und startet nach dem Booten automatisch, wenn es gespeichert eingeschaltet war.
 - `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` greifen erst nach einem Neustart. Die CLI kennzeichnet das in der Antwort mit `(applies after reboot)`.
 - `timing` zeigt `FastLED`-FPS, `loop`-/`work`-Zeiten, Frame-Budget und Sample-Anzahl in Mikrosekunden.
+- `battery` zeigt zusätzlich `battery_percent` und `battery_state`.
 - `timing reset` setzt die Timing-Statistik (`avg`, `max`, `samples`) zurück, damit einzelne Pattern oder Änderungen direkt vergleichbar sind.
 - `offsets` zeigt die aktuell verwendeten MPU-Offsets.
 - `calibrate quick` ist die schnelle Alltags-Kalibrierung und speichert die gefundenen Offsets.
@@ -217,9 +217,17 @@ Der Pimoroni Pico LiPo besitzt ein intelligentes Lade-/Entlademanagement.
 - **Lade-Anzeige:** Während des Ladens zeigt das Band den Füllstand als Balken;  
   eine rote LED blinkt während des aktiven Ladevorgangs.  
 - **USB-CLI aktiv:** Bei aktiver serieller Verbindung wird die Ladeanzeige unterdrückt, damit die CLI störungsfrei genutzt werden kann.  
-- **Voll geladen:** Die Ladeanzeige springt erst nahe der vollen Zellspannung auf 5 blaue LEDs (Firmware-Schwelle: ≥ 4.20 V, also ungefähr 4.2 V); dann geht die rote Lade-LED aus.  
 - **Automatischer Rückwechsel:** Nach dem Trennen vom USB kehrt das System zum letzten Muster zurück.  
 - **Laufzeit:** Je nach Muster und Helligkeit ca. 1 – 2,5 Stunden.
+
+**Akkuwarnungen und Schutzverhalten:**
+
+- Der Ladezustand wird über eine NightKite-spezifische LiPo-SoC-Kurve berechnet und geglättet.
+- Unter 3.40 V für ca. 15 s meldet die Diagnose `LOW_WARNING`.
+- Unter 3.30 V für ca. 10 s meldet die Diagnose `CRITICAL`; die Helligkeit wird temporär auf `MIN_BRIGHTNESS` begrenzt, ohne den gespeicherten Helligkeitswert zu ändern.
+- Unter 3.20 V für ca. 15 s geht der Controller in `SOFT_CUTOFF`: LEDs schwarz, Konfiguration defensiv gespeichert, keine Pattern-/Wireless-Aktivität mehr.
+- Unter ca. 3.08 V wird sofort `EMERGENCY_CUTOFF` aktiv.
+- USB-Betrieb und Laden lösen keinen Low-Battery-Cutoff aus.
 
 **Speicherfunktion (automatisch):**
 

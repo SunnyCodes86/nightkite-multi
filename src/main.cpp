@@ -31,6 +31,7 @@
 #include <math.h> // Math library
 #include <string.h>
 #include "hardware/watchdog.h"
+#include "app/Battery.h"
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
 #include "protocol/NkProtocol.h"
@@ -115,13 +116,9 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // MPU interrupt input pin
 #define DEFAULT_LEDS_PER_STRIP 25
 #define MAX_TOTAL_LEDS (MAX_LEDS_PER_STRIP * 2)
 
-constexpr float BATTERY_BAR_5_THRESHOLD = 4.05f;
-constexpr float BATTERY_BAR_4_THRESHOLD = 3.92f;
-constexpr float BATTERY_BAR_3_THRESHOLD = 3.80f;
-constexpr float BATTERY_BAR_2_THRESHOLD = 3.68f;
-constexpr float BATTERY_BAR_1_YELLOW_THRESHOLD = 3.55f;
-constexpr float BATTERY_BAR_1_RED_THRESHOLD = 3.40f;
-constexpr float CHARGING_FULL_THRESHOLD = 4.20f;
+constexpr unsigned long BATTERY_SAMPLE_INTERVAL_MS = 1000;
+constexpr uint8_t BATTERY_SAMPLE_WINDOW = 15;
+constexpr float BATTERY_MEASUREMENT_HYSTERESIS_VOLTAGE = 0.05f;
 
 int ledsPerStrip = DEFAULT_LEDS_PER_STRIP;
 int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // total logical LEDs across both strips
@@ -404,6 +401,16 @@ int UsbPowerRaw = 0;
 bool SerialSessionActive = false;
 int RawVoltage = 0;
 float Voltage = 0;
+int BatteryPercent = 0;
+BatteryState currentBatteryState = BATTERY_STATE_NORMAL;
+BatteryStateTracker batteryStateTracker;
+float batteryVoltageSamples[BATTERY_SAMPLE_WINDOW] = {0};
+uint8_t batteryVoltageSampleCount = 0;
+uint8_t batteryVoltageSampleIndex = 0;
+float batteryVoltageSampleSum = 0.0f;
+unsigned long lastBatterySampleMs = 0;
+bool lowPowerCutoffActive = false;
+bool lowPowerCutoffSaved = false;
 
 unsigned long previousMillis = 0; // will store last time LED was updated
 unsigned long currentMillis = 0;
@@ -513,7 +520,6 @@ int parseSyncLossBehavior(String value);
 const char* wirelessProfileToString(int value);
 int parseWirelessProfile(String value);
 int sanitizeBinaryFlag(int value);
-int estimateBatteryPercent(float voltage);
 String formatHex32(uint32_t value);
 String buildPatternMaskFields();
 int patternSyncClass(uint8_t patternId);
@@ -585,6 +591,12 @@ bool batteryViewTimedOut();
 bool chargingUsbDisconnected();
 int readBatteryRawValue();
 float convertBatteryRawToVoltage(int rawValue);
+bool isUsbPowered();
+void updateBatteryMeasurement(bool force);
+void applyEffectiveBrightness();
+void applyBatteryBrightnessLimit();
+void renderBatteryBar(int batteryBarMax);
+void handleBatteryCutoff();
 void printBatteryStatus();
 void printSensorStatus();
 void resetTimingStats();
@@ -824,7 +836,7 @@ void applyPersistentConfig()
   }
   setPlayMode(currentPlayMode);
   BRIGHTNESS = currentBrightness;
-  FastLED.setBrightness(BRIGHTNESS);
+  applyEffectiveBrightness();
   resetAutoplayTimer();
 }
 
@@ -1294,13 +1306,6 @@ int parseWirelessProfile(String value)
   return -1;
 }
 
-int estimateBatteryPercent(float voltage)
-{
-  if (voltage >= CHARGING_FULL_THRESHOLD) return 100;
-  if (voltage <= BATTERY_BAR_1_RED_THRESHOLD) return 0;
-  return constrain((int)(((voltage - BATTERY_BAR_1_RED_THRESHOLD) * 100.0f) / (CHARGING_FULL_THRESHOLD - BATTERY_BAR_1_RED_THRESHOLD)), 0, 100);
-}
-
 String formatHex32(uint32_t value)
 {
   char buffer[11];
@@ -1526,15 +1531,16 @@ String buildWirelessFields()
 
 String buildBatteryFields()
 {
-  RawVoltage = readBatteryRawValue();
-  Voltage = convertBatteryRawToVoltage(RawVoltage);
+  updateBatteryMeasurement(false);
   const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
   String fields = "battery_raw=";
   fields += RawVoltage;
   fields += " battery_voltage=";
   fields += String(Voltage, 3);
   fields += " battery_percent=";
-  fields += estimateBatteryPercent(Voltage);
+  fields += BatteryPercent;
+  fields += " battery_state=";
+  fields += batteryStateName(currentBatteryState);
   fields += " usb_power_raw=";
   fields += usbSenseRaw;
   fields += " serial_session_active=";
@@ -1682,7 +1688,7 @@ void applySyncStartIfDue()
 
   currentBrightness = syncEngine.armedBrightness;
   BRIGHTNESS = currentBrightness;
-  FastLED.setBrightness(BRIGHTNESS);
+  applyEffectiveBrightness();
   switchToPattern(syncEngine.armedPattern, true, "sync_arm");
   setPlayMode(PLAY_MODE_SYNC);
 }
@@ -1751,7 +1757,7 @@ void applyReceivedSyncBeacon()
     {
       currentBrightness = beacon.brightness;
       BRIGHTNESS = currentBrightness;
-      FastLED.setBrightness(BRIGHTNESS);
+      applyEffectiveBrightness();
     }
     else
     {
@@ -2625,16 +2631,135 @@ float convertBatteryRawToVoltage(int rawValue)
   return rawValue * 3.0f * 3.3f / 4096.0f;
 }
 
+bool isUsbPowered()
+{
+  return digitalRead(PIN_USB_SENSE) == 1;
+}
+
+void updateBatteryMeasurement(bool force)
+{
+  const unsigned long now = millis();
+  const bool noSamplesYet = batteryVoltageSampleCount == 0;
+  if (!force && !noSamplesYet && (now - lastBatterySampleMs) < BATTERY_SAMPLE_INTERVAL_MS)
+  {
+    return;
+  }
+
+  lastBatterySampleMs = now;
+  RawVoltage = readBatteryRawValue();
+  const float measuredVoltage = convertBatteryRawToVoltage(RawVoltage);
+
+  if (batteryVoltageSampleCount < BATTERY_SAMPLE_WINDOW)
+  {
+    batteryVoltageSamples[batteryVoltageSampleIndex] = measuredVoltage;
+    batteryVoltageSampleSum += measuredVoltage;
+    batteryVoltageSampleCount++;
+  }
+  else
+  {
+    batteryVoltageSampleSum -= batteryVoltageSamples[batteryVoltageSampleIndex];
+    batteryVoltageSamples[batteryVoltageSampleIndex] = measuredVoltage;
+    batteryVoltageSampleSum += measuredVoltage;
+  }
+  batteryVoltageSampleIndex = (batteryVoltageSampleIndex + 1) % BATTERY_SAMPLE_WINDOW;
+
+  const float averagedVoltage = batteryVoltageSampleSum / batteryVoltageSampleCount;
+  if (noSamplesYet || fabsf(averagedVoltage - Voltage) >= BATTERY_MEASUREMENT_HYSTERESIS_VOLTAGE)
+  {
+    Voltage = averagedVoltage;
+  }
+
+  BatteryPercent = estimateBatteryPercent(Voltage);
+  const BatteryState previousState = currentBatteryState;
+  currentBatteryState = batteryStateTracker.update(Voltage, isUsbPowered(), now);
+  if (batteryStateCapsBrightness(previousState) && !batteryStateCapsBrightness(currentBatteryState))
+  {
+    applyEffectiveBrightness();
+  }
+}
+
+void applyEffectiveBrightness()
+{
+  const int effectiveBrightness = batteryStateCapsBrightness(currentBatteryState) ? MIN_BRIGHTNESS : BRIGHTNESS;
+  FastLED.setBrightness(effectiveBrightness);
+}
+
+void applyBatteryBrightnessLimit()
+{
+  if (batteryStateCapsBrightness(currentBatteryState) && FastLED.getBrightness() > MIN_BRIGHTNESS)
+  {
+    FastLED.setBrightness(MIN_BRIGHTNESS);
+  }
+}
+
+void renderBatteryBar(int batteryBarMax)
+{
+  const uint8_t bars = batteryBarsForPercent(BatteryPercent);
+  const int clampedMax = min(5, batteryBarMax);
+  if (bars == 0)
+  {
+    fill_solid(Strip, min(1, clampedMax), blink ? CRGB::Red : CRGB::Black);
+    return;
+  }
+
+  CRGB color = CRGB::Yellow;
+  if (bars >= 5)
+  {
+    color = CRGB::Blue;
+  }
+  else if (bars >= 3)
+  {
+    color = CRGB::Green;
+  }
+
+  fill_solid(Strip, min((int)bars, clampedMax), color);
+}
+
+void handleBatteryCutoff()
+{
+  if (!batteryStateCutsOff(currentBatteryState))
+  {
+    if (lowPowerCutoffActive && isUsbPowered())
+    {
+      lowPowerCutoffActive = false;
+      lowPowerCutoffSaved = false;
+      rm2BleRestoreGattAdvertising();
+      applyEffectiveBrightness();
+    }
+    return;
+  }
+
+  if (!lowPowerCutoffActive)
+  {
+    lowPowerCutoffActive = true;
+    syncBeaconRadioStop();
+    rm2BleStopAdvertising();
+    fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+    fill_solid(PhysicalStrip, MAX_TOTAL_LEDS, CRGB::Black);
+    FastLED.setBrightness(0);
+    FastLED.show();
+  }
+
+  if (!lowPowerCutoffSaved)
+  {
+    saveConfigToEEPROM(false);
+    lowPowerCutoffSaved = true;
+  }
+}
+
 void printBatteryStatus()
 {
-  RawVoltage = readBatteryRawValue();
-  Voltage = convertBatteryRawToVoltage(RawVoltage);
+  updateBatteryMeasurement(false);
   const int usbSenseRaw = digitalRead(PIN_USB_SENSE);
 
   Serial.print("OK battery_raw=");
   Serial.print(RawVoltage);
   Serial.print(" battery_voltage=");
   Serial.print(Voltage, 3);
+  Serial.print(" battery_percent=");
+  Serial.print(BatteryPercent);
+  Serial.print(" battery_state=");
+  Serial.print(batteryStateName(currentBatteryState));
   Serial.print(" usb_power_raw=");
   Serial.print(usbSenseRaw);
   Serial.print(" serial_session_active=");
@@ -3077,8 +3202,7 @@ void showPlayModeIndicatorTest()
       playModeIndicatorColor(PLAY_MODE_SYNC, SYNC_ROLE_MASTER, false),
       CRGB::Red};
   const size_t colorCount = sizeof(colors) / sizeof(colors[0]);
-  const uint8_t previousBrightness = BRIGHTNESS;
-  FastLED.setBrightness(BRIGHTNESS);
+  applyEffectiveBrightness();
   for (size_t i = 0; i < colorCount; i++)
   {
     fill_solid(Strip, TOTAL_LEDS, colors[i]);
@@ -3104,7 +3228,7 @@ void showPlayModeIndicatorTest()
   clearInactiveLeds();
   syncLogicalToPhysicalLeds();
   FastLED.show();
-  FastLED.setBrightness(previousBrightness);
+  applyEffectiveBrightness();
 }
 
 void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
@@ -3180,16 +3304,17 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
 
   if (command.command == "status")
   {
-    RawVoltage = readBatteryRawValue();
-    Voltage = convertBatteryRawToVoltage(RawVoltage);
+    updateBatteryMeasurement(false);
     String fields = "pattern=";
     fields += currentPattern;
     fields += " brightness=";
     fields += currentBrightness;
     fields += " battery_percent=";
-    fields += estimateBatteryPercent(Voltage);
+    fields += BatteryPercent;
     fields += " battery_voltage=";
     fields += String(Voltage, 3);
+    fields += " battery_state=";
+    fields += batteryStateName(currentBatteryState);
     fields += " usb=";
     fields += (UsbPowerRaw == 1 ? 1 : 0);
     fields += " imu=";
@@ -3459,7 +3584,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         }
         currentBrightness = valueInt;
         BRIGHTNESS = currentBrightness;
-        FastLED.setBrightness(BRIGHTNESS);
+        applyEffectiveBrightness();
       }
       else if (key == "strip_length")
       {
@@ -4108,7 +4233,7 @@ void onCliSet(cmd* cPtr)
 
     currentBrightness = value;
     BRIGHTNESS = currentBrightness;
-    FastLED.setBrightness(BRIGHTNESS);
+    applyEffectiveBrightness();
     batteryViewLastInteractionMs = millis();
 
     Serial.print("OK brightness=");
@@ -4640,8 +4765,7 @@ void ChargingEntry()
 
 void ChargingRunning()
 {
-  RawVoltage = analogRead(PIN_BATTERY_ADC);
-  Voltage = RawVoltage * 3.0 * 3.3 / 4096.0;
+  updateBatteryMeasurement(false);
 
   currentMillis = millis();
 
@@ -4658,18 +4782,6 @@ void ChargingRunning()
     {
       blink = 0;
     }
-  }
-
-  // Hysteresis for voltage measurement.
-  static float vLast = 0;
-  const float HYS = 0.03; // 30 mV
-  if (fabsf(Voltage - vLast) < HYS)
-  {
-    Voltage = vLast;
-  }
-  else
-  {
-    vLast = Voltage;
   }
 
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
@@ -4681,36 +4793,12 @@ void ChargingRunning()
   }
 
   int batteryBarMax = min(5, NUM_LEDS);
-  if (Voltage >= CHARGING_FULL_THRESHOLD)
-  {
-    fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-  }
-  else if (Voltage >= BATTERY_BAR_4_THRESHOLD)
-  {
-    fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-  }
-  else if (Voltage >= BATTERY_BAR_3_THRESHOLD)
-  {
-    fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-  }
-  else if (Voltage >= BATTERY_BAR_2_THRESHOLD)
-  {
-    fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-  }
-  else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD)
-  {
-    fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-  }
-  else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)
-  {
-    fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
-  }
-  // Below the red threshold, leave the battery bar off.
+  renderBatteryBar(batteryBarMax);
 }
 
 void ChargingExit()
 {
-  FastLED.setBrightness(BRIGHTNESS);
+  applyEffectiveBrightness();
 }
 
 void BatteryEntry()
@@ -4722,8 +4810,7 @@ void BatteryEntry()
 
 void BatteryRunning()
 {
-  RawVoltage = analogRead(PIN_BATTERY_ADC);
-  Voltage = RawVoltage * 3.0 * 3.3 / 4096.0;
+  updateBatteryMeasurement(false);
 
   currentMillis = millis();
 
@@ -4740,18 +4827,6 @@ void BatteryRunning()
     {
       blink = 0;
     }
-  }
-
-  // Hysteresis for voltage measurement.
-  static float vLast = 0;
-  const float HYS = 0.03; // 30 mV
-  if (fabsf(Voltage - vLast) < HYS)
-  {
-    Voltage = vLast;
-  }
-  else
-  {
-    vLast = Voltage;
   }
 
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
@@ -4773,31 +4848,7 @@ void BatteryRunning()
   }
 
   int batteryBarMax = min(5, NUM_LEDS);
-  if (Voltage >= BATTERY_BAR_5_THRESHOLD)
-  {
-    fill_solid(Strip, min(5, batteryBarMax), CRGB::Blue);
-  }
-  else if (Voltage >= BATTERY_BAR_4_THRESHOLD)
-  {
-    fill_solid(Strip, min(4, batteryBarMax), CRGB::Green);
-  }
-  else if (Voltage >= BATTERY_BAR_3_THRESHOLD)
-  {
-    fill_solid(Strip, min(3, batteryBarMax), CRGB::Green);
-  }
-  else if (Voltage >= BATTERY_BAR_2_THRESHOLD)
-  {
-    fill_solid(Strip, min(2, batteryBarMax), CRGB::Yellow);
-  }
-  else if (Voltage >= BATTERY_BAR_1_YELLOW_THRESHOLD)
-  {
-    fill_solid(Strip, min(1, batteryBarMax), CRGB::Yellow);
-  }
-  else if (Voltage >= BATTERY_BAR_1_RED_THRESHOLD)
-  {
-    fill_solid(Strip, min(1, batteryBarMax), CRGB::Red);
-  }
-  // Below the red threshold, leave the battery bar off.
+  renderBatteryBar(batteryBarMax);
 
   int autoplayStatusPixel = statusStart + 1 + brightnessPixels;
   if (autoplayStatusPixel < TOTAL_LEDS)
@@ -4865,7 +4916,7 @@ void running3()
 void RunExit3()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  FastLED.setBrightness(BRIGHTNESS);
+  applyEffectiveBrightness();
 }
 
 void RunEntry4()
@@ -5994,7 +6045,8 @@ void setup()
   FastLED.addLeds<LED_TYPE, PinStrip2, COLOR_ORDER>(PhysicalStrip, MAX_LEDS_PER_STRIP, MAX_LEDS_PER_STRIP).setCorrection(TypicalLEDStrip);
 
   // Apply persisted global brightness.
-  FastLED.setBrightness(BRIGHTNESS);
+  updateBatteryMeasurement(true);
+  applyEffectiveBrightness();
 
   // Initialize motion smoothing with the configured window size.
   applyConfiguredMotionSmoothing();
@@ -6127,6 +6179,14 @@ void loop()
   // Disable the charging view while a serial session is active.
   UsbConnected = (UsbPowerRaw == 1 && !SerialSessionActive) ? 1 : 0;
 
+  updateBatteryMeasurement(false);
+  handleBatteryCutoff();
+  if (lowPowerCutoffActive)
+  {
+    delay(50);
+    return;
+  }
+
   fsm.run(0);
   multiresponseButton.poll();
 
@@ -6184,8 +6244,8 @@ void loop()
     {
       BRIGHTNESS = MIN_BRIGHTNESS; // Wrap around to the minimum brightness.
     }
-    FastLED.setBrightness(BRIGHTNESS);
     currentBrightness = BRIGHTNESS;
+    applyEffectiveBrightness();
     batteryViewLastInteractionMs = millis();
   }
 
@@ -6216,6 +6276,7 @@ void loop()
 
   // Copy the logical LEDs into the fixed physical strip layout and show them.
   clearInactiveLeds();
+  applyBatteryBrightnessLimit();
   syncLogicalToPhysicalLeds();
   FastLED.show();
 

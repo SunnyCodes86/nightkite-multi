@@ -120,17 +120,16 @@ The right button is a **multi-function control**:
     On the second strip, a blue marker LED flashes, yellow LEDs show the current brightness step (6 levels), and two additional status LEDs behind them show autoplay state (`green/green` = on, `red/red` = off).  
     Return to the previously active pattern happens 5 seconds after the last interaction in the battery display.
 
-**Battery Level Scale (voltage-based):**
+**Battery Level Scale (percentage-based):**
 
-| Indicator | Voltage Range | Color |
-|------------|----------------|--------|
-| 5 LEDs     | ≥ 4.05 V       | Blue |
-| 4 LEDs     | 4.05 – 3.92 V  | Green |
-| 3 LEDs     | 3.92 – 3.80 V  | Green |
-| 2 LEDs     | 3.80 – 3.68 V  | Yellow |
-| 1 LED      | 3.68 – 3.55 V  | Yellow |
-| 1 LED      | 3.55 – 3.40 V  | Red |
-| None       | < 3.40 V       | (very empty) |
+| Indicator | State of charge | Color |
+|------------|-----------------|--------|
+| 5 LEDs     | ≥ 80% | Blue |
+| 4 LEDs     | ≥ 60% | Green |
+| 3 LEDs     | ≥ 40% | Green |
+| 2 LEDs     | ≥ 20% | Yellow |
+| 1 LED      | ≥ 8% | Yellow |
+| 1 blinking LED | < 8% | Red |
 
 ---
 
@@ -200,6 +199,7 @@ Notes:
 - Autoplay can be stored persistently and starts automatically after boot if it was saved as enabled.
 - `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` only take effect after reboot. The CLI marks this in the reply with `(applies after reboot)`.
 - `timing` reports `FastLED` FPS, `loop`/`work` times, frame budget, and sample count in microseconds.
+- `battery` also reports `battery_percent` and `battery_state`.
 - `timing reset` clears the timing statistics (`avg`, `max`, `samples`) so individual patterns or changes can be compared directly.
 - `offsets` reports the currently active MPU offsets.
 - `calibrate quick` is the fast everyday calibration path and saves the resulting offsets.
@@ -217,9 +217,17 @@ The Pimoroni Pico LiPo features intelligent charging and power management.
 - **Charging Indicator:** While charging, the LED strip shows the charge level as a bar;  
   a red LED blinks during the active charging process.  
 - **USB CLI active:** While a serial session is active, the charging display is suppressed so CLI usage stays predictable.  
-- **Fully Charged:** The charging display switches to five blue LEDs only near full cell voltage (firmware threshold: ≥ 4.20 V, approx. 4.2 V); then the red LED turns off.  
 - **Automatic Return:** After disconnecting USB, the system automatically returns to the last active pattern.  
 - **Runtime:** Typically between 1 – 2.5 hours depending on brightness and pattern.
+
+**Battery warnings and protection behavior:**
+
+- State of charge is calculated from a NightKite-specific LiPo SoC curve and smoothed.
+- Below 3.40 V for about 15 s, diagnostics report `LOW_WARNING`.
+- Below 3.30 V for about 10 s, diagnostics report `CRITICAL`; brightness is temporarily capped to `MIN_BRIGHTNESS` without changing the saved brightness value.
+- Below 3.20 V for about 15 s, the controller enters `SOFT_CUTOFF`: LEDs black, configuration defensively saved, and no pattern/wireless activity.
+- Below about 3.08 V, `EMERGENCY_CUTOFF` is entered immediately.
+- USB operation and charging do not trigger low-battery cutoff.
 
 **Automatic Memory Function:**
 

@@ -57,9 +57,11 @@ Die folgende Tabelle zeigt die Verbindungen zwischen dem Pimoroni Pico Lipo, dem
 
 Das System wird über einen integrierten 500mAh LiPo Akku betrieben. Der Pimoroni Pico Lipo verfügt über ein integriertes Akku-Management, das ein sicheres Laden und Entladen des Akkus gewährleistet.
 
-**Aufladen:** Das Aufladen erfolgt bequem über den USB-C Anschluss am Mikrocontroller. Während des Ladevorgangs zeigt das LED-Band den Ladefortschritt als Balken, eine rote LED blinkt zur Bestätigung. Voll geladen bedeutet fünf blaue LEDs und die rote Status-LED erlischt erst nahe der vollen Zellspannung (Firmware-Schwelle aktuell: ≥ 4.20 V).
+**Aufladen:** Das Aufladen erfolgt bequem über den USB-C Anschluss am Mikrocontroller. Während des Ladevorgangs zeigt das LED-Band den Ladefortschritt als Prozent-Balken, eine rote LED blinkt zur Bestätigung.
 
 **Laufzeit:** Die Akkulaufzeit beträgt, abhängig von der gewählten LED-Animation und der Helligkeit, zwischen 1 und 2,5 Stunden. Nach dem Abziehen vom USB springt das System automatisch zurück zum zuletzt aktiven Muster.
+
+**Akkuwarnungen:** Die Firmware berechnet den Ladezustand über eine NightKite-spezifische LiPo-SoC-Kurve. Die Anzeige nutzt fünf Balken ab 80%, vier ab 60%, drei ab 40%, zwei ab 20%, einen gelben Balken ab 8% und unter 8% einen rot blinkenden Warnbalken. Unter 3.40 V wird nach ca. 15 s `LOW_WARNING` aktiv, unter 3.30 V nach ca. 10 s `CRITICAL` und die Helligkeit wird nur zur Laufzeit auf `MIN_BRIGHTNESS` begrenzt. Unter 3.20 V folgt nach ca. 15 s `SOFT_CUTOFF`: Die LEDs werden schwarz geschaltet, die Konfiguration wird defensiv gespeichert und Pattern-/Wireless-Aktivitaet stoppt. Unter ca. 3.08 V wird sofort `EMERGENCY_CUTOFF` aktiv. USB-Betrieb bzw. Laden loest diese Cutoffs nicht aus.
 
 ### Bedienung
 
@@ -169,7 +171,7 @@ Hinweise:
 * Es muss immer mindestens ein Pattern aktiv bleiben.
 * Autoplay verwendet nur aktivierte Pattern und kann persistent gespeichert werden.
 * `smoothing`, `accel_range`, `gyro_range` und `boot_calibration` werden persistent gespeichert, greifen aber erst nach einem Neustart.
-* `battery` zeigt den ADC-Rohwert, die berechnete Spannung sowie USB-/Serial-Status.
+* `battery` zeigt ADC-Rohwert, geglaettete Spannung, `battery_percent`, `battery_state` sowie USB-/Serial-Status.
 * `sensor` zeigt MPU-/DMP-Status und die konfigurierten bzw. aktiven Sensor-Ranges.
 * `timing` zeigt `FastLED`-FPS, Loop-/Work-Zeiten, Frame-Budget und Samples in Mikrosekunden.
 * `timing reset` setzt die Timing-Statistik (`avg`, `max`, `samples`) zurück, damit Pattern oder Änderungen direkt vergleichbar sind.
@@ -379,9 +381,11 @@ The following table shows the connections between the Pimoroni Pico Lipo, the LE
 
 The system is powered by an integrated 500mAh LiPo battery. The Pimoroni Pico Lipo features integrated battery management, ensuring safe charging and discharging of the battery.
 
-**Charging:** Charging is done via the USB-C port on the microcontroller. While charging, the LED strip displays a progress bar and a red LED blinks to indicate active charging. The battery is treated as full only near full cell voltage (current firmware threshold: ≥ 4.20 V), at which point five blue LEDs remain and the red status LED switches off.
+**Charging:** Charging is done via the USB-C port on the microcontroller. While charging, the LED strip displays a percentage-based progress bar and a red LED blinks to indicate active charging.
 
 **Runtime:** Battery runtime is between 1 and 2.5 hours, depending on the selected LED animation and brightness. After unplugging USB power the controller automatically resumes the last active pattern.
+
+**Battery warnings:** Firmware now estimates state of charge with a NightKite-specific LiPo SoC curve. The LED indicator shows five bars at 80% and above, four at 60%, three at 40%, two at 20%, one yellow bar at 8%, and a blinking red warning below 8%. Below 3.40 V for about 15 s the state becomes `LOW_WARNING`; below 3.30 V for about 10 s it becomes `CRITICAL` and runtime brightness is capped to `MIN_BRIGHTNESS` without overwriting the saved brightness. Below 3.20 V for about 15 s, `SOFT_CUTOFF` turns LEDs black, defensively saves the current configuration, and stops pattern/wireless activity. Below about 3.08 V, `EMERGENCY_CUTOFF` happens immediately. USB power or charging suppresses low-battery cutoffs.
 
 ### Operation
 
@@ -490,7 +494,7 @@ Notes:
 * At least one pattern must always remain enabled.
 * Autoplay uses only enabled patterns and can be stored persistently.
 * `smoothing`, `accel_range`, `gyro_range`, and `boot_calibration` are stored persistently but only take effect after reboot.
-* `battery` reports raw ADC value, calculated voltage, and USB/serial status.
+* `battery` reports raw ADC value, smoothed voltage, `battery_percent`, `battery_state`, and USB/serial status.
 * `sensor` reports MPU/DMP status and both configured and active sensor ranges.
 * `timing` reports `FastLED` FPS, loop/work timings, frame budget, and sample count in microseconds.
 * `timing reset` clears the timing statistics (`avg`, `max`, `samples`) so patterns or changes can be compared directly.
