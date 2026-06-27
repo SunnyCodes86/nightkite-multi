@@ -33,7 +33,7 @@ The NightKite Multi lighting system offers the following core features:
 - **Brightness Levels:**  
   Six selectable brightness levels (95 → 255 in steps of 32), which also affect battery life.
 - **Animation Patterns:**  
-  22 predefined animation modes to customize the kite’s appearance (each affects runtime differently).
+  27 predefined animation modes, including five experimental V2 audio-sync patterns (each affects runtime differently).
 - **Autoplay:**  
   Optional automatic cycling through enabled patterns with a configurable global interval.
 - **Battery Indicator:**  
@@ -47,7 +47,7 @@ The NightKite Multi lighting system offers the following core features:
 
 ### 1.1. Animation Patterns in Detail
 
-The NightKite Multi (v3.0) includes 22 predefined animation patterns that can be changed with a double-click.  
+The current NightKite Multi firmware includes 27 predefined animation patterns that can be changed with a double-click.
 After powering on and calibration, the controller starts with the last used pattern and brightness level.  
 On first startup: **Pattern ID 1**, **Brightness 95**.
 
@@ -75,6 +75,15 @@ On first startup: **Pattern ID 1**, **Brightness 95**.
 20. **Pride Yaw:** Smooth, saturated flowing rainbow bands with yaw-based hue offset and motion-dependent pace.
 21. **Confetti Jerk:** Calm glow with bursts of bright confetti when the kite gets sharp motion impulses.
 22. **Center Ripple:** Clear ripple waves starting from the middle and running outward after motion impulses.
+23. **Audio Pulse Angle Color:** A synchronized full-strip pulse; energy and bass drive brightness while yaw/pitch set local color.
+24. **Audio Spectrum Ribbon:** A phase-synchronized ribbon combining a bass glow, mid wave, and treble highlights.
+25. **Audio Beat Ripples:** Beat- and bass-driven rings travel outward from the center of each strip.
+26. **Audio Band Comets:** Bass, mid, and treble drive three differently colored synchronized comets.
+27. **Audio Beat Mosaic:** Beat phase and frequency bands switch a synchronized tile pattern while local motion shifts its colors.
+
+Patterns 23 through 27 need V2 audio beacons for live audio response. With V1 or missing V2 data, they continue with a smooth visible fallback.
+
+**Audio-sync hardware test:** Put the controller in follower mode with the same sync group as the Cardputer, run `enable_pattern 23,24,25,26,27` for an older saved pattern mask, and start `V2 Mic Full` on the Cardputer. `NK4 seq=20 cmd=audio_sync_status` and `NK4 seq=10 cmd=get section=sync` should show `audio_valid=1`, `last_beacon_version=2`, increasing `scan_decode_v2`, `sync_locked=1`, and `scan_crc_fail=0`.
 
 ---
 
@@ -109,7 +118,7 @@ The controller has two buttons: **left** and **right**.
 The right button is a **multi-function control**:
 
 - **Change Pattern / Animation (double-click):**  
-  → Cycles through the 22 available animation patterns.
+  → Cycles through the next enabled animation pattern.
 - **Toggle Autoplay (double-click while the battery display is active):**  
   → Turns autoplay on or off globally.
 - **Change Brightness (short press):**  
@@ -148,7 +157,7 @@ As soon as an active USB serial connection exists, the CLI is available.
 - Show current values: `show`
 - Read single value: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`, `get autoplay`, `get autoplay_interval`
 - Set single value:
-  - `set pattern <1..22>`
+  - `set pattern <1..27>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
   - `set smoothing <1..512>`
@@ -159,10 +168,10 @@ As soon as an active USB serial connection exists, the CLI is available.
   - `set autoplay_interval <1..300>`
 - Pattern selection:
   - `patterns`
-  - `enable_pattern <1..22[,id...]>`
-  - `disable_pattern <1..22[,id...]>`
-  - `invert_pattern <1..22[,id...]>`
-  - `normal_pattern <1..22[,id...]>`
+  - `enable_pattern <1..27[,id...]>`
+  - `disable_pattern <1..27[,id...]>`
+  - `invert_pattern <1..27[,id...]>`
+  - `normal_pattern <1..27[,id...]>`
 - Diagnostics:
   - `battery`
   - `sensor`

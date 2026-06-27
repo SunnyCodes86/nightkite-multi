@@ -9,7 +9,7 @@ Dieses Projekt realisiert eine dynamische LED-Beleuchtung für Lenkdrachen, die 
 ### Features
 
 * Helligkeit in 6 Stufen (95 → 255 in Schritten von 32) einstellbar – beeinflusst die Akkulaufzeit
-* 22 Patterns/Animationen, teilweise bewegungsabhängig
+* 27 Patterns/Animationen, davon fünf experimentelle V2-Audio-Sync-Patterns
 * Autoplay zum automatischen Durchschalten durch aktivierte Pattern mit global einstellbarem Intervall
 * Ladestandsanzeige über das LED-Band inkl. Ladefortschritt während USB-Verbindung
 * Persistente Konfiguration in EEPROM: Pattern, Helligkeit, Strip-Länge, Motion-Smoothing, Sensor-Range, Boot-Kalibrierung, aktivierte/invertierte Pattern, Autoplay und MPU-Offsets
@@ -69,7 +69,7 @@ Der Controller verfügt über zwei Tasten:
 
 * **Linker Button:** Schaltet den Controller ein und aus.
 * **Rechter Button:** Hat mehrere Funktionen:
-    * **Doppelklick (2x kurz hintereinander):** Schaltet im normalen Betrieb zyklisch durch die 22 Animationsmuster.
+    * **Doppelklick (2x kurz hintereinander):** Schaltet im normalen Betrieb zyklisch durch die aktivierten Animationsmuster.
     * **Kurz drücken (Shortpress):** Nur in der Akkuanzeige. Schaltet durch die 6 Helligkeitsstufen (95 → 127 → 159 → 191 → 223 → 255 → 95).
     * **Gedrückt halten (Longpress):** Öffnet die Akkuanzeige. Bis zu fünf LEDs dienen als Balkenanzeige; auf dem zweiten Strip blinkt eine blaue Markierung, gelbe LEDs zeigen die Helligkeitsstufe, und zwei weitere Status-LEDs zeigen Autoplay (`grün/grün` = an, `rot/rot` = aus).
     * **Doppelklick in der Akkuanzeige:** Schaltet Autoplay global ein oder aus.
@@ -127,7 +127,7 @@ help
 show
 get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration>
 get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|autoplay|autoplay_interval|enabled_patterns|inverted_patterns>
-set pattern <1..22>
+set pattern <1..27>
 set brightness <95|127|159|191|223|255>
 set strip_length <10..35>
 set smoothing <1..512>
@@ -137,10 +137,10 @@ set boot_calibration <off|quick>
 set autoplay <on|off>
 set autoplay_interval <1..300>
 patterns
-enable_pattern <1..22[,id...]>
-disable_pattern <1..22[,id...]>
-invert_pattern <1..22[,id...]>
-normal_pattern <1..22[,id...]>
+enable_pattern <1..27[,id...]>
+disable_pattern <1..27[,id...]>
+invert_pattern <1..27[,id...]>
+normal_pattern <1..27[,id...]>
 battery
 sensor
 timing [reset]
@@ -209,7 +209,7 @@ NK4 seq=22 cmd=set sync_enabled=1 sync_group=1 sync_role=master
 NK4 seq=23 cmd=set wireless_profile=long_range
 NK4 seq=24 cmd=set play_mode=sync
 NK4 seq=25 cmd=set strip_length=25 smoothing=100
-NK4 seq=26 cmd=set enabled_mask=0x003FFFFF inverted_mask=0x00000000
+NK4 seq=26 cmd=set enabled_mask=0x07FFFFFF inverted_mask=0x00000000
 NK4 seq=30 cmd=save
 NK4 seq=40 cmd=patterns
 NK4 seq=41 cmd=battery
@@ -228,9 +228,11 @@ Die 4.0-Config erweitert die bestehende EEPROM-Konfiguration ohne die alten Adre
 
 PlayMode ist jetzt als Steuerlogik mit `manual`, `autoplay` und `sync` angebunden. `manual` bleibt lokal auf dem aktuellen Pattern, `autoplay` nutzt das bestehende Autoplay-Verhalten, und `sync` bleibt lokal lauffaehig, auch wenn noch kein Funkmodul aktiv ist. Im Sync-Master-Modus kann `autoplay_enabled=1` genutzt werden: der Master wechselt dann automatisch durch die aktivierten Patterns und Follower uebernehmen Pattern und Helligkeit ueber die Sync-Beacons. Sync-Follower fuehren im Sync-Modus kein eigenes Autoplay aus, auch wenn `autoplay_enabled=1` gespeichert ist. Im Battery-View schaltet der vorhandene Mode-Button-Zyklus defensiv `manual -> autoplay -> sync -> manual`; der normale Pattern-Wechsel ausserhalb des Battery-Views bleibt erhalten. Die Status-Farben sind blau fuer manual, gruen fuer autoplay, cyan fuer sync follower, magenta fuer sync master und rot blinkend fuer sync error/no master. `NK4 cmd=test indicator=play_modes` zeigt diese Farben nacheinander auf dem Strip.
 
-`SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt lokale Sync-Zustaende, geplante lokale Starts, Pattern, Helligkeit, Phase und Pattern-Zeit. `sync_arm`, `sync_status` und `sync_cancel` funktionieren lokal und loesen keine direkten EEPROM-Schreibvorgaenge aus; automatische Config-Saves werden waehrend aktivem lokalen Sync-Timing zurueckgestellt. Das experimentelle Sync-Beacon-V1-Modell uebertraegt Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC. Follower akzeptieren zusaetzlich V2-Beacons mit Energy, Bass, Mid, Treble und Confidence. Die V2-Audiodaten werden nur als kurzlebiger Runtime-Status gespeichert und beeinflussen noch keine Patterns; Mikrofon-, FFT- und Beat-Analyse sind nicht Bestandteil der Firmware. Es werden keine LED-Frames ueber Funk gestreamt.
+`SyncEngine` und `PatternClock` verwalten in diesem Alpha-Schritt lokale Sync-Zustaende, geplante lokale Starts, Pattern, Helligkeit, Phase und Pattern-Zeit. `sync_arm`, `sync_status` und `sync_cancel` funktionieren lokal und loesen keine direkten EEPROM-Schreibvorgaenge aus; automatische Config-Saves werden waehrend aktivem lokalen Sync-Timing zurueckgestellt. Das experimentelle Sync-Beacon-V1-Modell uebertraegt Group, Flags, Sequenz, Pattern, Helligkeit, Phase, Beat und CRC. Follower akzeptieren zusaetzlich V2-Beacons mit Energy, Bass, Mid, Treble und Confidence. Die V2-Audiodaten werden als kurzlebiger Runtime-Status gespeichert und steuern die Patterns 23 bis 27; die Audioanalyse selbst findet im Cardputer statt. Es werden keine LED-Frames ueber Funk gestreamt.
 
-Sync-Timing ist ueber NK4 diagnostizierbar. `sync_status` und `get section=sync` melden u. a. `last_beacon_pattern`, `last_beacon_seq`, `last_applied_seq`, `phase_ms`, `beacon_phase_ms`, `sync_apply_count`, `sync_apply_skipped`, `sync_apply_reason`, `pattern_change_count`, `last_pattern_change_latency_ms`, `sync_ready_pattern` und `partial_sync_pattern`. `patterns` und `get section=patterns` enthalten zusaetzlich `sync_ready_mask`, `partial_sync_mask` und `local_reactive_mask`. Pattern 1 `rainbow` ist aktuell der reine sync-ready Kandidat. Die Patterns 4 `runner_fixed`, 7 `heartbeat`, 8 `ping_pong`, 10 `breath_storm`, 15 `palette_beat_motion`, 16 `pacifica_kite`, 19 `noise_ring` und 20 `pride_yaw` nutzen PatternClock fuer ihre Animationsphase, behalten aber lokale Motion-/Yaw-/Farbanteile und sind deshalb partial-sync. Die Patterns 2, 3, 5, 6, 9, 11, 12, 13, 14, 17, 18, 21 und 22 bleiben local-reactive/TODO; sie folgen Pattern und Helligkeit, duerfen visuell aber pro Controller unterschiedlich reagieren.
+Sync-Timing ist ueber NK4 diagnostizierbar. `sync_status` und `get section=sync` melden u. a. `last_beacon_pattern`, `last_beacon_seq`, `last_applied_seq`, `phase_ms`, `beacon_phase_ms`, `sync_apply_count`, `sync_apply_skipped`, `sync_apply_reason`, `pattern_change_count`, `last_pattern_change_latency_ms`, `sync_ready_pattern` und `partial_sync_pattern`. `patterns` und `get section=patterns` enthalten zusaetzlich `sync_ready_mask`, `partial_sync_mask` und `local_reactive_mask`. Pattern 1 `rainbow` ist aktuell der reine sync-ready Kandidat. Die Patterns 4 `runner_fixed`, 7 `heartbeat`, 8 `ping_pong`, 10 `breath_storm`, 15 `palette_beat_motion`, 16 `pacifica_kite`, 19 `noise_ring`, 20 `pride_yaw` sowie 23 bis 27 nutzen synchronisierte Zeit- oder Audiowerte, behalten aber lokale Motion-/Yaw-/Farbanteile und sind deshalb partial-sync. Die Patterns 2, 3, 5, 6, 9, 11, 12, 13, 14, 17, 18, 21 und 22 bleiben local-reactive/TODO; sie folgen Pattern und Helligkeit, duerfen visuell aber pro Controller unterschiedlich reagieren.
+
+Die neuen Audio-Patterns sind `audio_pulse_angle_color` (23), `audio_spectrum_ribbon` (24), `audio_beat_ripples` (25), `audio_band_comets` (26) und `audio_beat_mosaic` (27). Energy und Frequenzbaender bestimmen Helligkeit, Form und Akzente; Beat, BeatMs und Phase halten die Bewegung synchron. Yaw, Pitch oder lokale Bewegung beeinflussen weiterhin die Farbe. Bei V1 oder nach dem 1500-ms-Audio-Timeout wechseln alle fünf Patterns weich auf einen ruhigen lokalen Fallback und bleiben sichtbar. Werkseinstellungen aktivieren alle 27 Patterns. Bereits gespeicherte benutzerdefinierte Masken bleiben unveraendert; die neuen IDs muessen dort bei Bedarf mit `enable_pattern 23,24,25,26,27` aktiviert und anschliessend gespeichert werden.
 
 Zusaetzlich zu den Basis-Kommandos sind maschinenlesbare Diagnose- und Config-Kommandos verfuegbar: `battery`, `sensor`, `timing`, `offsets`, `get section=config`, `set strip_length`, `set smoothing`, `set accel_range`, `set gyro_range`, `set boot_calibration`, `set boot_mode`, `set enabled_mask`, `set inverted_mask`, `enable_pattern`, `disable_pattern`, `invert_pattern` und `normal_pattern`. Ungueltige Werte werden mit standardisierten `NK4 ... err code=...` Antworten abgewiesen.
 
@@ -282,6 +284,20 @@ Experimenteller Sync-Beacon-Radio:
 - `follower`: wenn `play_mode=sync`, `sync_enabled=1` und `wireless_enabled=1`, scannt der Controller nach gueltigen NightKite-Beacons derselben `sync_group`. Beacons mit falscher Gruppe oder CRC werden ignoriert und gezaehlt.
 
 Der Controller-Master sendet weiterhin unveraendert V1. Der Follower-Decoder akzeptiert V1 und V2; beide Versionen speisen dieselben bestehenden Sync-Basisdaten ein. V2 ist 22 Byte gross, hat 24 Byte Manufacturer Data inklusive Company ID und passt damit in ein 29-Byte-Legacy-Advertising-Paket. Die Manufacturer-Data-Signatur beginnt mit `FFFF4E4B02...`. Nach 1500 ms ohne gueltiges V2-Paket wird nur `audio_valid=0`; die normale Beacon-Synchronisation laeuft weiter.
+
+Hardwaretest der Audio-Patterns:
+
+1. Controller mit dem BLE/RM2-Build als Follower in dieselbe Sync-Gruppe wie den Cardputer setzen.
+2. Bei einer bereits gespeicherten alten Pattern-Maske einmal `enable_pattern 23,24,25,26,27` und `save` ausfuehren.
+3. Auf dem Cardputer `V2 Mic Full` starten und nacheinander Pattern 23 bis 27 senden.
+4. Auf dem Controller pruefen:
+
+```text
+NK4 seq=20 cmd=audio_sync_status
+NK4 seq=10 cmd=get section=sync
+```
+
+Erwartet werden `audio_valid=1`, `last_beacon_version=2`, steigendes `scan_decode_v2`, `sync_locked=1`, `scan_crc_fail=0` und sichtbare Reaktionen auf Pegel, Baender und Beatphase. Der Test erfordert einen Cardputer/NightKite-Link-Build mit V2-Audio-Sync-Unterstuetzung.
 
 GATT/NK4 bleibt der Konfigurations- und Diagnosepfad. Der Beacon-Radio nutzt keine GATT-Kommandos fuer Echtzeit-Sync und sendet keine Acknowledgements. Wenn ein BLE-GATT-Client verbunden ist, hat der Config/GATT-Modus Vorrang und der Beacon-Radio meldet `radio_mode=gatt`; USB bleibt immer als Fallback verfuegbar. Im Beacon-Master-Modus kontrolliert der Sync-Radio das Advertising und das normale `NK-...`-GATT-Advertising wird unterdrueckt. Ein BLE-Scanner muss den Controller in diesem Modus nicht als normales GATT-Geraet anzeigen; sichtbar sein sollte ein namenloses bzw. non-connectable Advertising mit Manufacturer Data `FFFF4E4B01...` oder als Rohpaket etwa `02010614FFFFFF4E4B01...`.
 
@@ -335,7 +351,7 @@ This project implements dynamic LED lighting for kites that reacts to their move
 ### Features
 
 * Six brightness levels (95 → 255 in steps of 32) impact the battery runtime
-* 22 patterns/animations with mirrored dual-strip output
+* 27 patterns/animations, including five experimental V2 audio-sync patterns
 * Autoplay for automatic cycling through enabled patterns with a configurable global interval
 * Battery level indicator on the LED strip including charging progress while on USB power
 * Persistent EEPROM configuration for pattern, brightness, strip length, motion smoothing, sensor ranges, boot calibration, enabled/inverted patterns, autoplay, and MPU offsets
@@ -395,7 +411,7 @@ The controller has two buttons:
 
 * **Left Button:** Turns the controller on and off.
 * **Right Button:** Provides multiple functions:
-    * **Double click (two quick presses):** In normal operation, cycles through the 22 animation patterns.
+    * **Double click (two quick presses):** In normal operation, cycles through the enabled animation patterns.
     * **Short press:** Only in battery display mode. Cycles through the six brightness levels (95 → 127 → 159 → 191 → 223 → 255 → 95).
     * **Long press:** Opens the battery display. Up to five LEDs form a bar indicator; on the second strip a blue marker LED blinks, yellow LEDs show brightness level, and two additional status LEDs show autoplay (`green/green` = on, `red/red` = off).
     * **Double click in battery display:** Toggles autoplay globally.
@@ -452,7 +468,7 @@ Available commands:
 help
 show
 get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|autoplay|autoplay_interval|enabled_patterns|inverted_patterns>
-set pattern <1..22>
+set pattern <1..27>
 set brightness <95|127|159|191|223|255>
 set strip_length <10..35>
 set smoothing <1..512>
@@ -462,10 +478,10 @@ set boot_calibration <off|quick>
 set autoplay <on|off>
 set autoplay_interval <1..300>
 patterns
-enable_pattern <1..22[,id...]>
-disable_pattern <1..22[,id...]>
-invert_pattern <1..22[,id...]>
-normal_pattern <1..22[,id...]>
+enable_pattern <1..27[,id...]>
+disable_pattern <1..27[,id...]>
+invert_pattern <1..27[,id...]>
+normal_pattern <1..27[,id...]>
 battery
 sensor
 timing [reset]

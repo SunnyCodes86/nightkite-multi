@@ -31,6 +31,7 @@
 #include <math.h> // Math library
 #include <string.h>
 #include "hardware/watchdog.h"
+#include "app/AudioPatternMath.h"
 #include "app/Battery.h"
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
@@ -315,8 +316,8 @@ const int DEFAULT_Z_ACCEL_OFFSET = 3687;
 const int DEFAULT_X_GYRO_OFFSET = 111;
 const int DEFAULT_Y_GYRO_OFFSET = -6;
 const int DEFAULT_Z_GYRO_OFFSET = 34;
-const uint8_t FIRST_PATTERN_ID = 1;
-const uint8_t LAST_PATTERN_ID = 22;
+const uint8_t FIRST_PATTERN_ID = NK_PATTERN_MIN_ID;
+const uint8_t LAST_PATTERN_ID = NK_PATTERN_MAX_ID;
 const uint8_t PATTERN_COUNT = LAST_PATTERN_ID - FIRST_PATTERN_ID + 1;
 const uint32_t ALL_ENABLED_PATTERN_MASK = (1ul << PATTERN_COUNT) - 1ul;
 const uint32_t ALL_INVERTED_PATTERN_MASK = (1ul << PATTERN_COUNT) - 1ul;
@@ -684,6 +685,98 @@ inline uint32_t smoothedMotion() {
   uint32_t s = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
   myAccel.add(s);
   return myAccel.get();
+}
+
+struct AudioPatternFrame
+{
+  bool beat;
+  uint8_t phase8;
+  uint8_t beatPulse;
+  uint8_t energy;
+  uint8_t bass;
+  uint8_t mid;
+  uint8_t treble;
+  uint8_t confidence;
+};
+
+AudioPatternFrame buildAudioPatternFrame()
+{
+  static bool initialized = false;
+  static uint8_t energy = 0;
+  static uint8_t bass = 0;
+  static uint8_t mid = 0;
+  static uint8_t treble = 0;
+  static uint8_t confidence = 0;
+
+  const unsigned long now = millis();
+  const AudioSyncState state = syncBeaconAudioState();
+  const uint16_t beatMs = state.valid
+      ? sanitizeAudioPatternBeatMs(state.beatMs)
+      : AUDIO_PATTERN_DEFAULT_BEAT_MS;
+  const uint32_t phaseMs = state.valid
+      ? state.phaseMs + (uint32_t)(now - state.lastUpdateMs)
+      : patternClock.phaseMs();
+  const uint8_t phase8 = audioPatternPhase8(phaseMs, beatMs);
+  const uint8_t beatPulse = audioPatternBeatPulse8(phaseMs, beatMs);
+
+  // V1 or expired V2 data falls back to a quiet synthetic spectrum. This
+  // keeps every audio pattern moving and visible without pretending that
+  // audio confidence exists.
+  const uint8_t targetEnergy = state.valid
+      ? state.energy
+      : qadd8(52, scale8(sin8(phase8), 54));
+  const uint8_t targetBass = state.valid
+      ? state.bass
+      : qadd8(40, scale8(beatPulse, 80));
+  const uint8_t targetMid = state.valid
+      ? state.mid
+      : qadd8(48, scale8(sin8(phase8 + 64), 58));
+  const uint8_t targetTreble = state.valid
+      ? state.treble
+      : qadd8(30, scale8(sin8((uint8_t)(phase8 * 2U) + 96), 42));
+  const uint8_t targetConfidence = state.valid ? state.confidence : 0;
+
+  if (!initialized)
+  {
+    energy = targetEnergy;
+    bass = targetBass;
+    mid = targetMid;
+    treble = targetTreble;
+    confidence = targetConfidence;
+    initialized = true;
+  }
+  else
+  {
+    const uint8_t blendAmount = state.valid ? 64 : 18;
+    energy = lerp8by8(energy, targetEnergy, blendAmount);
+    bass = lerp8by8(bass, targetBass, blendAmount);
+    mid = lerp8by8(mid, targetMid, blendAmount);
+    treble = lerp8by8(treble, targetTreble, blendAmount);
+    confidence = lerp8by8(confidence, targetConfidence, blendAmount);
+  }
+
+  AudioPatternFrame frame;
+  frame.beat = state.valid && state.beat && (now - state.lastUpdateMs) < 180;
+  frame.phase8 = phase8;
+  frame.beatPulse = beatPulse;
+  frame.energy = energy;
+  frame.bass = bass;
+  frame.mid = mid;
+  frame.treble = treble;
+  frame.confidence = confidence;
+  return frame;
+}
+
+uint8_t audioPatternLocalHue()
+{
+  const int yawDegrees = constrain((int)(ypr[0] * 180.0f / M_PI), -180, 180);
+  return (uint8_t)map(yawDegrees, -180, 180, 0, 255);
+}
+
+int audioPatternPitchOffset()
+{
+  const int pitchDegrees = constrain((int)(ypr[1] * 180.0f / M_PI), -90, 90);
+  return map(pitchDegrees, -90, 90, -28, 28);
 }
 
 bool isValidBrightnessLevel(int value)
@@ -1327,6 +1420,11 @@ int patternSyncClass(uint8_t patternId)
     case 16:
     case 19:
     case 20:
+    case 23:
+    case 24:
+    case 25:
+    case 26:
+    case 27:
       return PATTERN_SYNC_PARTIAL;
     case 2:
     case 3:
@@ -4085,7 +4183,7 @@ void printCliHelp()
   Serial.println("  help");
   Serial.println("  show");
   Serial.println("  get <pattern|brightness|strip_length|smoothing|accel_range|gyro_range|boot_calibration|autoplay|autoplay_interval|enabled_patterns|inverted_patterns>");
-  Serial.println("  set pattern <1..22>");
+  Serial.println("  set pattern <1..27>");
   Serial.println("  set brightness <95|127|159|191|223|255>");
   Serial.println("  set strip_length <10..35>");
   Serial.println("  set smoothing <1..512>           (takes effect after reboot)");
@@ -4095,10 +4193,10 @@ void printCliHelp()
   Serial.println("  set autoplay <on|off>");
   Serial.println("  set autoplay_interval <1..300>");
   Serial.println("  patterns");
-  Serial.println("  enable_pattern <1..22[,id...]>");
-  Serial.println("  disable_pattern <1..22[,id...]>");
-  Serial.println("  invert_pattern <1..22[,id...]>");
-  Serial.println("  normal_pattern <1..22[,id...]>");
+  Serial.println("  enable_pattern <1..27[,id...]>");
+  Serial.println("  disable_pattern <1..27[,id...]>");
+  Serial.println("  invert_pattern <1..27[,id...]>");
+  Serial.println("  normal_pattern <1..27[,id...]>");
   Serial.println("  battery");
   Serial.println("  sensor");
   Serial.println("  timing [reset]");
@@ -4219,7 +4317,7 @@ void onCliSet(cmd* cPtr)
   {
     if (!isValidPatternId(value))
     {
-      Serial.println("ERR pattern range 1..22");
+      Serial.println("ERR pattern range 1..27");
       return;
     }
     switchToPattern((uint8_t)value, true, "cli");
@@ -4539,7 +4637,7 @@ void onCliEnablePattern(cmd* cPtr)
   uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..22");
+    Serial.println("ERR pattern list must contain IDs in range 1..27");
     return;
   }
 
@@ -4556,7 +4654,7 @@ void onCliDisablePattern(cmd* cPtr)
   uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..22");
+    Serial.println("ERR pattern list must contain IDs in range 1..27");
     return;
   }
 
@@ -4578,7 +4676,7 @@ void onCliInvertPattern(cmd* cPtr)
   uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..22");
+    Serial.println("ERR pattern list must contain IDs in range 1..27");
     return;
   }
 
@@ -4594,7 +4692,7 @@ void onCliNormalPattern(cmd* cPtr)
   uint32_t mask = 0;
   if (!parsePatternListMask(cmd.getArgument("pattern").getValue(), &mask))
   {
-    Serial.println("ERR pattern list must contain IDs in range 1..22");
+    Serial.println("ERR pattern list must contain IDs in range 1..27");
     return;
   }
 
@@ -5758,6 +5856,206 @@ void running22()
   }
 }
 
+void RunEntry23()
+{
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  currentPattern = 23;
+  batteryViewActive = false;
+}
+
+void running23()
+{
+  // Audio Pulse Angle Color: beat phase drives the global pulse, energy sets
+  // its body, bass adds the flash, and local yaw/pitch select the color.
+  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const uint8_t baseHue = audioPatternLocalHue();
+  const int pitchOffset = audioPatternPitchOffset();
+  const uint8_t baseValue = qadd8(22, scale8(audio.energy, 128));
+  uint8_t flash = scale8(audio.beatPulse, qadd8(72, scale8(audio.bass, 156)));
+  if (audio.beat)
+  {
+    flash = qadd8(flash, 48);
+  }
+
+  for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
+  {
+    for (int i = 0; i < NUM_LEDS; ++i)
+    {
+      const uint8_t spatial = sin8((uint8_t)(i * 10 + audio.phase8));
+      const uint8_t value = qadd8(baseValue, scale8(flash, qadd8(176, scale8(spatial, 78))));
+      const uint8_t hue = baseHue + pitchOffset + scale8(spatial, 22) + (stripIndex * 8);
+      const uint8_t saturation = qsub8(245, scale8(audio.energy, 44));
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 96);
+    }
+  }
+}
+
+void RunEntry24()
+{
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  currentPattern = 24;
+  batteryViewActive = false;
+}
+
+void running24()
+{
+  // Audio Spectrum Ribbon: bass is the broad glow, mid draws the traveling
+  // ribbon, treble creates narrow highlights, and energy scales the result.
+  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const uint8_t baseHue = audioPatternLocalHue();
+  const int pitchOffset = audioPatternPitchOffset();
+
+  for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
+  {
+    for (int i = 0; i < NUM_LEDS; ++i)
+    {
+      const uint8_t directionPhase = stripIndex == 0 ? audio.phase8 : (uint8_t)(255 - audio.phase8);
+      const uint8_t bassWave = sin8((uint8_t)(i * 8 - directionPhase));
+      const uint8_t midWave = sin8((uint8_t)(i * 23 + directionPhase * 2U));
+      const uint8_t trebleWave = sin8((uint8_t)(i * 49 - directionPhase * 3U));
+      const uint8_t broadGlow = scale8(scale8(bassWave, audio.bass), 104);
+      const uint8_t ribbon = scale8(scale8(midWave, audio.mid), 156);
+      const uint8_t highlight = scale8(qsub8(trebleWave, 176), qadd8(audio.treble, audio.treble));
+      const uint8_t spectrum = qadd8(qadd8(broadGlow, ribbon), highlight);
+      const uint8_t value = qadd8(18, scale8(qadd8(scale8(audio.energy, 176), spectrum), 214));
+      const uint8_t hue = baseHue + pitchOffset + scale8(midWave, 54) + scale8(trebleWave, 18);
+      const uint8_t saturation = qsub8(248, scale8(highlight, 104));
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 88);
+    }
+  }
+}
+
+void RunEntry25()
+{
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  currentPattern = 25;
+  batteryViewActive = false;
+}
+
+void running25()
+{
+  // Audio Beat Ripples: the synchronized beat phase moves rings from each
+  // strip center. Bass/energy set strength and confidence sharpens the wave.
+  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const uint8_t baseHue = audioPatternLocalHue();
+  const int pitchOffset = audioPatternPitchOffset();
+  const int center = NUM_LEDS / 2;
+  const int maxDistance = max(1, center);
+  const int ringPosition = ((int)audio.phase8 * (maxDistance + 2)) / 255;
+  const int ringWidth = audio.confidence >= 128 ? 1 : 2;
+  uint8_t ringStrength = qadd8(scale8(audio.energy, 132), scale8(audio.bass, 116));
+  ringStrength = qadd8(ringStrength, scale8(audio.beatPulse, 96));
+  if (audio.beat)
+  {
+    ringStrength = qadd8(ringStrength, 40);
+  }
+
+  for (int i = 0; i < NUM_LEDS; ++i)
+  {
+    const int distance = abs(i - center);
+    const int delta = abs(distance - ringPosition);
+    uint8_t ring = 0;
+    if (delta <= ringWidth)
+    {
+      ring = (uint8_t)map(delta, 0, ringWidth + 1, ringStrength, 0);
+    }
+    const uint8_t softWave = scale8(sin8((uint8_t)(distance * 34 - audio.phase8)), 52);
+    const uint8_t value = qadd8(qadd8(18, scale8(audio.energy, 74)), qadd8(ring, softWave));
+    const uint8_t hue = baseHue + pitchOffset + (distance * 7);
+    const CRGB target = CHSV(hue, qsub8(240, scale8(audio.confidence, 52)), value);
+    nblend(Strip[i], target, 104);
+    nblend(Strip[i + NUM_LEDS], target, 104);
+  }
+}
+
+void RunEntry26()
+{
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  currentPattern = 26;
+  batteryViewActive = false;
+}
+
+void running26()
+{
+  // Audio Band Comets: bass, mid, and treble each own a phase-locked comet.
+  // Energy lights the trail while local yaw/pitch rotate their color triad.
+  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
+  uint8_t phase = audio.phase8;
+  if (getPatternDirectionFactor(26) < 0)
+  {
+    phase = 255 - phase;
+  }
+  const int bassHead = ((uint16_t)phase * NUM_LEDS) >> 8;
+  const int midHead = ((uint16_t)(255 - phase) * NUM_LEDS) >> 8;
+  const int trebleHead = ((uint16_t)((uint8_t)(phase * 3U)) * NUM_LEDS) >> 8;
+  const uint8_t trailStep = qsub8(74, scale8(audio.confidence, 28));
+
+  for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
+  {
+    for (int i = 0; i < NUM_LEDS; ++i)
+    {
+      const int bassTrail = (i - bassHead + NUM_LEDS) % NUM_LEDS;
+      const int midTrail = (midHead - i + NUM_LEDS) % NUM_LEDS;
+      const int trebleTrail = (i - trebleHead + NUM_LEDS) % NUM_LEDS;
+      const uint8_t bassValue = scale8(audio.bass, qsub8(255, min(255, bassTrail * trailStep)));
+      const uint8_t midValue = scale8(audio.mid, qsub8(255, min(255, midTrail * trailStep)));
+      const uint8_t trebleValue = scale8(audio.treble, qsub8(255, min(255, trebleTrail * trailStep)));
+
+      CRGB target = CHSV(baseHue, 190, qadd8(12, scale8(audio.energy, 44)));
+      CRGB bassColor = CHSV(baseHue, 240, bassValue);
+      CRGB midColor = CHSV(baseHue + 86, 220, midValue);
+      CRGB trebleColor = CHSV(baseHue + 160, 150, trebleValue);
+      target += bassColor;
+      target += midColor;
+      target += trebleColor;
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, 112);
+    }
+  }
+}
+
+void RunEntry27()
+{
+  fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  currentPattern = 27;
+  batteryViewActive = false;
+}
+
+void running27()
+{
+  // Audio Beat Mosaic: phase advances deterministic tiles, the three bands
+  // select tile levels, confidence controls crispness, and local motion/yaw
+  // shift the palette without disturbing synchronization.
+  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const uint32_t localMotion = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
+  const uint8_t motionHue = (uint8_t)constrain((int)(localMotion / 180U), 0, 42);
+  const uint8_t baseHue = audioPatternLocalHue() + motionHue;
+  const int pitchOffset = audioPatternPitchOffset();
+  const uint8_t beatStep = audio.phase8 >> 6;
+  const int tileSize = max(2, NUM_LEDS / 8);
+
+  for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
+  {
+    for (int i = 0; i < NUM_LEDS; ++i)
+    {
+      const int tile = i / tileSize;
+      const uint8_t band = (uint8_t)((tile + beatStep + stripIndex) % 3);
+      const uint8_t bandValue = band == 0 ? audio.bass : (band == 1 ? audio.mid : audio.treble);
+      const uint8_t softValue = sin8((uint8_t)(i * 19 + audio.phase8 + stripIndex * 64));
+      const uint8_t bandBlend = qadd8(64, scale8(audio.confidence, 191));
+      const uint8_t texture = lerp8by8(softValue, bandValue, bandBlend);
+      const uint8_t tilePulse = ((tile + beatStep) & 1)
+          ? audio.beatPulse
+          : scale8(audio.beatPulse, 52);
+      const uint8_t value = qadd8(
+          qadd8(16, scale8(audio.energy, 92)),
+          qadd8(scale8(texture, 108), scale8(tilePulse, qadd8(48, scale8(audio.bass, 92)))));
+      const uint8_t hue = baseHue + (band * 78) + pitchOffset;
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, 226, value), 120);
+    }
+  }
+}
+
 const PatternDefinition patternDefinitions[] = {
     {1, "rainbow", RunEntry, running, NULL},
     {2, "full_color", RunEntry2, running2, NULL},
@@ -5781,7 +6079,16 @@ const PatternDefinition patternDefinitions[] = {
     {20, "pride_yaw", RunEntry20, running20, NULL},
     {21, "confetti_jerk", RunEntry21, running21, NULL},
     {22, "center_ripple", RunEntry22, running22, NULL},
+    {23, "audio_pulse_angle_color", RunEntry23, running23, NULL},
+    {24, "audio_spectrum_ribbon", RunEntry24, running24, NULL},
+    {25, "audio_beat_ripples", RunEntry25, running25, NULL},
+    {26, "audio_band_comets", RunEntry26, running26, NULL},
+    {27, "audio_beat_mosaic", RunEntry27, running27, NULL},
 };
+
+static_assert(
+    (sizeof(patternDefinitions) / sizeof(patternDefinitions[0])) == PATTERN_COUNT,
+    "Pattern registry must cover every supported pattern ID");
 
 // Look up the callbacks and display name for a pattern ID.
 const PatternDefinition* getPatternDefinition(uint8_t patternId)

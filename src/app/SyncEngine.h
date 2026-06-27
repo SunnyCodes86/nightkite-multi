@@ -2,6 +2,11 @@
 
 #include <Arduino.h>
 
+// Pattern IDs are part of the sync payload's application-level contract.
+// Keep transmitter, decoder, and local registry on the same accepted range.
+constexpr uint8_t NK_PATTERN_MIN_ID = 1;
+constexpr uint8_t NK_PATTERN_MAX_ID = 27;
+
 // Manufacturer data starts with company ID 0xFFFF in little-endian order,
 // followed by one packed beacon. Multi-byte beacon fields are little endian.
 // V1 offsets: NK[0..1], version[2], group[3], flags[4], seq[5..6],

@@ -138,7 +138,7 @@ const char* modeName(RadioMode mode)
 
 bool isValidBeaconPattern(uint8_t pattern)
 {
-  return pattern >= 1 && pattern <= 22;
+  return pattern >= NK_PATTERN_MIN_ID && pattern <= NK_PATTERN_MAX_ID;
 }
 
 bool isValidBeaconBrightness(uint8_t brightness)
@@ -359,7 +359,7 @@ bool runCodecSelftest()
   audioBeacon.groupId = 1;
   audioBeacon.flags = NK_SYNC_BEACON_FLAG_AUDIO_BEAT;
   audioBeacon.seq = 43;
-  audioBeacon.pattern = 7;
+  audioBeacon.pattern = NK_PATTERN_MAX_ID;
   audioBeacon.brightness = 159;
   audioBeacon.phaseMs = 4321;
   audioBeacon.beatMs = 500;
@@ -402,6 +402,14 @@ bool runCodecSelftest()
   }
 
   if (syncBeaconDecodeV2(reinterpret_cast<const uint8_t*>(&audioBeacon), sizeof(audioBeacon), 2, &decodedAudio) != SYNC_BEACON_DECODE_BAD_GROUP)
+  {
+    return false;
+  }
+
+  NkSyncBeaconV2 badPattern = audioBeacon;
+  badPattern.pattern = NK_PATTERN_MAX_ID + 1;
+  badPattern.crc = computeBeaconCrc(badPattern);
+  if (syncBeaconDecodeV2(reinterpret_cast<const uint8_t*>(&badPattern), sizeof(badPattern), 1, &decodedAudio) != SYNC_BEACON_DECODE_BAD_PATTERN)
   {
     return false;
   }

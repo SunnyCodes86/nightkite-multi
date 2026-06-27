@@ -33,7 +33,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 - **Helligkeitsstufen:**  
   Sechs Helligkeitsstufen (95 → 255 in Schritten von 32), beeinflussen auch die Akkulaufzeit.
 - **Animations-Muster:**  
-  22 vordefinierte Animations-Muster zur Anpassung des Erscheinungsbilds (ebenfalls Einfluss auf die Laufzeit).
+  27 vordefinierte Animations-Muster, davon fünf experimentelle V2-Audio-Sync-Patterns (ebenfalls Einfluss auf die Laufzeit).
 - **Autoplay:**  
   Optionales automatisches Durchschalten durch aktivierte Pattern mit einstellbarem globalem Intervall.
 - **Ladestandsanzeige:**  
@@ -47,7 +47,7 @@ Die NightKite Multi Beleuchtung bietet dir folgende Kernfunktionen:
 
 ### 1.1. Animations-Muster im Detail
 
-Die NightKite Multi (v3.0) verfügt über 22 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.  
+Die aktuelle NightKite-Multi-Firmware verfügt über 27 vordefinierte Animationsmuster, die per Doppelklick gewechselt werden.
 Nach dem Einschalten (und der Kalibrierung) startet der Controller mit dem zuletzt verwendeten Muster und der zuletzt gewählten Helligkeit.  
 Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
 
@@ -75,6 +75,15 @@ Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
 20. **Pride Yaw:** Weiche, satte Farbströme mit Yaw-abhängigem Farbversatz und bewegungsabhängigem Tempo.
 21. **Confetti Jerk:** Ruhiger Grundschein mit hellen Konfetti-Ausbrüchen bei harten Bewegungsimpulsen.
 22. **Center Ripple:** Klar erkennbare Wellen laufen nach Bewegungsimpulsen von der Mitte nach außen.
+23. **Audio Pulse Angle Color:** Synchroner Ganzband-Puls; Energy und Bass steuern Helligkeit und Flash, Yaw/Pitch die lokale Farbe.
+24. **Audio Spectrum Ribbon:** Ein phasensynchrones Band kombiniert Bass-Grundglühen, Mittenwelle und Höhenakzente.
+25. **Audio Beat Ripples:** Beat- und Bass-gesteuerte Ringe laufen synchron von der Strip-Mitte nach außen.
+26. **Audio Band Comets:** Bass, Mitten und Höhen treiben drei unterschiedlich gefärbte, synchron laufende Kometen.
+27. **Audio Beat Mosaic:** Beatphase und Frequenzbänder schalten ein synchrones Kachelmuster; lokale Bewegung verschiebt die Farben.
+
+Die Patterns 23 bis 27 benötigen für echte Audioreaktion V2-Audio-Beacons. Bei V1 oder fehlenden V2-Daten laufen sie mit einem weichen, sichtbaren Fallback weiter.
+
+**Audio-Sync-Hardwaretest:** Controller als Follower in dieselbe Sync-Gruppe wie den Cardputer setzen, bei alten Pattern-Masken `enable_pattern 23,24,25,26,27` ausführen und am Cardputer `V2 Mic Full` starten. Mit `NK4 seq=20 cmd=audio_sync_status` und `NK4 seq=10 cmd=get section=sync` müssen unter anderem `audio_valid=1`, `last_beacon_version=2`, steigendes `scan_decode_v2`, `sync_locked=1` und `scan_crc_fail=0` sichtbar sein.
 
 ---
 
@@ -109,7 +118,7 @@ Der Controller besitzt zwei Tasten: **links** und **rechts**.
 Der rechte Button ist ein **Multifunktions-Button**:
 
 - **Muster / Animation wechseln (Doppelklick):**  
-  → Zyklischer Wechsel zum nächsten der 22 Muster.
+  → Zyklischer Wechsel zum nächsten aktivierten Muster.
 - **Autoplay umschalten (Doppelklick in der Akkuanzeige):**  
   → Schaltet Autoplay global ein oder aus.
 - **Helligkeitsstufe ändern (kurz drücken):**  
@@ -148,7 +157,7 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
 - Aktuelle Werte: `show`
 - Einzelwert lesen: `get pattern`, `get brightness`, `get strip_length`, `get smoothing`, `get accel_range`, `get gyro_range`, `get boot_calibration`, `get enabled_patterns`, `get inverted_patterns`, `get autoplay`, `get autoplay_interval`
 - Einzelwert setzen:
-  - `set pattern <1..22>`
+  - `set pattern <1..27>`
   - `set brightness <95|127|159|191|223|255>`
   - `set strip_length <10..35>`
   - `set smoothing <1..512>`
@@ -159,10 +168,10 @@ Sobald eine aktive serielle USB-Verbindung besteht, ist die CLI verfügbar.
   - `set autoplay_interval <1..300>`
 - Pattern-Auswahl:
   - `patterns`
-  - `enable_pattern <1..22[,id...]>`
-  - `disable_pattern <1..22[,id...]>`
-  - `invert_pattern <1..22[,id...]>`
-  - `normal_pattern <1..22[,id...]>`
+  - `enable_pattern <1..27[,id...]>`
+  - `disable_pattern <1..27[,id...]>`
+  - `invert_pattern <1..27[,id...]>`
+  - `normal_pattern <1..27[,id...]>`
 - Diagnose:
   - `battery`
   - `sensor`
