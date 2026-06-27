@@ -60,6 +60,8 @@ unsigned long scanReports = 0;
 unsigned long scanMfgReports = 0;
 unsigned long scanNkCandidates = 0;
 unsigned long scanDecodeOk = 0;
+unsigned long scanDecodeV1 = 0;
+unsigned long scanDecodeV2 = 0;
 unsigned long scanDecodeFail = 0;
 unsigned long scanCrcFail = 0;
 unsigned long scanGroupMismatch = 0;
@@ -75,6 +77,7 @@ uint8_t scanLastAdType = 0;
 uint16_t scanLastCompany = 0;
 uint8_t scanLastGroup = 0;
 uint8_t scanLastVersion = 0;
+uint8_t lastBeaconVersion = 0;
 const char* lastError = "disabled";
 const char* scanLastError = "none";
 const char* scanLastCandidateReason = "none";
@@ -82,6 +85,7 @@ char advMfgHead[HEX_HEAD_BUFFER_SIZE] = "none";
 char scanLastMfgHead[HEX_HEAD_BUFFER_SIZE] = "none";
 NkSyncBeaconV1 pendingBeacon;
 bool pendingBeaconAvailable = false;
+AudioSyncState audioSyncState;
 
 void formatHexBytes(const uint8_t* data, size_t len, char* output, size_t outputSize)
 {
@@ -169,9 +173,87 @@ uint16_t crc16Ccitt(const uint8_t* data, size_t len)
 
 uint16_t computeBeaconCrc(const NkSyncBeaconV1& beacon)
 {
-  NkSyncBeaconV1 copy = beacon;
-  copy.crc = 0;
-  return crc16Ccitt((const uint8_t*)&copy, sizeof(copy));
+  uint8_t bytes[NK_SYNC_BEACON_V1_PACKET_SIZE] = {0};
+  bytes[0] = beacon.magic0;
+  bytes[1] = beacon.magic1;
+  bytes[2] = beacon.version;
+  bytes[3] = beacon.groupId;
+  bytes[4] = beacon.flags;
+  bytes[5] = (uint8_t)(beacon.seq & 0xFF);
+  bytes[6] = (uint8_t)(beacon.seq >> 8);
+  bytes[7] = beacon.pattern;
+  bytes[8] = beacon.brightness;
+  bytes[9] = (uint8_t)(beacon.phaseMs & 0xFF);
+  bytes[10] = (uint8_t)((beacon.phaseMs >> 8) & 0xFF);
+  bytes[11] = (uint8_t)((beacon.phaseMs >> 16) & 0xFF);
+  bytes[12] = (uint8_t)(beacon.phaseMs >> 24);
+  bytes[13] = (uint8_t)(beacon.beatMs & 0xFF);
+  bytes[14] = (uint8_t)(beacon.beatMs >> 8);
+  return crc16Ccitt(bytes, sizeof(bytes));
+}
+
+uint16_t computeBeaconCrc(const NkSyncBeaconV2& beacon)
+{
+  uint8_t bytes[NK_SYNC_BEACON_V2_PACKET_SIZE] = {0};
+  bytes[0] = beacon.magic0;
+  bytes[1] = beacon.magic1;
+  bytes[2] = beacon.version;
+  bytes[3] = beacon.groupId;
+  bytes[4] = beacon.flags;
+  bytes[5] = (uint8_t)(beacon.seq & 0xFF);
+  bytes[6] = (uint8_t)(beacon.seq >> 8);
+  bytes[7] = beacon.pattern;
+  bytes[8] = beacon.brightness;
+  bytes[9] = (uint8_t)(beacon.phaseMs & 0xFF);
+  bytes[10] = (uint8_t)((beacon.phaseMs >> 8) & 0xFF);
+  bytes[11] = (uint8_t)((beacon.phaseMs >> 16) & 0xFF);
+  bytes[12] = (uint8_t)(beacon.phaseMs >> 24);
+  bytes[13] = (uint8_t)(beacon.beatMs & 0xFF);
+  bytes[14] = (uint8_t)(beacon.beatMs >> 8);
+  bytes[15] = beacon.audioEnergy;
+  bytes[16] = beacon.audioBass;
+  bytes[17] = beacon.audioMid;
+  bytes[18] = beacon.audioTreble;
+  bytes[19] = beacon.audioConfidence;
+  return crc16Ccitt(bytes, sizeof(bytes));
+}
+
+void copyV2SyncBasis(const NkSyncBeaconV2& source, NkSyncBeaconV1* target)
+{
+  target->magic0 = source.magic0;
+  target->magic1 = source.magic1;
+  target->version = source.version;
+  target->groupId = source.groupId;
+  target->flags = source.flags;
+  target->seq = source.seq;
+  target->pattern = source.pattern;
+  target->brightness = source.brightness;
+  target->phaseMs = source.phaseMs;
+  target->beatMs = source.beatMs;
+  target->crc = source.crc;
+}
+
+void updateAudioSyncState(const NkSyncBeaconV2& beacon, unsigned long nowMs)
+{
+  audioSyncState.valid = true;
+  audioSyncState.lastUpdateMs = nowMs;
+  audioSyncState.seq = beacon.seq;
+  audioSyncState.phaseMs = beacon.phaseMs;
+  audioSyncState.beatMs = beacon.beatMs;
+  audioSyncState.beat = (beacon.flags & NK_SYNC_BEACON_FLAG_AUDIO_BEAT) != 0;
+  audioSyncState.energy = beacon.audioEnergy;
+  audioSyncState.bass = beacon.audioBass;
+  audioSyncState.mid = beacon.audioMid;
+  audioSyncState.treble = beacon.audioTreble;
+  audioSyncState.confidence = beacon.audioConfidence;
+}
+
+void expireAudioSyncState(unsigned long nowMs)
+{
+  if (audioSyncState.valid && nowMs - audioSyncState.lastUpdateMs > NK_AUDIO_SYNC_TIMEOUT_MS)
+  {
+    audioSyncState.valid = false;
+  }
 }
 
 unsigned long txIntervalForProfile(uint8_t profile)
@@ -253,10 +335,80 @@ bool runCodecSelftest()
 
   NkSyncBeaconV1 decoded;
   const SyncBeaconDecodeResult result = syncBeaconDecode(&advData[7], NK_SYNC_BEACON_PACKET_SIZE, 1, &decoded);
-  return result == SYNC_BEACON_DECODE_OK &&
-      decoded.seq == beacon.seq &&
-      decoded.groupId == beacon.groupId &&
-      decoded.crc == beacon.crc;
+  if (result != SYNC_BEACON_DECODE_OK ||
+      decoded.seq != beacon.seq ||
+      decoded.groupId != beacon.groupId ||
+      decoded.crc != beacon.crc)
+  {
+    return false;
+  }
+
+  NkSyncBeaconV1 invalidV1 = beacon;
+  invalidV1.version = 3;
+  invalidV1.crc = computeBeaconCrc(invalidV1);
+  if (syncBeaconDecode(reinterpret_cast<const uint8_t*>(&invalidV1), sizeof(invalidV1), 1, &decoded) != SYNC_BEACON_DECODE_BAD_VERSION ||
+      syncBeaconDecode(reinterpret_cast<const uint8_t*>(&beacon), sizeof(beacon), 2, &decoded) != SYNC_BEACON_DECODE_BAD_GROUP)
+  {
+    return false;
+  }
+
+  NkSyncBeaconV2 audioBeacon;
+  audioBeacon.magic0 = NK_SYNC_BEACON_MAGIC0;
+  audioBeacon.magic1 = NK_SYNC_BEACON_MAGIC1;
+  audioBeacon.version = NK_SYNC_BEACON_VERSION_V2;
+  audioBeacon.groupId = 1;
+  audioBeacon.flags = NK_SYNC_BEACON_FLAG_AUDIO_BEAT;
+  audioBeacon.seq = 43;
+  audioBeacon.pattern = 7;
+  audioBeacon.brightness = 159;
+  audioBeacon.phaseMs = 4321;
+  audioBeacon.beatMs = 500;
+  audioBeacon.audioEnergy = 201;
+  audioBeacon.audioBass = 202;
+  audioBeacon.audioMid = 203;
+  audioBeacon.audioTreble = 204;
+  audioBeacon.audioConfidence = 205;
+  audioBeacon.crc = computeBeaconCrc(audioBeacon);
+
+  NkSyncBeaconV2 decodedAudio;
+  if (syncBeaconDecodeV2(reinterpret_cast<const uint8_t*>(&audioBeacon), sizeof(audioBeacon), 1, &decodedAudio) != SYNC_BEACON_DECODE_OK ||
+      decodedAudio.seq != audioBeacon.seq ||
+      decodedAudio.audioEnergy != 201 ||
+      decodedAudio.audioBass != 202 ||
+      decodedAudio.audioMid != 203 ||
+      decodedAudio.audioTreble != 204 ||
+      decodedAudio.audioConfidence != 205)
+  {
+    return false;
+  }
+
+  const AudioSyncState savedAudioState = audioSyncState;
+  updateAudioSyncState(decodedAudio, 123);
+  const bool audioStateOk = audioSyncState.valid &&
+      audioSyncState.lastUpdateMs == 123 &&
+      audioSyncState.seq == audioBeacon.seq &&
+      audioSyncState.phaseMs == audioBeacon.phaseMs &&
+      audioSyncState.beatMs == audioBeacon.beatMs &&
+      audioSyncState.beat &&
+      audioSyncState.energy == audioBeacon.audioEnergy &&
+      audioSyncState.bass == audioBeacon.audioBass &&
+      audioSyncState.mid == audioBeacon.audioMid &&
+      audioSyncState.treble == audioBeacon.audioTreble &&
+      audioSyncState.confidence == audioBeacon.audioConfidence;
+  audioSyncState = savedAudioState;
+  if (!audioStateOk)
+  {
+    return false;
+  }
+
+  if (syncBeaconDecodeV2(reinterpret_cast<const uint8_t*>(&audioBeacon), sizeof(audioBeacon), 2, &decodedAudio) != SYNC_BEACON_DECODE_BAD_GROUP)
+  {
+    return false;
+  }
+
+  NkSyncBeaconV2 badCrc = audioBeacon;
+  badCrc.audioEnergy++;
+  return syncBeaconDecodeV2(reinterpret_cast<const uint8_t*>(&badCrc), sizeof(badCrc), 1, &decodedAudio) == SYNC_BEACON_DECODE_BAD_CRC;
 }
 
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
@@ -338,14 +490,42 @@ void handleGapReport(const uint8_t* advData, uint8_t advLen, int8_t rssi)
     scanLastVersion = data[2 + 2];
 
     NkSyncBeaconV1 beacon;
-    const SyncBeaconDecodeResult result = syncBeaconDecode(&data[2], dataLen - 2, activeGroup, &beacon);
+    SyncBeaconDecodeResult result = SYNC_BEACON_DECODE_BAD_VERSION;
+    NkSyncBeaconV2 audioBeacon;
+    if (data[2] != NK_SYNC_BEACON_MAGIC0 || data[3] != NK_SYNC_BEACON_MAGIC1)
+    {
+      result = SYNC_BEACON_DECODE_BAD_MAGIC;
+    }
+    else if (scanLastVersion == NK_SYNC_BEACON_VERSION_V1)
+    {
+      result = syncBeaconDecode(&data[2], dataLen - 2, activeGroup, &beacon);
+    }
+    else if (scanLastVersion == NK_SYNC_BEACON_VERSION_V2)
+    {
+      result = syncBeaconDecodeV2(&data[2], dataLen - 2, activeGroup, &audioBeacon);
+      if (result == SYNC_BEACON_DECODE_OK)
+      {
+        copyV2SyncBasis(audioBeacon, &beacon);
+      }
+    }
     if (result == SYNC_BEACON_DECODE_OK)
     {
+      const unsigned long receiveMs = millis();
       pendingBeacon = beacon;
       pendingBeaconAvailable = true;
       rxCount++;
       scanDecodeOk++;
-      lastBeaconMs = millis();
+      if (beacon.version == NK_SYNC_BEACON_VERSION_V2)
+      {
+        scanDecodeV2++;
+        updateAudioSyncState(audioBeacon, receiveMs);
+      }
+      else
+      {
+        scanDecodeV1++;
+      }
+      lastBeaconVersion = beacon.version;
+      lastBeaconMs = receiveMs;
       lastError = "none";
       scanLastError = "ok";
       scanLastCandidateReason = "ok";
@@ -385,6 +565,15 @@ void handleGapReport(const uint8_t* advData, uint8_t advLen, int8_t rssi)
       lastError = "bad_version";
       scanLastError = "bad_version";
       scanLastCandidateReason = "version";
+    }
+    else if (result == SYNC_BEACON_DECODE_TOO_SHORT)
+    {
+      scanRejectLen++;
+      scanDecodeFail++;
+      invalidPackets++;
+      lastError = "too_short";
+      scanLastError = "too_short";
+      scanLastCandidateReason = "len";
     }
     else
     {
@@ -494,6 +683,7 @@ void syncBeaconRadioBegin()
 void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
 {
   syncBeaconRadioBegin();
+  expireAudioSyncState(millis());
   activeGroup = runtime.groupId;
 
   const Rm2BleStatus ble = rm2BleStatus();
@@ -593,6 +783,8 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   status.scanMfgReports = scanMfgReports;
   status.scanNkCandidates = scanNkCandidates;
   status.scanDecodeOk = scanDecodeOk;
+  status.scanDecodeV1 = scanDecodeV1;
+  status.scanDecodeV2 = scanDecodeV2;
   status.scanDecodeFail = scanDecodeFail;
   status.scanCrcFail = scanCrcFail;
   status.scanGroupMismatch = scanGroupMismatch;
@@ -609,6 +801,9 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   status.scanLastCompany = scanLastCompany;
   status.scanLastGroup = scanLastGroup;
   status.scanLastVersion = scanLastVersion;
+  status.lastBeaconVersion = lastBeaconVersion;
+  status.audio = syncBeaconAudioState();
+  status.audioAgeMs = status.audio.lastUpdateMs == 0 ? 0 : millis() - status.audio.lastUpdateMs;
   status.advMfgHead = advMfgHead;
   status.advOwner = ble.advOwner;
   status.advType = ble.advType;
@@ -740,6 +935,44 @@ String syncBeaconRadioBuildStatusFields()
   return fields;
 }
 
+String syncBeaconAudioBuildStatusFields()
+{
+  const SyncBeaconRadioStatus status = syncBeaconRadioStatus();
+  String fields = "audio_sync=";
+  fields += status.supported ? 1 : 0;
+  fields += " audio_valid=";
+  fields += status.audio.valid ? 1 : 0;
+  fields += " last_beacon_version=";
+  fields += status.lastBeaconVersion;
+  fields += " scan_decode_v1=";
+  fields += status.scanDecodeV1;
+  fields += " scan_decode_v2=";
+  fields += status.scanDecodeV2;
+  fields += " audio_seq=";
+  fields += status.audio.seq;
+  fields += " audio_age_ms=";
+  fields += status.audioAgeMs;
+  fields += " audio_beat=";
+  fields += status.audio.beat ? 1 : 0;
+  fields += " audio_energy=";
+  fields += status.audio.energy;
+  fields += " audio_bass=";
+  fields += status.audio.bass;
+  fields += " audio_mid=";
+  fields += status.audio.mid;
+  fields += " audio_treble=";
+  fields += status.audio.treble;
+  fields += " audio_confidence=";
+  fields += status.audio.confidence;
+  fields += " audio_phase_ms=";
+  fields += status.audio.phaseMs;
+  fields += " audio_beat_ms=";
+  fields += status.audio.beatMs;
+  fields += " audio_timeout_ms=";
+  fields += NK_AUDIO_SYNC_TIMEOUT_MS;
+  return fields;
+}
+
 bool syncBeaconRadioConsumeBeacon(NkSyncBeaconV1* beacon)
 {
   if (!pendingBeaconAvailable || beacon == nullptr)
@@ -749,6 +982,12 @@ bool syncBeaconRadioConsumeBeacon(NkSyncBeaconV1* beacon)
   *beacon = pendingBeacon;
   pendingBeaconAvailable = false;
   return true;
+}
+
+AudioSyncState syncBeaconAudioState()
+{
+  expireAudioSyncState(millis());
+  return audioSyncState;
 }
 
 bool syncBeaconEncode(const NkSyncBeaconV1& beacon, uint8_t* output, size_t outputSize, size_t* outputLen)
@@ -781,6 +1020,44 @@ SyncBeaconDecodeResult syncBeaconDecode(const uint8_t* data, size_t dataLen, uin
     return SYNC_BEACON_DECODE_BAD_MAGIC;
   }
   if (decoded.version != NK_SYNC_BEACON_VERSION)
+  {
+    return SYNC_BEACON_DECODE_BAD_VERSION;
+  }
+  if (expectedGroup != 0 && decoded.groupId != expectedGroup)
+  {
+    return SYNC_BEACON_DECODE_BAD_GROUP;
+  }
+  if (!isValidBeaconPattern(decoded.pattern))
+  {
+    return SYNC_BEACON_DECODE_BAD_PATTERN;
+  }
+  if (!isValidBeaconBrightness(decoded.brightness))
+  {
+    return SYNC_BEACON_DECODE_BAD_BRIGHTNESS;
+  }
+  if (decoded.crc != computeBeaconCrc(decoded))
+  {
+    return SYNC_BEACON_DECODE_BAD_CRC;
+  }
+
+  *beacon = decoded;
+  return SYNC_BEACON_DECODE_OK;
+}
+
+SyncBeaconDecodeResult syncBeaconDecodeV2(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV2* beacon)
+{
+  if (data == nullptr || beacon == nullptr || dataLen < NK_SYNC_BEACON_V2_PACKET_SIZE)
+  {
+    return SYNC_BEACON_DECODE_TOO_SHORT;
+  }
+
+  NkSyncBeaconV2 decoded;
+  memcpy(&decoded, data, NK_SYNC_BEACON_V2_PACKET_SIZE);
+  if (decoded.magic0 != NK_SYNC_BEACON_MAGIC0 || decoded.magic1 != NK_SYNC_BEACON_MAGIC1)
+  {
+    return SYNC_BEACON_DECODE_BAD_MAGIC;
+  }
+  if (decoded.version != NK_SYNC_BEACON_VERSION_V2)
   {
     return SYNC_BEACON_DECODE_BAD_VERSION;
   }

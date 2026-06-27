@@ -3987,6 +3987,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     return;
   }
 
+  if (command.command == "audio_sync_status")
+  {
+    nk4WriteOk(writer, seq, syncBeaconAudioBuildStatusFields());
+    return;
+  }
+
   if (command.command == "sync_arm")
   {
     int group = currentSyncGroupId;

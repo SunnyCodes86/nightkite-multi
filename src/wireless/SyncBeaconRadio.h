@@ -71,6 +71,8 @@ struct SyncBeaconRadioStatus
   unsigned long scanMfgReports;
   unsigned long scanNkCandidates;
   unsigned long scanDecodeOk;
+  unsigned long scanDecodeV1;
+  unsigned long scanDecodeV2;
   unsigned long scanDecodeFail;
   unsigned long scanCrcFail;
   unsigned long scanGroupMismatch;
@@ -87,6 +89,9 @@ struct SyncBeaconRadioStatus
   uint16_t scanLastCompany;
   uint8_t scanLastGroup;
   uint8_t scanLastVersion;
+  uint8_t lastBeaconVersion;
+  AudioSyncState audio;
+  unsigned long audioAgeMs;
   const char* advMfgHead;
   const char* advOwner;
   const char* advType;
@@ -109,23 +114,39 @@ enum SyncBeaconDecodeResult : uint8_t
   SYNC_BEACON_DECODE_BAD_CRC
 };
 
-constexpr uint8_t NK_SYNC_BEACON_VERSION = 1;
+constexpr uint8_t NK_SYNC_BEACON_VERSION_V1 = 1;
+constexpr uint8_t NK_SYNC_BEACON_VERSION_V2 = 2;
+// The firmware's beacon transmitter intentionally remains V1.
+constexpr uint8_t NK_SYNC_BEACON_VERSION = NK_SYNC_BEACON_VERSION_V1;
 constexpr uint16_t NK_SYNC_BEACON_BEAT_MS = 1000;
 constexpr uint8_t NK_SYNC_BEACON_MAGIC0 = 'N';
 constexpr uint8_t NK_SYNC_BEACON_MAGIC1 = 'K';
 constexpr uint16_t NK_SYNC_BEACON_COMPANY_ID = 0xFFFF;
-constexpr size_t NK_SYNC_BEACON_PACKET_SIZE = sizeof(NkSyncBeaconV1);
+constexpr uint8_t NK_SYNC_BEACON_FLAG_AUDIO_BEAT = 0x01;
+constexpr unsigned long NK_AUDIO_SYNC_TIMEOUT_MS = 1500;
+constexpr size_t NK_SYNC_BEACON_V1_PACKET_SIZE = sizeof(NkSyncBeaconV1);
+constexpr size_t NK_SYNC_BEACON_V2_PACKET_SIZE = sizeof(NkSyncBeaconV2);
+constexpr size_t NK_SYNC_BEACON_PACKET_SIZE = NK_SYNC_BEACON_V1_PACKET_SIZE;
 constexpr uint8_t NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET = 2;
 constexpr size_t NK_SYNC_BEACON_MFG_LEN = NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET + NK_SYNC_BEACON_PACKET_SIZE;
 constexpr size_t NK_SYNC_BEACON_ADV_LEN = 3 + 2 + NK_SYNC_BEACON_MFG_LEN;
+constexpr size_t NK_SYNC_BEACON_V2_MFG_LEN = NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET + NK_SYNC_BEACON_V2_PACKET_SIZE;
+constexpr size_t NK_SYNC_BEACON_V2_ADV_LEN = 3 + 2 + NK_SYNC_BEACON_V2_MFG_LEN;
+
+static_assert(sizeof(NkSyncBeaconV1) == 17, "Unexpected V1 sync beacon layout");
+static_assert(sizeof(NkSyncBeaconV2) == 22, "Unexpected V2 sync beacon layout");
+static_assert(NK_SYNC_BEACON_V2_ADV_LEN <= 31, "V2 sync beacon exceeds legacy advertising");
 
 void syncBeaconRadioBegin();
 void syncBeaconRadioTick(const SyncBeaconRuntime& runtime);
 void syncBeaconRadioStop();
 SyncBeaconRadioStatus syncBeaconRadioStatus();
 String syncBeaconRadioBuildStatusFields();
+String syncBeaconAudioBuildStatusFields();
 bool syncBeaconRadioConsumeBeacon(NkSyncBeaconV1* beacon);
+AudioSyncState syncBeaconAudioState();
 
 bool syncBeaconEncode(const NkSyncBeaconV1& beacon, uint8_t* output, size_t outputSize, size_t* outputLen);
 SyncBeaconDecodeResult syncBeaconDecode(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV1* beacon);
+SyncBeaconDecodeResult syncBeaconDecodeV2(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV2* beacon);
 const char* syncBeaconDecodeResultName(SyncBeaconDecodeResult result);
