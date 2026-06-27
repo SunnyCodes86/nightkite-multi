@@ -83,6 +83,8 @@ On first startup: **Pattern ID 1**, **Brightness 95**.
 
 Patterns 23 through 27 need V2 audio beacons for live audio response. With V1 or missing V2 data, they continue with a smooth visible fallback.
 
+On sync loss, `continue_local` keeps the last pattern running, `fallback_autoplay` switches to local autoplay, and `warning_only` shows a red loss warning in the status view. `get section=sync` separates the sync target in `sync_pattern` from the rendered `local_pattern`.
+
 **Audio-sync hardware test:** Put the controller in follower mode with the same sync group as the Cardputer, run `enable_pattern 23,24,25,26,27` for an older saved pattern mask, and start `V2 Mic Full` on the Cardputer. `NK4 seq=20 cmd=audio_sync_status` and `NK4 seq=10 cmd=get section=sync` should show `audio_valid=1`, `last_beacon_version=2`, increasing `scan_decode_v2`, `sync_locked=1`, and `scan_crc_fail=0`.
 
 ---

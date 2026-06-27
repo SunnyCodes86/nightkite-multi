@@ -283,6 +283,8 @@ Experimenteller Sync-Beacon-Radio:
 - `master`: wenn `play_mode=sync`, `sync_enabled=1` und `wireless_enabled=1`, sendet der Controller kleine nicht-connectable BLE-Advertising-Pakete mit Herstellerdaten-Payload. Die Beacon-Rate richtet sich nach `wireless_profile`: `long_range` ca. 5 Hz, `balanced` ca. 10 Hz, `fast_sync` ca. 20 Hz.
 - `follower`: wenn `play_mode=sync`, `sync_enabled=1` und `wireless_enabled=1`, scannt der Controller nach gueltigen NightKite-Beacons derselben `sync_group`. Beacons mit falscher Gruppe oder CRC werden ignoriert und gezaehlt.
 
+Bei Beacon-Verlust laesst `sync_loss_behavior=continue_local` das letzte Pattern lokal weiterlaufen, `fallback_autoplay` wechselt in lokales Autoplay und `warning_only` behaelt das Pattern mit roter Loss-Warnung in der Statusanzeige bei. `get section=sync` meldet dazu `sync_loss_count`, `last_sync_loss_ms` und `last_sync_loss_action`. `sync_pattern` bezeichnet das zuletzt gueltige Sync-Ziel, waehrend `local_pattern` das tatsaechlich gerenderte Pattern zeigt.
+
 Der Controller-Master sendet weiterhin unveraendert V1. Der Follower-Decoder akzeptiert V1 und V2; beide Versionen speisen dieselben bestehenden Sync-Basisdaten ein. V2 ist 22 Byte gross, hat 24 Byte Manufacturer Data inklusive Company ID und passt damit in ein 29-Byte-Legacy-Advertising-Paket. Die Manufacturer-Data-Signatur beginnt mit `FFFF4E4B02...`. Nach 1500 ms ohne gueltiges V2-Paket wird nur `audio_valid=0`; die normale Beacon-Synchronisation laeuft weiter.
 
 Hardwaretest der Audio-Patterns:

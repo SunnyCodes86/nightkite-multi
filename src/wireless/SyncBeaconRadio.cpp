@@ -253,6 +253,7 @@ void expireAudioSyncState(unsigned long nowMs)
   if (audioSyncState.valid && nowMs - audioSyncState.lastUpdateMs > NK_AUDIO_SYNC_TIMEOUT_MS)
   {
     audioSyncState.valid = false;
+    audioSyncState.beat = false;
   }
 }
 
@@ -395,8 +396,10 @@ bool runCodecSelftest()
       audioSyncState.mid == audioBeacon.audioMid &&
       audioSyncState.treble == audioBeacon.audioTreble &&
       audioSyncState.confidence == audioBeacon.audioConfidence;
+  expireAudioSyncState(123 + NK_AUDIO_SYNC_TIMEOUT_MS + 1);
+  const bool audioTimeoutOk = !audioSyncState.valid && !audioSyncState.beat;
   audioSyncState = savedAudioState;
-  if (!audioStateOk)
+  if (!audioStateOk || !audioTimeoutOk)
   {
     return false;
   }
@@ -692,6 +695,7 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
 {
   syncBeaconRadioBegin();
   expireAudioSyncState(millis());
+  const bool groupChanged = activeGroup != runtime.groupId;
   activeGroup = runtime.groupId;
 
   const Rm2BleStatus ble = rm2BleStatus();
@@ -739,6 +743,13 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
     return;
   }
 
+  if (currentMode != RADIO_MODE_BEACON_FOLLOWER || groupChanged)
+  {
+    lastBeaconMs = 0;
+    pendingBeaconAvailable = false;
+    audioSyncState.valid = false;
+    audioSyncState.beat = false;
+  }
   currentMode = RADIO_MODE_BEACON_FOLLOWER;
   advActive = false;
   nextTxMs = 0;

@@ -30,11 +30,11 @@
 #include <EEPROM.h> //EEPROM Library
 #include <math.h> // Math library
 #include <string.h>
-#include "hardware/watchdog.h"
 #include "app/AudioPatternMath.h"
 #include "app/Battery.h"
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
+#include "app/SyncMath.h"
 #include "protocol/NkProtocol.h"
 #include "wireless/Rm2Ble.h"
 #include "wireless/SyncBeaconRadio.h"
@@ -248,6 +248,9 @@ uint32_t lastBeaconPhaseMs = 0;
 unsigned long syncApplyCount = 0;
 unsigned long syncApplySkipped = 0;
 const char* syncApplyReason = "none";
+unsigned long syncLossCount = 0;
+unsigned long lastSyncLossMs = 0;
+const char* lastSyncLossAction = "none";
 unsigned long patternChangeCount = 0;
 unsigned long lastPatternChangeMs = 0;
 unsigned long lastPatternChangeLatencyMs = 0;
@@ -912,6 +915,7 @@ void applyConfiguredStripLength()
 
 void applyPersistentConfig()
 {
+  syncEngine.cancel();
   applyConfiguredStripLength();
   currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
   currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
@@ -1542,6 +1546,12 @@ String buildSyncFields(bool detailed)
   fields += syncEngine.stateName();
   fields += " sync_loss_behavior=";
   fields += syncLossBehaviorToString(currentSyncLossBehavior);
+  fields += " sync_loss_count=";
+  fields += syncLossCount;
+  fields += " last_sync_loss_ms=";
+  fields += lastSyncLossMs;
+  fields += " last_sync_loss_action=";
+  fields += lastSyncLossAction;
   fields += " master_uid=";
   fields += strlen(currentSyncMasterUid) > 0 ? currentSyncMasterUid : "none";
   fields += " last_seq=";
@@ -1551,7 +1561,16 @@ String buildSyncFields(bool detailed)
   fields += " drift_ms=";
   fields += syncEngine.driftMs;
   fields += " sync_pattern=";
-  fields += currentPattern;
+  if (syncEngine.state == SyncEngine::ARMED ||
+      syncEngine.state == SyncEngine::RUNNING ||
+      syncEngine.state == SyncEngine::LOST)
+  {
+    fields += syncEngine.armedPattern;
+  }
+  else
+  {
+    fields += currentPattern;
+  }
   fields += " local_pattern=";
   fields += currentPattern;
   fields += " last_beacon_pattern=";
@@ -1728,11 +1747,16 @@ String buildOffsetsFields()
 
 void setPlayMode(int mode)
 {
+  const int previousMode = currentPlayMode;
   if (mode < PLAY_MODE_MANUAL || mode > PLAY_MODE_SYNC)
   {
     mode = PLAY_MODE_MANUAL;
   }
   currentPlayMode = mode;
+  if (previousMode == PLAY_MODE_SYNC && currentPlayMode != PLAY_MODE_SYNC)
+  {
+    syncEngine.cancel();
+  }
   if (currentPlayMode == PLAY_MODE_AUTOPLAY)
   {
     currentAutoplayEnabled = 1;
@@ -1846,7 +1870,7 @@ void applyReceivedSyncBeacon()
     syncEngine.armedBrightness = beacon.brightness;
     syncEngine.armedPhaseMs = beacon.phaseMs;
     syncEngine.localStartMs = millis();
-    syncEngine.driftMs = (int32_t)beacon.phaseMs - (int32_t)localPhaseBeforeUpdate;
+    syncEngine.driftMs = syncPhaseDeltaMs(beacon.phaseMs, localPhaseBeforeUpdate, beacon.beatMs);
     syncApplyCount++;
     lastAppliedSeq = beacon.seq;
     syncApplyReason = "ok";
@@ -1893,12 +1917,33 @@ void tickSyncBeaconRadio()
     syncEngine.state = SyncEngine::RUNNING;
     syncEngine.locked = true;
     syncEngine.lastSeq = radioStatus.beaconSeq;
+    syncEngine.armedGroup = currentSyncGroupId;
+    syncEngine.armedPattern = currentPattern;
+    syncEngine.armedBrightness = currentBrightness;
+    syncEngine.armedPhaseMs = patternClock.phaseMs();
   }
   else if (currentPlayMode == PLAY_MODE_SYNC && currentSyncEnabled == 1 && currentSyncRole == SYNC_ROLE_FOLLOWER &&
-      syncEngine.locked && radioStatus.beaconRx && !radioStatus.locked)
+      syncEngine.locked && !radioStatus.locked)
   {
     syncEngine.state = SyncEngine::LOST;
     syncEngine.locked = false;
+    syncLossCount++;
+    lastSyncLossMs = millis();
+    if (currentSyncLossBehavior == SYNC_LOSS_FALLBACK_AUTOPLAY)
+    {
+      lastSyncLossAction = "fallback_autoplay";
+      currentPlayMode = PLAY_MODE_AUTOPLAY;
+      currentAutoplayEnabled = 1;
+      resetAutoplayTimer();
+    }
+    else if (currentSyncLossBehavior == SYNC_LOSS_WARNING_ONLY)
+    {
+      lastSyncLossAction = "warning_only";
+    }
+    else
+    {
+      lastSyncLossAction = "continue_local";
+    }
   }
 }
 
@@ -3265,14 +3310,8 @@ void readConfigFromEEPROM(bool verbose)
 void rebootController()
 {
   Serial.flush();
-  delay(50);
-  Serial.end();
-  delay(50);
-  watchdog_reboot(0, 0, 100);
-  while (true)
-  {
-    delay(1);
-  }
+  delay(100);
+  rp2040.reboot();
 }
 
 void emitNk4Event(const char* eventName, const String& fields)
@@ -3850,7 +3889,11 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "invalid_value", "bad_sync_enabled");
           return;
         }
-        currentSyncEnabled = flag;
+        if (currentSyncEnabled != flag)
+        {
+          currentSyncEnabled = flag;
+          syncEngine.cancel();
+        }
       }
       else if (key == "sync_group" || key == "sync_group_id")
       {
@@ -3865,7 +3908,11 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "range_error", "bad_sync_group");
           return;
         }
-        currentSyncGroupId = valueInt;
+        if (currentSyncGroupId != valueInt)
+        {
+          currentSyncGroupId = valueInt;
+          syncEngine.cancel();
+        }
       }
       else if (key == "sync_role")
       {
@@ -3875,7 +3922,11 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "invalid_value", "bad_sync_role");
           return;
         }
-        currentSyncRole = role;
+        if (currentSyncRole != role)
+        {
+          currentSyncRole = role;
+          syncEngine.cancel();
+        }
       }
       else if (key == "sync_master_uid" || key == "master_uid")
       {
@@ -3912,7 +3963,11 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "invalid_value", "bad_wireless_enabled");
           return;
         }
-        currentWirelessEnabled = flag;
+        if (currentWirelessEnabled != flag)
+        {
+          currentWirelessEnabled = flag;
+          syncEngine.cancel();
+        }
       }
       else if (key == "wireless_profile")
       {
@@ -4664,6 +4719,10 @@ void onCliDisablePattern(cmd* cPtr)
     Serial.println("ERR at least one pattern must remain enabled");
     return;
   }
+  if (!isPatternEnabled((uint8_t)currentPattern))
+  {
+    switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
+  }
 
   Serial.print("OK enabled_patterns=");
   printEnabledPatternsList();
@@ -4958,7 +5017,9 @@ void BatteryRunning()
   if (autoplayStatusPixel < TOTAL_LEDS)
   {
     const bool syncError = (currentPlayMode == PLAY_MODE_SYNC &&
-        (currentSyncEnabled == 0 || currentSyncRole == SYNC_ROLE_STANDALONE));
+        (currentSyncEnabled == 0 ||
+         currentSyncRole == SYNC_ROLE_STANDALONE ||
+         (syncEngine.state == SyncEngine::LOST && currentSyncLossBehavior == SYNC_LOSS_WARNING_ONLY)));
     CRGB statusColor = playModeIndicatorColor(currentPlayMode, currentSyncRole, syncError);
     if (syncError && !blink)
     {
