@@ -32,6 +32,7 @@
 #include <string.h>
 #include "app/AudioPatternMath.h"
 #include "app/Battery.h"
+#include "app/ConfigMigration.h"
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
 #include "app/SyncMath.h"
@@ -178,7 +179,6 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_WIRELESS_ENABLED 180
 #define EEPROM_ADDR_WIRELESS_PROFILE 184
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
-const int CONFIG_VERSION_4_ALPHA = 400;
 
 // Size of emulated EEPROM.
 // Must cover all persisted ints plus the enabled/inverted pattern bitmasks.
@@ -324,6 +324,9 @@ const uint8_t LAST_PATTERN_ID = NK_PATTERN_MAX_ID;
 const uint8_t PATTERN_COUNT = LAST_PATTERN_ID - FIRST_PATTERN_ID + 1;
 const uint32_t ALL_ENABLED_PATTERN_MASK = (1ul << PATTERN_COUNT) - 1ul;
 const uint32_t ALL_INVERTED_PATTERN_MASK = (1ul << PATTERN_COUNT) - 1ul;
+static_assert(
+    AUDIO_SYNC_PATTERN_MASK == (ALL_ENABLED_PATTERN_MASK & ~((1ul << 22) - 1ul)),
+    "Config migration mask must cover patterns 23 through 27");
 
 int activeMotionSmoothingSize = DEFAULT_MOTION_SMOOTHING_SIZE;
 
@@ -3148,8 +3151,10 @@ bool saveConfigToEEPROM(bool verbose)
 void readConfigFromEEPROM(bool verbose)
 {
   int magic = 0;
+  int storedConfigVersion = 0;
   bool loadedExtendedConfig = false;
   bool loadedLegacyConfig = false;
+  bool migratedAudioPatterns = false;
   char storedUid[DEVICE_UID_LENGTH + 1] = "";
   configValid = false;
   configRepaired = false;
@@ -3213,9 +3218,9 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_INVERTED_PATTERNS, currentInvertedPatternMask);
     EEPROM.get(EEPROM_ADDR_AUTOPLAY_ENABLED, currentAutoplayEnabled);
     EEPROM.get(EEPROM_ADDR_AUTOPLAY_INTERVAL_MS, currentAutoplayIntervalMs);
-    int storedConfigVersion = 0;
     EEPROM.get(EEPROM_ADDR_CONFIG_VERSION, storedConfigVersion);
-    if (storedConfigVersion == CONFIG_VERSION_4_ALPHA)
+    if (storedConfigVersion == CONFIG_VERSION_4_ALPHA_22_PATTERNS ||
+        storedConfigVersion == CONFIG_VERSION_4_ALPHA)
     {
       loadedExtendedConfig = true;
       currentConfigVersion = storedConfigVersion;
@@ -3231,9 +3236,13 @@ void readConfigFromEEPROM(bool verbose)
       EEPROM.get(EEPROM_ADDR_WIRELESS_ENABLED, currentWirelessEnabled);
       EEPROM.get(EEPROM_ADDR_WIRELESS_PROFILE, currentWirelessProfile);
     }
+    if (needsAudioSyncPatternMigration(storedConfigVersion))
+    {
+      currentEnabledPatternMask = migrateEnabledPatternMask(storedConfigVersion, currentEnabledPatternMask);
+      currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+      migratedAudioPatterns = true;
+    }
   }
-  // Future migrations can branch on storedConfigVersion here while leaving the
-  // original 3.x EEPROM addresses intact for backward compatibility.
   if (!loadedExtendedConfig)
   {
     if (isValidDeviceUid(storedUid))
@@ -3245,8 +3254,13 @@ void readConfigFromEEPROM(bool verbose)
   const bool loadedValuesSane = loadedExtendedConfig && isCurrentConfigSane();
   normalizePersistentConfig();
   configValid = loadedValuesSane;
-  configRepaired = !loadedValuesSane;
-  if (loadedValuesSane)
+  configRepaired = !loadedValuesSane || migratedAudioPatterns;
+  if (migratedAudioPatterns)
+  {
+    saveConfigToEEPROM(false);
+    configRepaired = true;
+  }
+  else if (loadedValuesSane)
   {
     markCurrentConfigSaved();
   }
@@ -3262,6 +3276,10 @@ void readConfigFromEEPROM(bool verbose)
   else if (verbose && !loadedValuesSane)
   {
     Serial.println("INFO config_valid=0 reason=invalid_values normalized=1");
+  }
+  if (verbose && migratedAudioPatterns)
+  {
+    Serial.println("INFO config_migrated=1 enabled_audio_patterns=23,24,25,26,27");
   }
 
   if (verbose)
