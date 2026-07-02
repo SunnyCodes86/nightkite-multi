@@ -15,12 +15,14 @@ Files:
 Sources:
 - 2.0: git tag v2.0
 - 3.0: git tag v3.0
-- 4.0-dev: dev branch commit 6cc3312 (Stabilize audio sync pattern handling)
+- 4.0-dev: dev branch commit c155faa (Migrate enabled audio sync patterns)
            Runtime version: 4.0.0-alpha.1
 
 The current 4.0-dev builds include 27 patterns, Sync Beacon V1 compatibility,
 V2 Audio Sync beacon receive support, AudioSyncState diagnostics and timeout,
 the audio-reactive patterns 23-27, and stabilized pattern/sync loss handling.
+Config version 401 migrates older config-400 enabled-pattern masks once so
+patterns 23-27 are enabled after updating; later saved choices remain intact.
 
 NightKite Link lists every .uf2 file from /firmware and does not require these
 exact filenames. In Firmware Update, select target RP2040 for NK20/NK30/NK40D
