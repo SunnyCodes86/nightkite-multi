@@ -5978,28 +5978,34 @@ void RunEntry24()
 
 void running24()
 {
-  // Audio Spectrum Ribbon: bass is the broad glow, mid draws the traveling
-  // ribbon, treble creates narrow highlights, and energy scales the result.
+  // Audio Spectrum Ribbon: one broad bass wave and two broad mid ribbons
+  // travel in opposite directions. Treble only brightens their crests.
   const AudioPatternFrame audio = buildAudioPatternFrame();
   const uint8_t baseHue = audioPatternLocalHue();
   const int pitchOffset = audioPatternPitchOffset();
+  const uint8_t bandWeight = qadd8(72, scale8(audio.confidence, 120));
+  const uint8_t bassLevel = lerp8by8(audio.energy, audio.bass, bandWeight);
+  const uint8_t midLevel = lerp8by8(audio.energy, audio.mid, bandWeight);
 
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
     for (int i = 0; i < NUM_LEDS; ++i)
     {
+      const uint8_t position = (uint8_t)(((uint16_t)i * 255U) / max(1, NUM_LEDS - 1));
       const uint8_t directionPhase = stripIndex == 0 ? audio.phase8 : (uint8_t)(255 - audio.phase8);
-      const uint8_t bassWave = sin8((uint8_t)(i * 8 - directionPhase));
-      const uint8_t midWave = sin8((uint8_t)(i * 23 + directionPhase * 2U));
-      const uint8_t trebleWave = sin8((uint8_t)(i * 49 - directionPhase * 3U));
-      const uint8_t broadGlow = scale8(scale8(bassWave, audio.bass), 104);
-      const uint8_t ribbon = scale8(scale8(midWave, audio.mid), 156);
-      const uint8_t highlight = scale8(qsub8(trebleWave, 176), qadd8(audio.treble, audio.treble));
-      const uint8_t spectrum = qadd8(qadd8(broadGlow, ribbon), highlight);
-      const uint8_t value = qadd8(18, scale8(qadd8(scale8(audio.energy, 176), spectrum), 214));
-      const uint8_t hue = baseHue + pitchOffset + scale8(midWave, 54) + scale8(trebleWave, 18);
-      const uint8_t saturation = qsub8(248, scale8(highlight, 104));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 88);
+      const uint8_t bassWave = sin8(position - directionPhase);
+      const uint8_t midWave = sin8((uint8_t)(position * 2U) + directionPhase);
+      const uint8_t broadGlow = scale8(bassWave, scale8(bassLevel, 110));
+      const uint8_t ribbon = scale8(midWave, scale8(midLevel, 120));
+      const uint8_t highlight = scale8(
+          scale8(qsub8(midWave, 208), audio.treble),
+          qadd8(80, scale8(audio.confidence, 96)));
+      const uint8_t value = qadd8(
+          qadd8(14, scale8(audio.energy, 70)),
+          qadd8(qadd8(broadGlow, ribbon), highlight));
+      const uint8_t hue = baseHue + pitchOffset + scale8(midWave, 32) + scale8(bassWave, 12);
+      const uint8_t saturation = qsub8(238, scale8(highlight, 64));
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 40);
     }
   }
 }
@@ -6056,8 +6062,8 @@ void RunEntry26()
 
 void running26()
 {
-  // Audio Band Comets: bass, mid, and treble each own a phase-locked comet.
-  // Energy lights the trail while local yaw/pitch rotate their color triad.
+  // Audio Band Comets: two broad bass/mid comets scan in opposite directions.
+  // Energy lights their path and treble adds a restrained shared accent.
   const AudioPatternFrame audio = buildAudioPatternFrame();
   const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
   uint8_t phase = audio.phase8;
@@ -6065,30 +6071,37 @@ void running26()
   {
     phase = 255 - phase;
   }
-  const int bassHead = ((uint16_t)phase * NUM_LEDS) >> 8;
-  const int midHead = ((uint16_t)(255 - phase) * NUM_LEDS) >> 8;
-  const int trebleHead = ((uint16_t)((uint8_t)(phase * 3U)) * NUM_LEDS) >> 8;
-  const uint8_t trailStep = qsub8(74, scale8(audio.confidence, 28));
+  const int bassHead = ((uint16_t)triwave8(phase) * (NUM_LEDS - 1)) / 255U;
+  const int midHead = ((uint16_t)triwave8((uint8_t)(phase + 128)) * (NUM_LEDS - 1)) / 255U;
+  const int radius = constrain(NUM_LEDS / 10, 1, 3);
+  const uint8_t bandWeight = qadd8(80, scale8(audio.confidence, 128));
+  const uint8_t bassLevel = lerp8by8(audio.energy, audio.bass, bandWeight);
+  const uint8_t midLevel = lerp8by8(audio.energy, audio.mid, bandWeight);
+  const uint8_t trebleLevel = scale8(
+      audio.treble,
+      qadd8(24, scale8(audio.confidence, 48)));
 
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
     for (int i = 0; i < NUM_LEDS; ++i)
     {
-      const int bassTrail = (i - bassHead + NUM_LEDS) % NUM_LEDS;
-      const int midTrail = (midHead - i + NUM_LEDS) % NUM_LEDS;
-      const int trebleTrail = (i - trebleHead + NUM_LEDS) % NUM_LEDS;
-      const uint8_t bassValue = scale8(audio.bass, qsub8(255, min(255, bassTrail * trailStep)));
-      const uint8_t midValue = scale8(audio.mid, qsub8(255, min(255, midTrail * trailStep)));
-      const uint8_t trebleValue = scale8(audio.treble, qsub8(255, min(255, trebleTrail * trailStep)));
+      const int bassDistance = abs(i - bassHead);
+      const int midDistance = abs(i - midHead);
+      const uint8_t bassShape = bassDistance > radius
+          ? 0
+          : (uint8_t)(255 - ((uint16_t)bassDistance * 255U) / (radius + 1));
+      const uint8_t midShape = midDistance > radius
+          ? 0
+          : (uint8_t)(255 - ((uint16_t)midDistance * 255U) / (radius + 1));
+      const uint8_t bassValue = scale8(bassShape, qadd8(scale8(bassLevel, 150), scale8(audio.energy, 36)));
+      const uint8_t midValue = scale8(midShape, qadd8(scale8(midLevel, 144), scale8(audio.energy, 30)));
+      const uint8_t accentValue = scale8(max(bassShape, midShape), trebleLevel);
 
-      CRGB target = CHSV(baseHue, 190, qadd8(12, scale8(audio.energy, 44)));
-      CRGB bassColor = CHSV(baseHue, 240, bassValue);
-      CRGB midColor = CHSV(baseHue + 86, 220, midValue);
-      CRGB trebleColor = CHSV(baseHue + 160, 150, trebleValue);
-      target += bassColor;
-      target += midColor;
-      target += trebleColor;
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, 112);
+      CRGB target = CHSV(baseHue + (stripIndex * 8), 190, qadd8(10, scale8(audio.energy, 48)));
+      target += CHSV(baseHue, 238, bassValue);
+      target += CHSV(baseHue + 86, 216, midValue);
+      target += CHSV(baseHue + 160, 138, accentValue);
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, 48);
     }
   }
 }
@@ -6102,35 +6115,39 @@ void RunEntry27()
 
 void running27()
 {
-  // Audio Beat Mosaic: phase advances deterministic tiles, the three bands
-  // select tile levels, confidence controls crispness, and local motion/yaw
-  // shift the palette without disturbing synchronization.
+  // Audio Beat Mosaic: three to five mirrored color zones stay spatially
+  // stable while band levels and beat phase move a soft brightness focus.
   const AudioPatternFrame audio = buildAudioPatternFrame();
-  const uint32_t localMotion = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
-  const uint8_t motionHue = (uint8_t)constrain((int)(localMotion / 180U), 0, 42);
-  const uint8_t baseHue = audioPatternLocalHue() + motionHue;
+  const uint8_t baseHue = audioPatternLocalHue();
   const int pitchOffset = audioPatternPitchOffset();
-  const uint8_t beatStep = audio.phase8 >> 6;
-  const int tileSize = max(2, NUM_LEDS / 8);
+  const int zoneCount = constrain(NUM_LEDS / 5, 3, 5);
+  const uint8_t bandWeight = qadd8(72, scale8(audio.confidence, 128));
+  uint8_t phase = audio.phase8;
+  if (getPatternDirectionFactor(27) < 0)
+  {
+    phase = 255 - phase;
+  }
 
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
     for (int i = 0; i < NUM_LEDS; ++i)
     {
-      const int tile = i / tileSize;
-      const uint8_t band = (uint8_t)((tile + beatStep + stripIndex) % 3);
+      const int logicalIndex = stripIndex == 0 ? i : (NUM_LEDS - 1 - i);
+      const int zone = (logicalIndex * zoneCount) / NUM_LEDS;
+      const uint8_t band = (uint8_t)(zone % 3);
       const uint8_t bandValue = band == 0 ? audio.bass : (band == 1 ? audio.mid : audio.treble);
-      const uint8_t softValue = sin8((uint8_t)(i * 19 + audio.phase8 + stripIndex * 64));
-      const uint8_t bandBlend = qadd8(64, scale8(audio.confidence, 191));
-      const uint8_t texture = lerp8by8(softValue, bandValue, bandBlend);
-      const uint8_t tilePulse = ((tile + beatStep) & 1)
-          ? audio.beatPulse
-          : scale8(audio.beatPulse, 52);
+      const uint8_t bandLevel = lerp8by8(audio.energy, bandValue, bandWeight);
+      const uint8_t zoneWave = sin8((uint8_t)(phase + ((uint16_t)zone * 256U) / zoneCount));
+      const uint8_t movement = scale8(zoneWave, qadd8(20, scale8(bandLevel, 72)));
+      const uint8_t beatAccent = scale8(
+          scale8(audio.beatPulse, zoneWave),
+          qadd8(12, scale8(audio.bass, 44)));
       const uint8_t value = qadd8(
-          qadd8(16, scale8(audio.energy, 92)),
-          qadd8(scale8(texture, 108), scale8(tilePulse, qadd8(48, scale8(audio.bass, 92)))));
-      const uint8_t hue = baseHue + (band * 78) + pitchOffset;
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, 226, value), 120);
+          qadd8(14, scale8(audio.energy, 72)),
+          qadd8(scale8(bandLevel, 92), qadd8(movement, beatAccent)));
+      const uint8_t hue = baseHue + pitchOffset + ((uint16_t)zone * 256U) / zoneCount + scale8(zoneWave, 10);
+      const uint8_t saturation = qsub8(232, scale8(bandLevel, 28));
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 32);
     }
   }
 }

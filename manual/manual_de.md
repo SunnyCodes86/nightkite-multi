@@ -78,8 +78,8 @@ Beim ersten Start: **Pattern-ID 1**, **Helligkeit 95**.
 23. **Audio Pulse Angle Color:** Synchroner Ganzband-Puls; Energy und Bass steuern Helligkeit und Flash, Yaw/Pitch die lokale Farbe.
 24. **Audio Spectrum Ribbon:** Ein phasensynchrones Band kombiniert Bass-Grundglühen, Mittenwelle und Höhenakzente.
 25. **Audio Beat Ripples:** Beat- und Bass-gesteuerte Ringe laufen synchron von der Strip-Mitte nach außen.
-26. **Audio Band Comets:** Bass, Mitten und Höhen treiben drei unterschiedlich gefärbte, synchron laufende Kometen.
-27. **Audio Beat Mosaic:** Beatphase und Frequenzbänder schalten ein synchrones Kachelmuster; lokale Bewegung verschiebt die Farben.
+26. **Audio Band Comets:** Zwei breite, gegenläufige Bass-/Mitten-Kometen laufen synchron; Höhen setzen dezente Akzente.
+27. **Audio Beat Mosaic:** Drei bis fünf große, gespiegelte Farbzonen reagieren weich auf Beat, Energie und Frequenzbänder.
 
 Die Patterns 23 bis 27 benötigen für echte Audioreaktion V2-Audio-Beacons. Bei V1 oder fehlenden V2-Daten laufen sie mit einem weichen, sichtbaren Fallback weiter.
 

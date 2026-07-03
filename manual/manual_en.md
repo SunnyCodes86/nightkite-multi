@@ -78,8 +78,8 @@ On first startup: **Pattern ID 1**, **Brightness 95**.
 23. **Audio Pulse Angle Color:** A synchronized full-strip pulse; energy and bass drive brightness while yaw/pitch set local color.
 24. **Audio Spectrum Ribbon:** A phase-synchronized ribbon combining a bass glow, mid wave, and treble highlights.
 25. **Audio Beat Ripples:** Beat- and bass-driven rings travel outward from the center of each strip.
-26. **Audio Band Comets:** Bass, mid, and treble drive three differently colored synchronized comets.
-27. **Audio Beat Mosaic:** Beat phase and frequency bands switch a synchronized tile pattern while local motion shifts its colors.
+26. **Audio Band Comets:** Two broad, counter-moving bass/mid comets run in sync while treble adds restrained accents.
+27. **Audio Beat Mosaic:** Three to five large mirrored color zones react smoothly to beat, energy, and frequency bands.
 
 Patterns 23 through 27 need V2 audio beacons for live audio response. With V1 or missing V2 data, they continue with a smooth visible fallback.
 
