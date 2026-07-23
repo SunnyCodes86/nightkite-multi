@@ -1,4 +1,5 @@
 #include "Rm2Ble.h"
+#include "BleGattHelpers.h"
 #include "BleResponseBuffer.h"
 
 #ifndef PIN_RM2_WL_ON
@@ -70,8 +71,7 @@ unsigned long syncAdvRefreshCount = 0;
 
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
 btstack_packet_callback_registration_t hciEventCallbackRegistration;
-uint8_t advData[31];
-uint8_t advDataLen = 0;
+BleGattAdvertisingData gattAdvertisingData;
 hci_con_handle_t connectionHandle = HCI_CON_HANDLE_INVALID;
 uint16_t rxValueHandle = 0;
 uint16_t txValueHandle = 0;
@@ -151,46 +151,9 @@ void setAdvertisingEnabled(bool enable)
   }
 }
 
-bool appendAdvField(uint8_t type, const uint8_t* value, uint8_t len)
-{
-  if ((uint16_t)advDataLen + len + 2 > sizeof(advData))
-  {
-    return false;
-  }
-  advData[advDataLen++] = len + 1;
-  advData[advDataLen++] = type;
-  memcpy(&advData[advDataLen], value, len);
-  advDataLen += len;
-  return true;
-}
-
-void reverseUuid128(const uint8_t* input, uint8_t* output)
-{
-  for (uint8_t i = 0; i < 16; i++)
-  {
-    output[i] = input[15 - i];
-  }
-}
-
 bool buildAdvertisingData(const char* name)
 {
-  advDataLen = 0;
-  const uint8_t flags = 0x06; // LE General Discoverable, BR/EDR not supported.
-  if (!appendAdvField(BLUETOOTH_DATA_TYPE_FLAGS, &flags, 1))
-  {
-    return false;
-  }
-
-  const size_t nameLen = strnlen(name, BLE_NAME_MAX - 1);
-  if (!appendAdvField(BLUETOOTH_DATA_TYPE_COMPLETE_LOCAL_NAME, (const uint8_t*)name, (uint8_t)nameLen))
-  {
-    return false;
-  }
-
-  uint8_t advServiceUuid[16];
-  reverseUuid128(NIGHTKITE_SERVICE_UUID, advServiceUuid);
-  appendAdvField(BLUETOOTH_DATA_TYPE_COMPLETE_LIST_OF_128_BIT_SERVICE_CLASS_UUIDS, advServiceUuid, sizeof(advServiceUuid));
-  return true;
+  return buildBleGattAdvertisingData(name, BLE_NAME_MAX - 1, NIGHTKITE_SERVICE_UUID, &gattAdvertisingData);
 }
 
 bool enqueueCommandLine(const char* line, size_t lineLen)
@@ -406,21 +369,46 @@ uint16_t attReadCallback(hci_con_handle_t conHandle, uint16_t attHandle, uint16_
 
 int attWriteCallback(hci_con_handle_t conHandle, uint16_t attHandle, uint16_t transactionMode, uint16_t offset, uint8_t* buffer, uint16_t bufferSize)
 {
-  (void)transactionMode;
-  (void)offset;
+  if (transactionMode != ATT_TRANSACTION_MODE_NONE)
+  {
+    return transactionMode == ATT_TRANSACTION_MODE_ACTIVE ? ATT_ERROR_REQUEST_NOT_SUPPORTED : ATT_ERROR_SUCCESS;
+  }
   if (attHandle == txClientConfigHandle)
   {
-    txNotificationsEnabled = little_endian_read_16(buffer, 0) == GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
+    const BleAttWriteValidation validation = validateBleAttWrite(offset, buffer, bufferSize, 2);
+    if (validation == BLE_ATT_WRITE_INVALID_OFFSET)
+    {
+      return ATT_ERROR_INVALID_OFFSET;
+    }
+    if (validation != BLE_ATT_WRITE_VALID)
+    {
+      return ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LENGTH;
+    }
+    const uint16_t config = little_endian_read_16(buffer, 0);
+    if (config != 0 && config != GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION)
+    {
+      return ATT_ERROR_VALUE_NOT_ALLOWED;
+    }
+    txNotificationsEnabled = config == GATT_CLIENT_CHARACTERISTICS_CONFIGURATION_NOTIFICATION;
     connectionHandle = conHandle;
-    return 0;
+    return ATT_ERROR_SUCCESS;
   }
   if (attHandle == rxValueHandle)
   {
+    const BleAttWriteValidation validation = validateBleAttWrite(offset, buffer, bufferSize);
+    if (validation == BLE_ATT_WRITE_INVALID_OFFSET)
+    {
+      return ATT_ERROR_INVALID_OFFSET;
+    }
+    if (validation != BLE_ATT_WRITE_VALID)
+    {
+      return ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LENGTH;
+    }
     connectionHandle = conHandle;
     consumeRxBytes(buffer, bufferSize);
-    return 0;
+    return ATT_ERROR_SUCCESS;
   }
-  return 0;
+  return ATT_ERROR_SUCCESS;
 }
 
 void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uint16_t size)
@@ -489,7 +477,8 @@ void hciPacketHandler(uint8_t packetType, uint16_t channel, uint8_t* packet, uin
     else
     {
       configureGattAdvertisingParams();
-      gap_advertisements_set_data(advDataLen, advData);
+      gap_advertisements_set_data(gattAdvertisingData.advertisingLength, gattAdvertisingData.advertising);
+      gap_scan_response_set_data(gattAdvertisingData.scanResponseLength, gattAdvertisingData.scanResponse);
       setAdvertisingEnabled(true);
       activeAdvType = 0;
       gattAdvSuppressed = false;
@@ -682,7 +671,8 @@ bool rm2BleBegin(const char* advertisedName)
   hci_add_event_handler(&hciEventCallbackRegistration);
 
   configureGattAdvertisingParams();
-  gap_advertisements_set_data(advDataLen, advData);
+  gap_advertisements_set_data(gattAdvertisingData.advertisingLength, gattAdvertisingData.advertising);
+  gap_scan_response_set_data(gattAdvertisingData.scanResponseLength, gattAdvertisingData.scanResponse);
   gap_set_local_name(bleName);
 
   if (hci_power_control(HCI_POWER_ON) != 0)
@@ -877,6 +867,7 @@ bool rm2BleUseSyncAdvertising(const uint8_t* data, uint8_t dataLen, uint16_t int
     }
     syncAdvertisingOwned = true;
     gattAdvSuppressed = true;
+    gap_scan_response_set_data(0, nullptr);
     gap_advertisements_set_params(intervalMin, intervalMax, advType, 0, nullAddress, 0x07, 0x00);
     activeAdvType = advType;
     activeAdvIntervalMin = intervalMin;
@@ -923,7 +914,7 @@ void rm2BleStopAdvertising()
 void rm2BleRestoreGattAdvertising()
 {
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
-  if (!initialized || connected || advDataLen == 0)
+  if (!initialized || connected || gattAdvertisingData.advertisingLength == 0)
   {
     return;
   }
@@ -934,7 +925,8 @@ void rm2BleRestoreGattAdvertising()
   syncAdvertisingOwned = false;
   gattAdvSuppressed = false;
   configureGattAdvertisingParams();
-  gap_advertisements_set_data(advDataLen, advData);
+  gap_advertisements_set_data(gattAdvertisingData.advertisingLength, gattAdvertisingData.advertising);
+  gap_scan_response_set_data(gattAdvertisingData.scanResponseLength, gattAdvertisingData.scanResponse);
   setAdvertisingEnabled(true);
 #endif
 }
