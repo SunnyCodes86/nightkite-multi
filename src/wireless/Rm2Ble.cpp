@@ -1,4 +1,5 @@
 #include "Rm2Ble.h"
+#include "BleResponseBuffer.h"
 
 #ifndef PIN_RM2_WL_ON
 #define PIN_RM2_WL_ON 17
@@ -37,7 +38,7 @@ namespace
 constexpr size_t BLE_NAME_MAX = 24;
 constexpr size_t BLE_COMMAND_MAX = 192;
 constexpr size_t BLE_COMMAND_QUEUE_DEPTH = 4;
-constexpr size_t BLE_TX_BUFFER_MAX = 1024;
+constexpr size_t BLE_TX_BUFFER_MAX = BLE_NK4_RESPONSE_CAPACITY;
 constexpr size_t BLE_TX_QUEUE_DEPTH = 4;
 constexpr size_t BLE_NOTIFY_CHUNK_SIZE = 20;
 constexpr unsigned long BLE_NOTIFY_PACE_MS = 5;
@@ -87,6 +88,7 @@ uint8_t commandQueueHead = 0;
 uint8_t commandQueueTail = 0;
 uint8_t commandQueueCount = 0;
 char txQueue[BLE_TX_QUEUE_DEPTH][BLE_TX_BUFFER_MAX];
+char txResponseBuffer[BLE_TX_BUFFER_MAX];
 size_t txQueueLen[BLE_TX_QUEUE_DEPTH];
 uint8_t txQueueHead = 0;
 uint8_t txQueueTail = 0;
@@ -262,8 +264,9 @@ bool enqueueTxLine(const char* data, size_t dataLen)
 
   if (dataLen >= BLE_TX_BUFFER_MAX)
   {
-    dataLen = BLE_TX_BUFFER_MAX - 1;
-    lastError = "tx_truncated";
+    txDroppedCount++;
+    lastError = "tx_line_too_long";
+    return false;
   }
 
   memcpy(txQueue[txQueueTail], data, dataLen);
@@ -566,9 +569,15 @@ void configureGattAdvertisingParams()
 }
 #endif
 
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
 class BleResponseWriter : public IResponseWriter
 {
 public:
+  BleResponseWriter()
+    : buffer(txResponseBuffer, BLE_TX_BUFFER_MAX)
+  {
+  }
+
   void print(const char* value) override { append(value != nullptr ? value : ""); }
   void print(const String& value) override { append(value.c_str()); }
   void print(int value) override { append(String(value).c_str()); }
@@ -576,45 +585,30 @@ public:
   void print(unsigned long value) override { append(String(value).c_str()); }
   void println() override
   {
-#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
-    append("\n");
-    enqueueTxLine(buffer, length);
-#endif
-    reset();
+    if (buffer.finishLine())
+    {
+      enqueueTxLine(buffer.data(), buffer.size());
+    }
+    else if (buffer.hasOverflowed())
+    {
+      txDroppedCount++;
+      lastError = "tx_line_too_long";
+    }
+    buffer.reset();
   }
 
 private:
-  char buffer[BLE_TX_BUFFER_MAX] = {0};
-  size_t length = 0;
-
-  void reset()
-  {
-    length = 0;
-    buffer[0] = '\0';
-  }
+  BleResponseBuffer buffer;
 
   void append(const char* value)
   {
-    if (value == nullptr)
-    {
-      return;
-    }
-    const size_t available = (length < sizeof(buffer)) ? (sizeof(buffer) - length - 1) : 0;
-    if (available == 0)
-    {
-      lastError = "tx_line_too_long";
-      return;
-    }
-    const size_t copyLen = strnlen(value, available);
-    memcpy(&buffer[length], value, copyLen);
-    length += copyLen;
-    buffer[length] = '\0';
-    if (value[copyLen] != '\0')
+    if (!buffer.append(value))
     {
       lastError = "tx_line_too_long";
     }
   }
 };
+#endif
 }
 
 void rm2BleSetNk4Handler(Rm2BleNk4Handler handler)
