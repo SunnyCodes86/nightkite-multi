@@ -516,6 +516,7 @@ void setDefaultDeviceName();
 bool sanitizeDeviceName(String value, char* output, size_t outputSize);
 bool sanitizeUidString(String value, char* output, size_t outputSize);
 bool readStoredDeviceUid(char* output, size_t outputSize);
+bool readStoredDeviceName(char* output, size_t outputSize);
 const char* playModeToString(int value);
 int parsePlayMode(String value);
 const char* bootModeToString(int value);
@@ -1212,7 +1213,7 @@ bool sanitizeDeviceName(String value, char* output, size_t outputSize)
   for (int i = 0; i < value.length(); i++)
   {
     const char ch = value[i];
-    if (!isalnum((int)ch) && ch != '-' && ch != '_' && ch != '.')
+    if (!isalnum((unsigned char)ch) && ch != '-' && ch != '_' && ch != '.')
     {
       return false;
     }
@@ -1232,7 +1233,7 @@ bool sanitizeUidString(String value, char* output, size_t outputSize)
   for (int i = 0; i < value.length(); i++)
   {
     const char ch = value[i];
-    if (!isxdigit((int)ch))
+    if (!isxdigit((unsigned char)ch))
     {
       return false;
     }
@@ -1257,6 +1258,13 @@ bool readStoredDeviceUid(char* output, size_t outputSize)
 
   copyCString(output, outputSize, storedUid);
   return true;
+}
+
+bool readStoredDeviceName(char* output, size_t outputSize)
+{
+  char storedName[DEVICE_NAME_LENGTH + 1];
+  readEEPROMCString(EEPROM_ADDR_DEVICE_NAME, storedName, sizeof(storedName));
+  return sanitizeDeviceName(String(storedName), output, outputSize);
 }
 
 void applyDefaultExtendedConfig(bool resetName)
@@ -3155,7 +3163,6 @@ void readConfigFromEEPROM(bool verbose)
   bool loadedExtendedConfig = false;
   bool loadedLegacyConfig = false;
   bool migratedAudioPatterns = false;
-  char storedUid[DEVICE_UID_LENGTH + 1] = "";
   configValid = false;
   configRepaired = false;
 
@@ -3179,14 +3186,13 @@ void readConfigFromEEPROM(bool verbose)
   currentDeviceUid[0] = '\0';
   currentDeviceName[0] = '\0';
   applyDefaultExtendedConfig(false);
-  readStoredDeviceUid(storedUid, sizeof(storedUid));
+  if (readStoredDeviceUid(currentDeviceUid, sizeof(currentDeviceUid)))
+  {
+    readStoredDeviceName(currentDeviceName, sizeof(currentDeviceName));
+  }
 
   if (safeBootActive)
   {
-    if (isValidDeviceUid(storedUid))
-    {
-      copyCString(currentDeviceUid, sizeof(currentDeviceUid), storedUid);
-    }
     ensureDeviceIdentity();
     normalizePersistentConfig();
     configRepaired = true;
@@ -3197,12 +3203,12 @@ void readConfigFromEEPROM(bool verbose)
     return;
   }
 
-  EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
-  EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
   EEPROM.get(EEPROM_ADDR_MAGIC, magic);
   if (magic == EEPROM_MAGIC)
   {
     loadedLegacyConfig = true;
+    EEPROM.get(EEPROM_ADDR_PATTERN, currentPattern);
+    EEPROM.get(EEPROM_ADDR_BRIGHTNESS, currentBrightness);
     EEPROM.get(EEPROM_ADDR_STRIP_LENGTH, currentStripLength);
     EEPROM.get(EEPROM_ADDR_SMOOTHING_SIZE, currentMotionSmoothingSize);
     EEPROM.get(EEPROM_ADDR_ACCEL_RANGE, currentAccelRange);
@@ -3245,19 +3251,18 @@ void readConfigFromEEPROM(bool verbose)
   }
   if (!loadedExtendedConfig)
   {
-    if (isValidDeviceUid(storedUid))
-    {
-      copyCString(currentDeviceUid, sizeof(currentDeviceUid), storedUid);
-    }
     currentPlayMode = currentAutoplayEnabled ? PLAY_MODE_AUTOPLAY : PLAY_MODE_MANUAL;
   }
   const bool loadedValuesSane = loadedExtendedConfig && isCurrentConfigSane();
   normalizePersistentConfig();
   configValid = loadedValuesSane;
   configRepaired = !loadedValuesSane || migratedAudioPatterns;
-  if (migratedAudioPatterns)
+  if (shouldPersistConfigRecovery(loadedValuesSane, migratedAudioPatterns))
   {
-    saveConfigToEEPROM(false);
+    if (!saveConfigToEEPROM(false) && verbose)
+    {
+      Serial.println("ERROR config_recovery_save_failed=1");
+    }
     configRepaired = true;
   }
   else if (loadedValuesSane)
@@ -3267,15 +3272,15 @@ void readConfigFromEEPROM(bool verbose)
 
   if (verbose && !loadedLegacyConfig)
   {
-    Serial.println("INFO config_valid=0 reason=bad_magic defaults=1");
+    Serial.println("INFO config_repaired=1 reason=bad_magic defaults=1");
   }
   else if (verbose && !loadedExtendedConfig)
   {
-    Serial.println("INFO config_valid=0 reason=legacy_or_incomplete defaults_extended=1");
+    Serial.println("INFO config_repaired=1 reason=legacy_or_incomplete defaults_extended=1");
   }
   else if (verbose && !loadedValuesSane)
   {
-    Serial.println("INFO config_valid=0 reason=invalid_values normalized=1");
+    Serial.println("INFO config_repaired=1 reason=invalid_values normalized=1");
   }
   if (verbose && migratedAudioPatterns)
   {
@@ -6411,7 +6416,9 @@ void setup()
   /* Making sure it worked (returns 0 if so) */
   if (devStatus == 0)
   {
-    const bool allowBootCalibration = configValid && !safeBootActive && currentBootCalibrationMode == BOOT_CALIBRATION_MODE_QUICK;
+    const bool allowBootCalibration = shouldRunBootCalibration(
+        safeBootActive,
+        currentBootCalibrationMode == BOOT_CALIBRATION_MODE_QUICK);
     if (allowBootCalibration)
     {
       runQuickCalibration(true);

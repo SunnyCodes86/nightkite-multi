@@ -17,3 +17,13 @@ inline uint32_t migrateEnabledPatternMask(int storedConfigVersion, uint32_t enab
       ? enabledPatternMask | AUDIO_SYNC_PATTERN_MASK
       : enabledPatternMask;
 }
+
+inline bool shouldPersistConfigRecovery(bool loadedValuesSane, bool migrated)
+{
+  return !loadedValuesSane || migrated;
+}
+
+inline bool shouldRunBootCalibration(bool safeBoot, bool quickConfigured)
+{
+  return !safeBoot && quickConfigured;
+}

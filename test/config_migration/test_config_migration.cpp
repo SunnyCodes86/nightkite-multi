@@ -13,5 +13,13 @@ int main()
   assert((migrateEnabledPatternMask(400, legacyCustom) & AUDIO_SYNC_PATTERN_MASK) == AUDIO_SYNC_PATTERN_MASK);
   assert(migrateEnabledPatternMask(401, legacyCustom) == legacyCustom);
   assert(migrateEnabledPatternMask(402, legacyCustom) == legacyCustom);
+
+  assert(shouldPersistConfigRecovery(false, false));
+  assert(shouldPersistConfigRecovery(true, true));
+  assert(!shouldPersistConfigRecovery(true, false));
+
+  assert(shouldRunBootCalibration(false, true));
+  assert(!shouldRunBootCalibration(false, false));
+  assert(!shouldRunBootCalibration(true, true));
   return 0;
 }
