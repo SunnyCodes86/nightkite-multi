@@ -33,6 +33,7 @@
 #include "app/AudioPatternMath.h"
 #include "app/Battery.h"
 #include "app/ConfigMigration.h"
+#include "app/OrientationColor.h"
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
 #include "app/SyncMath.h"
@@ -454,8 +455,6 @@ int ledeffect;
 int ledeffect2;
 
 // Shared scratch variables used by multiple motion-reactive patterns.
-int color;
-int color2;
 int accel;
 uint8_t accelcon;
 int fade;
@@ -774,6 +773,16 @@ AudioPatternFrame buildAudioPatternFrame()
   frame.treble = treble;
   frame.confidence = confidence;
   return frame;
+}
+
+int currentYawDegrees()
+{
+  return (int)(ypr[0] * 180.0f / M_PI);
+}
+
+uint8_t currentYawHue()
+{
+  return orientationHueFromDegrees(currentYawDegrees());
 }
 
 uint8_t audioPatternLocalHue()
@@ -5144,8 +5153,8 @@ void RunEntry2()
 
 void running2()
 {
-  color = map(color, -180, 180, 0, 255);
-  fill_solid(Strip, NUM_LEDS * 2, CHSV(color, 255, 255));
+  const uint8_t hue = currentYawHue();
+  fill_solid(Strip, NUM_LEDS * 2, CHSV(hue, 255, 255));
 }
 
 void RunEntry3()
@@ -5162,10 +5171,10 @@ void running3()
   uint8_t min_brightness = 30; // Set a minimum brightness level.
   accel = map(smoothedMotion(), 2000, 20000, min_brightness, MASTER_BRIGHTNESS);
   accelcon = constrain(accel, min_brightness, MASTER_BRIGHTNESS);
-  color = map(color, -180, 180, 0, 255);
+  const uint8_t hue = currentYawHue();
   FastLED.setBrightness(accelcon); // Set master brightness based on acceleration.
 
-  fill_solid(Strip, NUM_LEDS * 2, CHSV(color, 255, 255));
+  fill_solid(Strip, NUM_LEDS * 2, CHSV(hue, 255, 255));
 }
 
 void RunExit3()
@@ -5183,7 +5192,7 @@ void RunEntry4()
 
 void running4()
 {
-  color = map(color, -180, 180, 0, 255);
+  const uint8_t hue = currentYawHue();
   const uint32_t phaseInCycle = patternClock.phaseMs() % 1500UL; // 40 BPM.
   uint8_t pos = (uint8_t)((phaseInCycle * (uint32_t)NUM_LEDS) / 1500UL);
   if (pos >= NUM_LEDS)
@@ -5194,8 +5203,8 @@ void running4()
   {
     pos = (uint8_t)((NUM_LEDS - 1) - pos);
   }
-  Strip[pos] = CHSV(color, 200, 255);
-  Strip[pos + NUM_LEDS] = CHSV(color, 200, 255);
+  Strip[pos] = CHSV(hue, 200, 255);
+  Strip[pos + NUM_LEDS] = CHSV(hue, 200, 255);
 
   fadeToBlackBy(Strip, NUM_LEDS * 2, 12);
 }
@@ -5210,7 +5219,7 @@ void RunEntry5()
 void running5()
 {
   const int direction = getPatternDirectionFactor(5);
-  color = map(color, -180, 180, 0, 255);
+  const uint8_t hue = currentYawHue();
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
   fade = map(accel, 20, 160, 60, 12);
   accel = constrain(accel, 0, 100);
@@ -5225,8 +5234,8 @@ void running5()
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
 
-    Strip[ledeffect] = CHSV(color, 255, 255);
-    Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
+    Strip[ledeffect] = CHSV(hue, 255, 255);
+    Strip[ledeffect + NUM_LEDS] = CHSV(hue, 255, 255);
 
     ledeffect += direction;
 
@@ -5244,8 +5253,9 @@ void RunEntry6()
 void running6()
 {
   const int direction = getPatternDirectionFactor(6);
-  color = map(color, -180, 180, 0, 255);
-  color2 = map(color2, 180, -180, 0, 255);
+  const int yawDegrees = currentYawDegrees();
+  const uint8_t hue = orientationHueFromDegrees(yawDegrees);
+  const uint8_t reverseHue = orientationHueFromDegrees(-yawDegrees);
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
   fade = map(accel, 20, 160, 60, 12);
   accel = constrain(accel, 0, 100);
@@ -5261,10 +5271,10 @@ void running6()
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
 
-    Strip[ledeffect] = CHSV(color, 255, 255);
-    Strip[ledeffect2] = CHSV(color2, 255, 255);
-    Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
-    Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
+    Strip[ledeffect] = CHSV(hue, 255, 255);
+    Strip[ledeffect2] = CHSV(reverseHue, 255, 255);
+    Strip[ledeffect + NUM_LEDS] = CHSV(hue, 255, 255);
+    Strip[ledeffect2 + NUM_LEDS] = CHSV(reverseHue, 255, 255);
 
     ledeffect2 = ledeffect;
     ledeffect += direction;
@@ -5282,8 +5292,7 @@ void RunEntry7()
 
 void running7()
 {
-  color = map(color, -180, 180, 0, 255);
-  bloodHue = color; // Blood color [hue from 0-255]
+  bloodHue = currentYawHue(); // Blood color [hue from 0-255]
   const int flow = flowDirection * getPatternDirectionFactor(7);
 
   for (int i = 0; i < NUM_LEDS; i++)
@@ -5303,7 +5312,7 @@ void RunEntry8()
 
 void running8()
 {
-  color = map(color, -180, 180, 0, 255);
+  const uint8_t hue = currentYawHue();
   accel = map(smoothedMotion(), 0, 10000, 20, 160);
   fade = map(accel, 20, 160, 48, 6);
   fade = constrain(fade, 6, 48);
@@ -5314,8 +5323,8 @@ void running8()
     pos = (uint8_t)((NUM_LEDS - 1) - pos);
   }
 
-  Strip[pos] = CHSV(color, 200, 255);
-  Strip[pos + NUM_LEDS] = CHSV(color, 200, 255);
+  Strip[pos] = CHSV(hue, 200, 255);
+  Strip[pos + NUM_LEDS] = CHSV(hue, 200, 255);
 
   fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
 }
@@ -5336,8 +5345,7 @@ void running9()
   const uint8_t tailLength = 3;           // Symmetric glow radius around each comet head.
   const uint8_t maxBrightness = 255;
 
-  color = map(color, -180, 180, 0, 255);
-  const CRGB cometColor = CHSV(color, 200, 255);
+  const CRGB cometColor = CHSV(currentYawHue(), 200, 255);
 
   auto ringToLogicalIndex = [](int ringIndex) {
     if (ringIndex < NUM_LEDS)
@@ -5577,8 +5585,9 @@ void RunEntry14()
 void running14()
 {
   const int direction = getPatternDirectionFactor(14);
-  color = map(color, -180, 180, 0, 255);
-  color2 = map(color2, 180, -180, 0, 255);
+  const int yawDegrees = currentYawDegrees();
+  const uint8_t hue = orientationHueFromDegrees(yawDegrees);
+  const uint8_t reverseHue = orientationHueFromDegrees(-yawDegrees);
   accel = map(smoothedMotion(), 2000, 20000, 100, 0);
   fade = map(accel, 20, 160, 60, 12);
   accel = constrain(accel, 0, 100);
@@ -5594,10 +5603,10 @@ void running14()
 
     fadeToBlackBy(Strip, NUM_LEDS * 2, fade);
 
-    Strip[ledeffect] = CHSV(color, 255, 255);
-    Strip[ledeffect2] = CHSV(color2, 255, 255);
-    Strip[ledeffect + NUM_LEDS] = CHSV(color, 255, 255);
-    Strip[ledeffect2 + NUM_LEDS] = CHSV(color2, 255, 255);
+    Strip[ledeffect] = CHSV(hue, 255, 255);
+    Strip[ledeffect2] = CHSV(reverseHue, 255, 255);
+    Strip[ledeffect + NUM_LEDS] = CHSV(hue, 255, 255);
+    Strip[ledeffect2 + NUM_LEDS] = CHSV(reverseHue, 255, 255);
 
     ledeffect2 = ledeffect;
     ledeffect -= direction;
@@ -6597,9 +6606,6 @@ void loop()
     mpu.dmpGetQuaternion(&q, FIFOBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-    color = ypr[0] * 180 / M_PI;
-    color2 = ypr[0] * 180 / M_PI;
-
     // Gravity-free world-frame acceleration for motion-reactive patterns.
     mpu.dmpGetAccel(&aa, FIFOBuffer);
     mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
