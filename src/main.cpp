@@ -37,6 +37,7 @@
 #include "app/SyncEngine.h"
 #include "app/SyncMath.h"
 #include "protocol/CommandInput.h"
+#include "protocol/NkSetTransaction.h"
 #include "protocol/NkProtocol.h"
 #include "wireless/Rm2Ble.h"
 #include "wireless/SyncBeaconRadio.h"
@@ -3655,8 +3656,13 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
 
   if (command.command == "set")
   {
-    for (uint8_t i = 0; i < command.pairCount; i++)
-    {
+    uint32_t nextEnabledPatternMask = currentEnabledPatternMask;
+    // Validate the complete request before replaying its fields with side effects enabled.
+    if (!runNk4SetTransaction(command.pairCount, [&](uint8_t i, bool applyField) {
+      if (i == 0)
+      {
+        nextEnabledPatternMask = currentEnabledPatternMask;
+      }
       const String key = command.pairs[i].key;
       const String value = command.pairs[i].value;
       if (key == "name")
@@ -3665,14 +3671,17 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!sanitizeDeviceName(value, sanitized, sizeof(sanitized)))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_name");
-          return;
+          return false;
         }
-        copyCString(currentDeviceName, sizeof(currentDeviceName), sanitized);
+        if (applyField)
+        {
+          copyCString(currentDeviceName, sizeof(currentDeviceName), sanitized);
+        }
       }
       else if (key == "uid" || key == "device_uid")
       {
         nk4WriteError(writer, seq, "locked", "uid_locked");
-        return;
+        return false;
       }
       else if (key == "pattern")
       {
@@ -3680,14 +3689,17 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_pattern");
-          return;
+          return false;
         }
         if (!isValidPatternId(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_pattern");
-          return;
+          return false;
         }
-        switchToPattern((uint8_t)valueInt, true, "nk4_set");
+        if (applyField)
+        {
+          switchToPattern((uint8_t)valueInt, true, "nk4_set");
+        }
       }
       else if (key == "brightness")
       {
@@ -3695,16 +3707,19 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_brightness");
-          return;
+          return false;
         }
         if (!isValidBrightnessLevel(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_brightness");
-          return;
+          return false;
         }
-        currentBrightness = valueInt;
-        BRIGHTNESS = currentBrightness;
-        applyEffectiveBrightness();
+        if (applyField)
+        {
+          currentBrightness = valueInt;
+          BRIGHTNESS = currentBrightness;
+          applyEffectiveBrightness();
+        }
       }
       else if (key == "strip_length")
       {
@@ -3712,15 +3727,18 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_strip_length");
-          return;
+          return false;
         }
         if (!isValidStripLength(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_strip_length");
-          return;
+          return false;
         }
-        currentStripLength = valueInt;
-        applyConfiguredStripLength();
+        if (applyField)
+        {
+          currentStripLength = valueInt;
+          applyConfiguredStripLength();
+        }
       }
       else if (key == "smoothing")
       {
@@ -3728,15 +3746,18 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_smoothing");
-          return;
+          return false;
         }
         if (!isValidMotionSmoothingSize(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_smoothing");
-          return;
+          return false;
         }
-        currentMotionSmoothingSize = valueInt;
-        applyConfiguredMotionSmoothing();
+        if (applyField)
+        {
+          currentMotionSmoothingSize = valueInt;
+          applyConfiguredMotionSmoothing();
+        }
       }
       else if (key == "accel_range")
       {
@@ -3744,17 +3765,20 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_accel_range");
-          return;
+          return false;
         }
         if (!isValidAccelRange(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_accel_range");
-          return;
+          return false;
         }
-        currentAccelRange = valueInt;
-        if (imuReady)
+        if (applyField)
         {
-          applyConfiguredSensorRanges();
+          currentAccelRange = valueInt;
+          if (imuReady)
+          {
+            applyConfiguredSensorRanges();
+          }
         }
       }
       else if (key == "gyro_range")
@@ -3763,17 +3787,20 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_gyro_range");
-          return;
+          return false;
         }
         if (!isValidGyroRange(valueInt))
         {
           nk4WriteError(writer, seq, "range_error", "bad_gyro_range");
-          return;
+          return false;
         }
-        currentGyroRange = valueInt;
-        if (imuReady)
+        if (applyField)
         {
-          applyConfiguredSensorRanges();
+          currentGyroRange = valueInt;
+          if (imuReady)
+          {
+            applyConfiguredSensorRanges();
+          }
         }
       }
       else if (key == "boot_calibration")
@@ -3782,9 +3809,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!isValidBootCalibrationMode(mode))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_boot_calibration");
-          return;
+          return false;
         }
-        currentBootCalibrationMode = mode;
+        if (applyField)
+        {
+          currentBootCalibrationMode = mode;
+        }
       }
       else if (key == "enabled_mask")
       {
@@ -3792,18 +3822,22 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseUint32Value(value, &mask))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_enabled_mask");
-          return;
+          return false;
         }
         mask &= ALL_ENABLED_PATTERN_MASK;
         if (mask == 0)
         {
           nk4WriteError(writer, seq, "range_error", "empty_enabled_mask");
-          return;
+          return false;
         }
-        currentEnabledPatternMask = mask;
-        if (!isPatternEnabled((uint8_t)currentPattern))
+        nextEnabledPatternMask = mask;
+        if (applyField)
         {
-          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
+          currentEnabledPatternMask = mask;
+          if (!isPatternEnabled((uint8_t)currentPattern))
+          {
+            switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
+          }
         }
       }
       else if (key == "inverted_mask")
@@ -3812,9 +3846,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseUint32Value(value, &mask))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_inverted_mask");
-          return;
+          return false;
         }
-        currentInvertedPatternMask = sanitizeInvertedPatternMask(mask);
+        if (applyField)
+        {
+          currentInvertedPatternMask = sanitizeInvertedPatternMask(mask);
+        }
       }
       else if (key == "enable_pattern")
       {
@@ -3822,9 +3859,13 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parsePatternListMask(value, &mask))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
-          return;
+          return false;
         }
-        updateEnabledPatternsFromMask(mask, true);
+        nextEnabledPatternMask = sanitizeEnabledPatternMask(nextEnabledPatternMask | mask);
+        if (applyField)
+        {
+          updateEnabledPatternsFromMask(mask, true);
+        }
       }
       else if (key == "disable_pattern")
       {
@@ -3832,16 +3873,22 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parsePatternListMask(value, &mask))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
-          return;
+          return false;
         }
-        if (!updateEnabledPatternsFromMask(mask, false))
+        const uint32_t remainingMask = nextEnabledPatternMask & (uint32_t)~mask;
+        if (remainingMask == 0)
         {
           nk4WriteError(writer, seq, "locked", "last_pattern");
-          return;
+          return false;
         }
-        if (!isPatternEnabled((uint8_t)currentPattern))
+        nextEnabledPatternMask = sanitizeEnabledPatternMask(remainingMask);
+        if (applyField)
         {
-          switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
+          updateEnabledPatternsFromMask(mask, false);
+          if (!isPatternEnabled((uint8_t)currentPattern))
+          {
+            switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
+          }
         }
       }
       else if (key == "invert_pattern")
@@ -3850,9 +3897,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parsePatternListMask(value, &mask))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
-          return;
+          return false;
         }
-        updateInvertedPatternsFromMask(mask, true);
+        if (applyField)
+        {
+          updateInvertedPatternsFromMask(mask, true);
+        }
       }
       else if (key == "normal_pattern")
       {
@@ -3860,9 +3910,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parsePatternListMask(value, &mask))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_pattern_list");
-          return;
+          return false;
         }
-        updateInvertedPatternsFromMask(mask, false);
+        if (applyField)
+        {
+          updateInvertedPatternsFromMask(mask, false);
+        }
       }
       else if (key == "sync_enabled")
       {
@@ -3870,9 +3923,9 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseBinaryValue(value, &flag))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_sync_enabled");
-          return;
+          return false;
         }
-        if (currentSyncEnabled != flag)
+        if (applyField && currentSyncEnabled != flag)
         {
           currentSyncEnabled = flag;
           syncEngine.cancel();
@@ -3884,14 +3937,14 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &valueInt))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_sync_group");
-          return;
+          return false;
         }
         if (valueInt < 1 || valueInt > 255)
         {
           nk4WriteError(writer, seq, "range_error", "bad_sync_group");
-          return;
+          return false;
         }
-        if (currentSyncGroupId != valueInt)
+        if (applyField && currentSyncGroupId != valueInt)
         {
           currentSyncGroupId = valueInt;
           syncEngine.cancel();
@@ -3903,9 +3956,9 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (role < 0)
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_sync_role");
-          return;
+          return false;
         }
-        if (currentSyncRole != role)
+        if (applyField && currentSyncRole != role)
         {
           currentSyncRole = role;
           syncEngine.cancel();
@@ -3915,7 +3968,10 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
       {
         if (value == "none" || value == "0")
         {
-          currentSyncMasterUid[0] = '\0';
+          if (applyField)
+          {
+            currentSyncMasterUid[0] = '\0';
+          }
         }
         else
         {
@@ -3923,9 +3979,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           if (!sanitizeUidString(value, sanitized, sizeof(sanitized)))
           {
             nk4WriteError(writer, seq, "invalid_value", "bad_master_uid");
-            return;
+            return false;
           }
-          copyCString(currentSyncMasterUid, sizeof(currentSyncMasterUid), sanitized);
+          if (applyField)
+          {
+            copyCString(currentSyncMasterUid, sizeof(currentSyncMasterUid), sanitized);
+          }
         }
       }
       else if (key == "sync_loss_behavior")
@@ -3934,9 +3993,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (behavior < 0)
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_sync_loss");
-          return;
+          return false;
         }
-        currentSyncLossBehavior = behavior;
+        if (applyField)
+        {
+          currentSyncLossBehavior = behavior;
+        }
       }
       else if (key == "wireless_enabled")
       {
@@ -3944,9 +4006,9 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseBinaryValue(value, &flag))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_wireless_enabled");
-          return;
+          return false;
         }
-        if (currentWirelessEnabled != flag)
+        if (applyField && currentWirelessEnabled != flag)
         {
           currentWirelessEnabled = flag;
           syncEngine.cancel();
@@ -3958,9 +4020,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (profile < 0)
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_wireless_profile");
-          return;
+          return false;
         }
-        currentWirelessProfile = profile;
+        if (applyField)
+        {
+          currentWirelessProfile = profile;
+        }
       }
       else if (key == "play_mode")
       {
@@ -3968,9 +4033,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (mode < 0)
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_play_mode");
-          return;
+          return false;
         }
-        setPlayMode(mode);
+        if (applyField)
+        {
+          setPlayMode(mode);
+        }
       }
       else if (key == "boot_mode")
       {
@@ -3978,9 +4046,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (mode < 0)
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_boot_mode");
-          return;
+          return false;
         }
-        currentBootMode = mode;
+        if (applyField)
+        {
+          currentBootMode = mode;
+        }
       }
       else if (key == "autoplay" || key == "autoplay_enabled")
       {
@@ -3988,9 +4059,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseBinaryValue(value, &flag))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_autoplay");
-          return;
+          return false;
         }
-        setAutoplayEnabledFlag(flag);
+        if (applyField)
+        {
+          setAutoplayEnabledFlag(flag);
+        }
       }
       else if (key == "autoplay_interval")
       {
@@ -3998,16 +4072,19 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (!parseIntValue(value, &intervalSec))
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_autoplay_interval");
-          return;
+          return false;
         }
         if (intervalSec < 1 || intervalSec > 300)
         {
           nk4WriteError(writer, seq, "range_error", "bad_autoplay_interval");
-          return;
+          return false;
         }
-        int intervalMs = intervalSec * 1000;
-        currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(intervalMs);
-        resetAutoplayTimer();
+        if (applyField)
+        {
+          int intervalMs = intervalSec * 1000;
+          currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(intervalMs);
+          resetAutoplayTimer();
+        }
       }
       else if (key == "usb_mode" || key == "protocol")
       {
@@ -4015,23 +4092,33 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         mode.toLowerCase();
         if (mode == "human" || mode == "legacy")
         {
-          usbProtocolMode = USB_PROTOCOL_HUMAN;
+          if (applyField)
+          {
+            usbProtocolMode = USB_PROTOCOL_HUMAN;
+          }
         }
         else if (mode == "machine" || mode == "nk4")
         {
-          usbProtocolMode = USB_PROTOCOL_MACHINE;
+          if (applyField)
+          {
+            usbProtocolMode = USB_PROTOCOL_MACHINE;
+          }
         }
         else
         {
           nk4WriteError(writer, seq, "invalid_value", "bad_usb_mode");
-          return;
+          return false;
         }
       }
       else
       {
         nk4WriteError(writer, seq, "invalid_key", "unknown_key");
-        return;
+        return false;
       }
+      return true;
+    }))
+    {
+      return;
     }
     normalizePersistentConfig();
     String fields = "updated=1 play_mode=";
