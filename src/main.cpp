@@ -36,6 +36,7 @@
 #include "app/PatternClock.h"
 #include "app/SyncEngine.h"
 #include "app/SyncMath.h"
+#include "protocol/CommandInput.h"
 #include "protocol/NkProtocol.h"
 #include "wireless/Rm2Ble.h"
 #include "wireless/SyncBeaconRadio.h"
@@ -346,6 +347,7 @@ unsigned long batteryViewLastInteractionMs = 0;
 
 SimpleCLI cli;
 String cliInputBuffer;
+bool cliInputOverflow = false;
 bool cliPromptShown = false;
 unsigned long cliLastInputMs = 0;
 const unsigned long CLI_AUTOPARSE_TIMEOUT_MS = 200;
@@ -1025,56 +1027,14 @@ int parseOnOffValue(String valueText)
 
 bool parseIntValue(String value, int* output)
 {
-  if (output == NULL)
-  {
-    return false;
-  }
   value.trim();
-  if (value.length() == 0)
-  {
-    return false;
-  }
-
-  int start = (value[0] == '-' || value[0] == '+') ? 1 : 0;
-  if (start >= value.length())
-  {
-    return false;
-  }
-  for (int i = start; i < value.length(); i++)
-  {
-    if (!isDigit((int)value[i]))
-    {
-      return false;
-    }
-  }
-  *output = value.toInt();
-  return true;
+  return parseStrictInt(value.c_str(), output);
 }
 
 bool parseUint32Value(String value, uint32_t* output)
 {
-  if (output == NULL)
-  {
-    return false;
-  }
   value.trim();
-  if (value.length() == 0)
-  {
-    return false;
-  }
-  if (value[0] == '-')
-  {
-    return false;
-  }
-
-  char* endPtr = NULL;
-  unsigned long parsed = strtoul(value.c_str(), &endPtr, 0);
-  if (endPtr == value.c_str() || (endPtr != NULL && *endPtr != '\0'))
-  {
-    return false;
-  }
-  *output = (uint32_t)parsed;
-  return true;
+  return parseStrictUint32(value.c_str(), output);
 }
 
 bool parseBinaryValue(String value, int* output)
@@ -2683,8 +2643,8 @@ bool parsePatternListMask(String valueText, uint32_t* maskOut)
       return false;
     }
 
-    int patternId = token.toInt();
-    if (!isValidPatternId(patternId))
+    int patternId = 0;
+    if (!parseIntValue(token, &patternId) || !isValidPatternId(patternId))
     {
       return false;
     }
@@ -4040,12 +4000,12 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
           nk4WriteError(writer, seq, "invalid_value", "bad_autoplay_interval");
           return;
         }
-        int intervalMs = intervalSec * 1000;
-        if (intervalMs < MIN_AUTOPLAY_INTERVAL_MS || intervalMs > MAX_AUTOPLAY_INTERVAL_MS)
+        if (intervalSec < 1 || intervalSec > 300)
         {
           nk4WriteError(writer, seq, "range_error", "bad_autoplay_interval");
           return;
         }
+        int intervalMs = intervalSec * 1000;
         currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(intervalMs);
         resetAutoplayTimer();
       }
@@ -4388,12 +4348,13 @@ void onCliSet(cmd* cPtr)
   Command cmd(cPtr);
   String key = cmd.getArgument("key").getValue();
   String valueText = cmd.getArgument("value").getValue();
-  int value = valueText.toInt();
+  int value = 0;
+  const bool numericValueValid = parseIntValue(valueText, &value);
   key.toLowerCase();
 
   if (key == "pattern")
   {
-    if (!isValidPatternId(value))
+    if (!numericValueValid || !isValidPatternId(value))
     {
       Serial.println("ERR pattern range 1..27");
       return;
@@ -4407,7 +4368,7 @@ void onCliSet(cmd* cPtr)
 
   if (key == "brightness")
   {
-    if (!isValidBrightnessLevel(value))
+    if (!numericValueValid || !isValidBrightnessLevel(value))
     {
       Serial.println("ERR brightness must be one of 95,127,159,191,223,255");
       return;
@@ -4424,7 +4385,7 @@ void onCliSet(cmd* cPtr)
   }
   if (key == "strip_length")
   {
-    if (!isValidStripLength(value))
+    if (!numericValueValid || !isValidStripLength(value))
     {
       Serial.print("ERR strip_length range ");
       Serial.print(MIN_LEDS_PER_STRIP);
@@ -4441,7 +4402,7 @@ void onCliSet(cmd* cPtr)
   }
   if (key == "smoothing")
   {
-    if (!isValidMotionSmoothingSize(value))
+    if (!numericValueValid || !isValidMotionSmoothingSize(value))
     {
       Serial.print("ERR smoothing range ");
       Serial.print(MIN_MOTION_SMOOTHING_SIZE);
@@ -4458,7 +4419,7 @@ void onCliSet(cmd* cPtr)
   }
   if (key == "accel_range")
   {
-    if (!isValidAccelRange(value))
+    if (!numericValueValid || !isValidAccelRange(value))
     {
       Serial.println("ERR accel_range must be one of 2,4,8,16");
       return;
@@ -4472,7 +4433,7 @@ void onCliSet(cmd* cPtr)
   }
   if (key == "gyro_range")
   {
-    if (!isValidGyroRange(value))
+    if (!numericValueValid || !isValidGyroRange(value))
     {
       Serial.println("ERR gyro_range must be one of 250,500,1000,2000");
       return;
@@ -4514,13 +4475,13 @@ void onCliSet(cmd* cPtr)
   }
   if (key == "autoplay_interval")
   {
-    int intervalMs = value * 1000;
-    if (intervalMs < MIN_AUTOPLAY_INTERVAL_MS || intervalMs > MAX_AUTOPLAY_INTERVAL_MS)
+    if (!numericValueValid || value < 1 || value > 300)
     {
       Serial.println("ERR autoplay_interval range 1..300");
       return;
     }
 
+    int intervalMs = value * 1000;
     currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(intervalMs);
     resetAutoplayTimer();
     Serial.print("OK autoplay_interval=");
@@ -4841,15 +4802,68 @@ void setupCLI()
   cli.setOnError(onCliError);
 }
 
+void resetCliInput()
+{
+  cliInputBuffer = "";
+  cliInputOverflow = false;
+  cliLastInputMs = 0;
+}
+
+void processCliInput(bool* commandExecuted)
+{
+  cliInputBuffer.trim();
+  if (cliInputOverflow)
+  {
+    if (usbProtocolMode == USB_PROTOCOL_MACHINE || cliInputBuffer.startsWith("NK4"))
+    {
+      NkCommand partialCommand;
+      parseNk4Line(cliInputBuffer, &partialCommand, NULL, NULL);
+      SerialResponseWriter writer;
+      nk4WriteError(writer, partialCommand.seq, "range_error", "line_too_long");
+    }
+    else
+    {
+      Serial.println("ERR line too long");
+      if (commandExecuted != NULL)
+      {
+        *commandExecuted = true;
+      }
+    }
+    resetCliInput();
+    return;
+  }
+
+  if (cliInputBuffer.length() > 0)
+  {
+    if (cliInputBuffer.startsWith("NK4"))
+    {
+      handleNk4Line(cliInputBuffer);
+    }
+    else if (usbProtocolMode == USB_PROTOCOL_MACHINE)
+    {
+      SerialResponseWriter writer;
+      nk4WriteError(writer, "0", "invalid_command", "expected_NK4");
+    }
+    else
+    {
+      cli.parse(cliInputBuffer);
+      if (commandExecuted != NULL)
+      {
+        *commandExecuted = true;
+      }
+    }
+  }
+  resetCliInput();
+}
+
 void handleCLI()
 {
   bool commandExecuted = false;
 
   if (!SerialSessionActive)
   {
-    cliInputBuffer = "";
+    resetCliInput();
     cliPromptShown = false;
-    cliLastInputMs = 0;
     cliSessionBannerPending = false;
     cliSessionBecameActiveMs = 0;
     return;
@@ -4872,64 +4886,33 @@ void handleCLI()
   {
     char ch = (char)Serial.read();
 
-    if (ch == '\r')
+    if (ch == '\r' || ch == '\n')
     {
-      continue;
-    }
-    if (ch == '\n')
-    {
-      cliInputBuffer.trim();
-      if (cliInputBuffer.length() > 0)
-      {
-        if (cliInputBuffer.startsWith("NK4"))
-        {
-          handleNk4Line(cliInputBuffer);
-        }
-        else if (usbProtocolMode == USB_PROTOCOL_MACHINE)
-        {
-          SerialResponseWriter writer;
-          nk4WriteError(writer, "0", "invalid_command", "expected_NK4");
-        }
-        else
-        {
-          cli.parse(cliInputBuffer);
-          commandExecuted = true;
-        }
-      }
-      cliInputBuffer = "";
+      processCliInput(&commandExecuted);
       continue;
     }
 
-    if (isPrintable((int)ch) && cliInputBuffer.length() < 128)
+    if (isPrintable((unsigned char)ch))
     {
-      cliInputBuffer += ch;
+      if (usbInputHasCapacity(cliInputBuffer.length()))
+      {
+        cliInputBuffer += ch;
+      }
+      else
+      {
+        cliInputOverflow = true;
+      }
       cliLastInputMs = millis();
     }
   }
 
-  // Some serial monitors send without newline; parse after a short idle time.
-  if (cliInputBuffer.length() > 0 && cliLastInputMs > 0 && (millis() - cliLastInputMs >= CLI_AUTOPARSE_TIMEOUT_MS))
+  // Keep no-newline convenience for Legacy monitors; NK4 always waits for framing.
+  if ((cliInputBuffer.length() > 0 || cliInputOverflow) &&
+      cliLastInputMs > 0 &&
+      millis() - cliLastInputMs >= CLI_AUTOPARSE_TIMEOUT_MS &&
+      shouldAutoParseUsbInput(usbProtocolMode == USB_PROTOCOL_MACHINE, cliInputBuffer.c_str()))
   {
-    cliInputBuffer.trim();
-    if (cliInputBuffer.length() > 0)
-    {
-      if (cliInputBuffer.startsWith("NK4"))
-      {
-        handleNk4Line(cliInputBuffer);
-      }
-      else if (usbProtocolMode == USB_PROTOCOL_MACHINE)
-      {
-        SerialResponseWriter writer;
-        nk4WriteError(writer, "0", "invalid_command", "expected_NK4");
-      }
-      else
-      {
-        cli.parse(cliInputBuffer);
-        commandExecuted = true;
-      }
-    }
-    cliInputBuffer = "";
-    cliLastInputMs = 0;
+    processCliInput(&commandExecuted);
   }
 
   if (commandExecuted && usbProtocolMode == USB_PROTOCOL_HUMAN)
@@ -6589,8 +6572,7 @@ void loop()
     cliSessionBecameActiveMs = millis();
     cliSessionBannerPending = true;
     cliPromptShown = false;
-    cliInputBuffer = "";
-    cliLastInputMs = 0;
+    resetCliInput();
   }
   // Disable the charging view while a serial session is active.
   UsbConnected = (UsbPowerRaw == 1 && !SerialSessionActive) ? 1 : 0;
