@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <string.h>
+#include <string>
 
 #include "wireless/BleGattHelpers.h"
 
@@ -36,9 +37,59 @@ static void testAttWriteValidationRejectsMalformedBuffers()
   assert(validateBleAttWrite(0, NULL, 0) == BLE_ATT_WRITE_VALID);
 }
 
+static void feedBleWrite(BleCommandFramer* framer, const std::string& bytes,
+    std::string* overflowPrefix, std::string* completedLine)
+{
+  for (size_t i = 0; i < bytes.size(); i++)
+  {
+    const int lineLength = consumeBleCommandByte(framer, bytes[i]);
+    if (lineLength < 0)
+    {
+      overflowPrefix->assign(framer->buffer, sizeof(framer->buffer));
+    }
+    else if (lineLength > 0)
+    {
+      completedLine->assign(framer->buffer, (size_t)lineLength);
+    }
+  }
+}
+
+static void testFragmentedOverflowDefersErrorAndRecovers()
+{
+  BleCommandFramer framer = {};
+  resetBleCommandFramer(&framer);
+  std::string overflowPrefix;
+  std::string completedLine;
+  const std::string malformed = "NK4 seq=41 bad seq=99 cmd=set pattern=1 ";
+  const std::string oversized = malformed + std::string(BLE_GATT_COMMAND_CAPACITY, 'x');
+
+  // Both ATT write properties feed the same byte framer; split at arbitrary write boundaries.
+  feedBleWrite(&framer, oversized.substr(0, 17), &overflowPrefix, &completedLine);
+  feedBleWrite(&framer, oversized.substr(17), &overflowPrefix, &completedLine);
+  assert(overflowPrefix == oversized.substr(0, BLE_GATT_COMMAND_CAPACITY));
+  assert(!takeBleCommandOverflow(&framer));
+
+  feedBleWrite(&framer, "\n", &overflowPrefix, &completedLine);
+  assert(takeBleCommandOverflow(&framer));
+  assert(!takeBleCommandOverflow(&framer));
+
+  const std::string compact = "NK4seq=42 cmd=status\n";
+  feedBleWrite(&framer, compact, &overflowPrefix, &completedLine);
+  assert(completedLine == compact.substr(0, compact.size() - 1));
+
+  resetBleCommandFramer(&framer);
+  overflowPrefix.clear();
+  const std::string missingSequence = "NK4 cmd=set pattern=1 " +
+      std::string(BLE_GATT_COMMAND_CAPACITY, 'x') + "\n";
+  feedBleWrite(&framer, missingSequence, &overflowPrefix, &completedLine);
+  assert(overflowPrefix == missingSequence.substr(0, BLE_GATT_COMMAND_CAPACITY));
+  assert(takeBleCommandOverflow(&framer));
+}
+
 int main()
 {
   testGattAdvertisingContainsUuidAndVisibleName();
   testAttWriteValidationRejectsMalformedBuffers();
+  testFragmentedOverflowDefersErrorAndRecovers();
   return 0;
 }

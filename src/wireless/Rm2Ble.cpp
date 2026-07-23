@@ -37,7 +37,7 @@
 namespace
 {
 constexpr size_t BLE_NAME_MAX = 24;
-constexpr size_t BLE_COMMAND_MAX = 192;
+constexpr size_t BLE_COMMAND_MAX = BLE_GATT_COMMAND_CAPACITY;
 constexpr size_t BLE_COMMAND_QUEUE_DEPTH = 4;
 constexpr size_t BLE_TX_BUFFER_MAX = BLE_NK4_RESPONSE_CAPACITY;
 constexpr size_t BLE_TX_QUEUE_DEPTH = 4;
@@ -77,11 +77,9 @@ uint16_t rxValueHandle = 0;
 uint16_t txValueHandle = 0;
 uint16_t txClientConfigHandle = 0;
 bool txNotificationsEnabled = false;
-char rxLineBuffer[BLE_COMMAND_MAX];
-size_t rxLineLen = 0;
-bool rxDroppingLongLine = false;
-bool rxRangeErrorPending = false;
+BleCommandFramer rxFramer = {};
 bool rxQueueFullErrorPending = false;
+char rxRangeErrorSequence[BLE_COMMAND_MAX];
 char commandQueue[BLE_COMMAND_QUEUE_DEPTH][BLE_COMMAND_MAX];
 size_t commandQueueLen[BLE_COMMAND_QUEUE_DEPTH];
 uint8_t commandQueueHead = 0;
@@ -98,6 +96,21 @@ unsigned long lastNotifyChunkMs = 0;
 unsigned long lastTxProgressMs = 0;
 
 void configureGattAdvertisingParams();
+
+void prepareRxRangeErrorSequence(const char* line, size_t lineLen)
+{
+  if (rxFramer.overflowPending)
+  {
+    return;
+  }
+  NkCommand partialCommand;
+  parseNk4Line(String(line, (unsigned int)lineLen), &partialCommand, NULL, NULL);
+  rxRangeErrorSequence[0] = '\0';
+  if (partialCommand.seq.length() > 0 && partialCommand.seq.length() < sizeof(rxRangeErrorSequence))
+  {
+    memcpy(rxRangeErrorSequence, partialCommand.seq.c_str(), partialCommand.seq.length() + 1);
+  }
+}
 
 // 4e4b4000-6e69-6768-746b-000000000001
 const uint8_t NIGHTKITE_SERVICE_UUID[16] = {
@@ -166,7 +179,8 @@ bool enqueueCommandLine(const char* line, size_t lineLen)
   }
   if (lineLen >= BLE_COMMAND_MAX)
   {
-    rxRangeErrorPending = true;
+    prepareRxRangeErrorSequence(line, lineLen);
+    rxFramer.overflowPending = true;
     lastError = "rx_line_too_long";
     return false;
   }
@@ -202,10 +216,9 @@ void resetTxQueue()
 
 void resetRxQueue()
 {
-  rxLineLen = 0;
-  rxDroppingLongLine = false;
-  rxRangeErrorPending = false;
+  resetBleCommandFramer(&rxFramer);
   rxQueueFullErrorPending = false;
+  rxRangeErrorSequence[0] = '\0';
   commandQueueHead = 0;
   commandQueueTail = 0;
   commandQueueCount = 0;
@@ -307,52 +320,20 @@ void sendNextTxChunk()
   }
 }
 
-void enqueueNk4ErrorLine(const char* code, const char* msg)
-{
-  char line[96];
-  const int written = snprintf(line, sizeof(line), "NK4 seq=0 err code=%s msg=%s\n", code, msg);
-  if (written > 0)
-  {
-    enqueueTxLine(line, (size_t)written);
-  }
-}
-
 void consumeRxBytes(const uint8_t* data, uint16_t dataLen)
 {
   for (uint16_t i = 0; i < dataLen; i++)
   {
-    const char ch = (char)data[i];
-    if (rxDroppingLongLine)
+    const int lineLength = consumeBleCommandByte(&rxFramer, (char)data[i]);
+    if (lineLength > 0)
     {
-      if (ch == '\n')
-      {
-        rxDroppingLongLine = false;
-        rxRangeErrorPending = true;
-      }
-      continue;
+      enqueueCommandLine(rxFramer.buffer, (size_t)lineLength);
     }
-
-    if (ch == '\r')
+    else if (lineLength < 0)
     {
-      continue;
-    }
-    if (ch == '\n')
-    {
-      if (rxLineLen > 0)
-      {
-        enqueueCommandLine(rxLineBuffer, rxLineLen);
-        rxLineLen = 0;
-      }
-      continue;
-    }
-    if (rxLineLen >= BLE_COMMAND_MAX - 1)
-    {
-      rxLineLen = 0;
-      rxDroppingLongLine = true;
+      prepareRxRangeErrorSequence(rxFramer.buffer, sizeof(rxFramer.buffer));
       lastError = "rx_line_too_long";
-      continue;
     }
-    rxLineBuffer[rxLineLen++] = ch;
   }
 }
 
@@ -706,15 +687,17 @@ void rm2BleTick()
     return;
   }
 
-  if (rxRangeErrorPending && txQueueCount == 0)
+  if (txQueueCount == 0 && takeBleCommandOverflow(&rxFramer))
   {
-    rxRangeErrorPending = false;
-    enqueueNk4ErrorLine("range_error", "line_too_long");
+    BleResponseWriter writer;
+    nk4WriteError(writer, rxRangeErrorSequence, "range_error", "line_too_long");
+    rxRangeErrorSequence[0] = '\0';
   }
   if (rxQueueFullErrorPending && txQueueCount == 0)
   {
     rxQueueFullErrorPending = false;
-    enqueueNk4ErrorLine("busy", "rx_queue_full");
+    BleResponseWriter writer;
+    nk4WriteError(writer, "0", "busy", "rx_queue_full");
   }
 
   if (txQueueCount == 0 && nk4Handler != nullptr)

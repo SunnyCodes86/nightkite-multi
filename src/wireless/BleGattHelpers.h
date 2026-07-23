@@ -5,6 +5,7 @@
 #include <string.h>
 
 constexpr size_t BLE_LEGACY_ADV_CAPACITY = 31;
+constexpr size_t BLE_GATT_COMMAND_CAPACITY = 192;
 
 struct BleGattAdvertisingData
 {
@@ -83,4 +84,61 @@ inline BleAttWriteValidation validateBleAttWrite(uint16_t offset, const uint8_t*
     return BLE_ATT_WRITE_INVALID_LENGTH;
   }
   return BLE_ATT_WRITE_VALID;
+}
+
+struct BleCommandFramer
+{
+  char buffer[BLE_GATT_COMMAND_CAPACITY];
+  uint16_t length;
+  bool droppingLongLine;
+  bool overflowPending;
+};
+
+inline void resetBleCommandFramer(BleCommandFramer* framer)
+{
+  framer->length = 0;
+  framer->droppingLongLine = false;
+  framer->overflowPending = false;
+}
+
+// Returns the completed line length, 0 for no event, or -1 when overflow starts.
+inline int consumeBleCommandByte(BleCommandFramer* framer, char ch)
+{
+  if (framer->droppingLongLine)
+  {
+    if (ch == '\n')
+    {
+      framer->droppingLongLine = false;
+      framer->overflowPending = true;
+    }
+    return 0;
+  }
+  if (ch == '\r')
+  {
+    return 0;
+  }
+  if (ch == '\n')
+  {
+    const int lineLength = framer->length;
+    framer->length = 0;
+    return lineLength;
+  }
+  framer->buffer[framer->length++] = ch;
+  if (framer->length == BLE_GATT_COMMAND_CAPACITY)
+  {
+    framer->length = 0;
+    framer->droppingLongLine = true;
+    return -1;
+  }
+  return 0;
+}
+
+inline bool takeBleCommandOverflow(BleCommandFramer* framer)
+{
+  if (!framer->overflowPending)
+  {
+    return false;
+  }
+  framer->overflowPending = false;
+  return true;
 }
