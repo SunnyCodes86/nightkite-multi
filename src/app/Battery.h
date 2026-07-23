@@ -16,15 +16,23 @@ constexpr float BATTERY_CRITICAL_VOLTAGE = 3.30f;
 constexpr float BATTERY_SOFT_CUTOFF_VOLTAGE = 3.20f;
 constexpr float BATTERY_EMERGENCY_CUTOFF_VOLTAGE = 3.08f;
 constexpr float BATTERY_STATE_HYSTERESIS_VOLTAGE = 0.05f;
+constexpr float BATTERY_MEASUREMENT_HYSTERESIS_VOLTAGE = 0.05f;
 constexpr uint32_t BATTERY_LOW_WARNING_DELAY_MS = 15000;
 constexpr uint32_t BATTERY_CRITICAL_DELAY_MS = 10000;
 constexpr uint32_t BATTERY_SOFT_CUTOFF_DELAY_MS = 15000;
+
+struct BatteryMeasurement
+{
+  float displayVoltage;
+  float protectionVoltage;
+};
 
 const char* batteryStateName(BatteryState state);
 int estimateBatteryPercent(float voltage);
 uint8_t batteryBarsForPercent(int percent);
 bool batteryStateCutsOff(BatteryState state);
 bool batteryStateCapsBrightness(BatteryState state);
+BatteryMeasurement batteryMeasurementFromAverage(float averagedVoltage, float displayedVoltage, bool firstSample);
 
 class BatteryStateTracker
 {

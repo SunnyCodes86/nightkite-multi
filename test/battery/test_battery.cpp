@@ -55,9 +55,21 @@ static void testStateTransitions()
   assert(batteryStateCutsOff(tracker.state()));
 }
 
+static void testDisplayHysteresisDoesNotDelayProtection()
+{
+  const BatteryMeasurement measurement = batteryMeasurementFromAverage(3.29f, 3.33f, false);
+  assert(measurement.displayVoltage == 3.33f);
+  assert(measurement.protectionVoltage == 3.29f);
+
+  BatteryStateTracker tracker;
+  assert(tracker.update(measurement.protectionVoltage, false, 1000) == BATTERY_STATE_NORMAL);
+  assert(tracker.update(measurement.protectionVoltage, false, 11000) == BATTERY_STATE_CRITICAL);
+}
+
 int main()
 {
   testSocInterpolation();
   testStateTransitions();
+  testDisplayHysteresisDoesNotDelayProtection();
   return 0;
 }

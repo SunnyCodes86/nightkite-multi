@@ -1,5 +1,6 @@
 #include "app/Battery.h"
 
+#include <math.h>
 #include <stddef.h>
 
 struct BatterySocPoint
@@ -94,6 +95,16 @@ bool batteryStateCutsOff(BatteryState state)
 bool batteryStateCapsBrightness(BatteryState state)
 {
   return state == BATTERY_STATE_CRITICAL || batteryStateCutsOff(state);
+}
+
+BatteryMeasurement batteryMeasurementFromAverage(float averagedVoltage, float displayedVoltage, bool firstSample)
+{
+  BatteryMeasurement measurement = {displayedVoltage, averagedVoltage};
+  if (firstSample || fabsf(averagedVoltage - displayedVoltage) >= BATTERY_MEASUREMENT_HYSTERESIS_VOLTAGE)
+  {
+    measurement.displayVoltage = averagedVoltage;
+  }
+  return measurement;
 }
 
 BatteryState BatteryStateTracker::update(float voltage, bool usbPowered, uint32_t nowMs)

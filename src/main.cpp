@@ -122,7 +122,6 @@ int const INTERRUPT_PIN = PIN_MPU_INTERRUPT; // MPU interrupt input pin
 
 constexpr unsigned long BATTERY_SAMPLE_INTERVAL_MS = 1000;
 constexpr uint8_t BATTERY_SAMPLE_WINDOW = 15;
-constexpr float BATTERY_MEASUREMENT_HYSTERESIS_VOLTAGE = 0.05f;
 
 int ledsPerStrip = DEFAULT_LEDS_PER_STRIP;
 int totalLeds = (DEFAULT_LEDS_PER_STRIP * 2); // total logical LEDs across both strips
@@ -2779,14 +2778,12 @@ void updateBatteryMeasurement(bool force)
   batteryVoltageSampleIndex = (batteryVoltageSampleIndex + 1) % BATTERY_SAMPLE_WINDOW;
 
   const float averagedVoltage = batteryVoltageSampleSum / batteryVoltageSampleCount;
-  if (noSamplesYet || fabsf(averagedVoltage - Voltage) >= BATTERY_MEASUREMENT_HYSTERESIS_VOLTAGE)
-  {
-    Voltage = averagedVoltage;
-  }
+  const BatteryMeasurement measurement = batteryMeasurementFromAverage(averagedVoltage, Voltage, noSamplesYet);
+  Voltage = measurement.displayVoltage;
 
   BatteryPercent = estimateBatteryPercent(Voltage);
   const BatteryState previousState = currentBatteryState;
-  currentBatteryState = batteryStateTracker.update(Voltage, isUsbPowered(), now);
+  currentBatteryState = batteryStateTracker.update(measurement.protectionVoltage, isUsbPowered(), now);
   if (batteryStateCapsBrightness(previousState) && !batteryStateCapsBrightness(currentBatteryState))
   {
     applyEffectiveBrightness();
