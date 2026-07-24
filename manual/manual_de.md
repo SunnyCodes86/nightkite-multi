@@ -216,6 +216,7 @@ Hinweise:
 - `calibrate quick` ist die schnelle Alltags-Kalibrierung und speichert die gefundenen Offsets.
 - `calibrate precise` nutzt den deutlich langsameren `IMU_Zero`-basierten Präzisionspfad und speichert die gefundenen Offsets.
 - `calibrate quick` und `calibrate precise` starten mit `OK calibrate_started=1 ...` und enden mit `OK calibrate_finished=1 ...` plus einer finalen Offset-Zeile.
+- Im USB-Machine-Modus wird `NK4 seq=<id> cmd=calibrate mode=quick|precise` verwendet. NK4 sendet nach dem Speichern genau eine Antwort mit derselben Sequenz; BLE GATT weist diese blockierende Wartungsfunktion mit `unsupported usb_only` ab.
 - `defaults` lädt die Standardwerte nur in den Arbeitsspeicher. Für dauerhafte Speicherung ist anschließend `save` nötig.
 - Beim nächsten Neustart werden die gespeicherten Werte automatisch geladen.
 

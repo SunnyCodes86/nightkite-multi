@@ -73,3 +73,8 @@ inline bool shouldAutoParseUsbInput(bool machineMode, const char* input)
 {
   return !machineMode && !usbInputCouldBeNk4(input);
 }
+
+inline bool isSupportedCalibrationMode(const char* value)
+{
+  return value != NULL && (strcmp(value, "quick") == 0 || strcmp(value, "precise") == 0);
+}

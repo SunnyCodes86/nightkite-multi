@@ -4160,6 +4160,38 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     return;
   }
 
+  if (command.command == "calibrate")
+  {
+    const String mode = nk4GetValue(command, "mode");
+    if (!isSupportedCalibrationMode(mode.c_str()))
+    {
+      nk4WriteError(writer, seq, "invalid_value", "bad_calibration_mode");
+      return;
+    }
+    if (rm2BleStatus().connected)
+    {
+      nk4WriteError(writer, seq, "unsupported", "usb_only");
+      return;
+    }
+    const bool calibrated = mode == "quick" ? runQuickCalibration(false) : runPreciseCalibration(false);
+    if (!calibrated)
+    {
+      nk4WriteError(writer, seq, "not_ready", "calibration_unavailable");
+      return;
+    }
+    if (!saveConfigToEEPROM(false))
+    {
+      nk4WriteError(writer, seq, "save_failed", "save_failed");
+      return;
+    }
+    String fields = "calibrate_finished=1 mode=";
+    fields += mode;
+    fields += " saved=1 ";
+    fields += buildOffsetsFields();
+    nk4WriteOk(writer, seq, fields);
+    return;
+  }
+
   if (command.command == "defaults")
   {
     if (nk4GetValue(command, "confirm") != "1")

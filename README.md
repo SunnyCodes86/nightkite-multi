@@ -216,6 +216,8 @@ NK4 seq=41 cmd=battery
 NK4 seq=42 cmd=sensor
 NK4 seq=43 cmd=timing
 NK4 seq=44 cmd=offsets
+NK4 seq=45 cmd=calibrate mode=quick
+NK4 seq=46 cmd=calibrate mode=precise
 NK4 seq=50 cmd=sync_arm group=1 pattern=8 brightness=159 start_in=750 phase=0
 NK4 seq=52 cmd=sync_status
 NK4 seq=51 cmd=sync_cancel
@@ -223,6 +225,8 @@ NK4 seq=60 cmd=test indicator=play_modes
 ```
 
 Antworten verwenden das Format `NK4 seq=<id> ok ...` oder `NK4 seq=<id> err code=<code> msg=<short_message>`. Schutzkommandos brauchen eine Bestaetigung, z. B. `NK4 seq=70 cmd=defaults confirm=1` und `NK4 seq=71 cmd=reboot confirm=1`.
+
+NK4-Kalibrierung ist eine USB-Wartungsfunktion. Sie antwortet nach Abschluss einmal mit derselben Sequenz und den gespeicherten Offsets; `precise` kann mehrere Minuten dauern. Bei einer aktiven BLE-GATT-Verbindung wird `cmd=calibrate` mit `unsupported usb_only` abgewiesen, damit der lange blockierende Kalibrierpfad den Funktransport nicht festhält.
 
 Die 4.0-Config erweitert die bestehende EEPROM-Konfiguration ohne die alten Adressen zu verschieben. Neu vorbereitet sind `device_uid`, `device_name`, `play_mode`, `boot_mode`, Sync-Einstellungen, Wireless-Einstellungen sowie kompakte Pattern-Masks. Beim ersten Start mit alter Config wird eine persistente UID erzeugt, daraus ein `short_id` abgeleitet und der Default-Name `NK-<short_id>` gesetzt. Die UID ist nicht per User-Kommando ueberschreibbar.
 
@@ -522,6 +526,7 @@ Notes:
 * `calibrate quick` runs the fast calibration path and saves the resulting offsets.
 * `calibrate precise` runs the slower `IMU_Zero`-style calibration path and saves the resulting offsets.
 * `calibrate quick` and `calibrate precise` start with `OK calibrate_started=1 ...` and finish with `OK calibrate_finished=1 ...` plus a final offsets line.
+* In USB machine mode, use `NK4 seq=<id> cmd=calibrate mode=quick|precise`. NK4 returns one sequence-matched completion after saving; BLE GATT rejects this blocking maintenance operation with `unsupported usb_only`.
 * `defaults` only loads factory defaults into working memory. Run `save` afterwards if you want to keep them permanently.
 * Persistent values are device name, pattern, brightness, strip length, smoothing, sensor ranges, boot calibration, autoplay/play mode/boot mode settings, pattern masks, sync settings, and wireless settings. Runtime diagnostics such as beacon/scan counters, `radio_mode`, `sync_locked`, drift/phase values, battery/USB/BLE connection state, and timing counters are intentionally not stored.
 * Live changes take effect immediately. `save` stores them persistently right away; the existing defensive auto-save may also persist changed values later when no local sync timing is active.

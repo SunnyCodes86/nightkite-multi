@@ -41,10 +41,19 @@ static void testUsbAutoparsePolicy()
   assert(!usbInputHasCapacity(USB_COMMAND_MAX));
 }
 
+static void testCalibrationModes()
+{
+  assert(isSupportedCalibrationMode("quick"));
+  assert(isSupportedCalibrationMode("precise"));
+  assert(!isSupportedCalibrationMode("fast"));
+  assert(!isSupportedCalibrationMode(NULL));
+}
+
 int main()
 {
   testSignedParsing();
   testUnsignedParsing();
   testUsbAutoparsePolicy();
+  testCalibrationModes();
   return 0;
 }

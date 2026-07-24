@@ -216,6 +216,7 @@ Notes:
 - `calibrate quick` is the fast everyday calibration path and saves the resulting offsets.
 - `calibrate precise` uses the much slower `IMU_Zero`-style precision path and saves the resulting offsets.
 - `calibrate quick` and `calibrate precise` start with `OK calibrate_started=1 ...` and finish with `OK calibrate_finished=1 ...` plus a final offset line.
+- In USB machine mode, use `NK4 seq=<id> cmd=calibrate mode=quick|precise`. NK4 sends one sequence-matched completion after saving; BLE GATT rejects this blocking maintenance operation with `unsupported usb_only`.
 - `defaults` loads the default values into working memory only. Run `save` afterwards if you want to keep them permanently.
 - Saved values are restored automatically after restart.
 
