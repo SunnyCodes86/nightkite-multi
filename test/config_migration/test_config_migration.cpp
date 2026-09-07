@@ -21,5 +21,13 @@ int main()
   assert(shouldRunBootCalibration(false, true));
   assert(!shouldRunBootCalibration(false, false));
   assert(!shouldRunBootCalibration(true, true));
+  assert(CONFIG_VERSION_CURRENT == 402);
+  for (int version = 400; version <= 402; ++version) {
+    assert(supportsExtendedConfigVersion(version));
+    assert(migrateShowControlEnabled(version, 1) == (version == 402 ? 1 : 0));
+    assert(migrateShowControlEnabled(version, 0) == 0);
+    if (version < 402) assert(migrateShowControlEnabled(version, -1) == 0);
+  }
+  assert(!supportsExtendedConfigVersion(399) && !supportsExtendedConfigVersion(403));
   return 0;
 }

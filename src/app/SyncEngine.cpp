@@ -1,4 +1,23 @@
 #include "SyncEngine.h"
+#include "SyncMath.h"
+#include <Arduino.h>
+
+bool SyncEngine::follow(const NkSyncBeaconV1& beacon, uint8_t group, uint32_t nowMs, uint32_t localPhaseMs)
+{
+  if (beacon.groupId != group || beacon.pattern < NK_PATTERN_MIN_ID || beacon.pattern > NK_PATTERN_MAX_ID)
+    return false;
+  // No local enabled mask, master UID, or sequence ordering: any valid group master may take over.
+  state = RUNNING;
+  locked = true;
+  lastSeq = beacon.seq;
+  armedGroup = beacon.groupId;
+  armedPattern = beacon.pattern;
+  armedBrightness = beacon.brightness;
+  armedPhaseMs = beacon.phaseMs;
+  localStartMs = nowMs;
+  driftMs = syncPhaseDeltaMs(beacon.phaseMs, localPhaseMs, beacon.beatMs);
+  return true;
+}
 
 void SyncEngine::begin()
 {

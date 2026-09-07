@@ -897,16 +897,18 @@ void rm2BleStopAdvertising()
 void rm2BleRestoreGattAdvertising()
 {
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
-  if (!initialized || connected || gattAdvertisingData.advertisingLength == 0)
+  if (!initialized || gattAdvertisingData.advertisingLength == 0)
   {
     return;
   }
+  // Release ownership even while connected; disconnect must restore GATT discovery.
+  syncAdvertisingOwned = false;
+  gattAdvSuppressed = false;
+  if (connected) return;
   if (advertising)
   {
     setAdvertisingEnabled(false);
   }
-  syncAdvertisingOwned = false;
-  gattAdvSuppressed = false;
   configureGattAdvertisingParams();
   gap_advertisements_set_data(gattAdvertisingData.advertisingLength, gattAdvertisingData.advertising);
   gap_scan_response_set_data(gattAdvertisingData.scanResponseLength, gattAdvertisingData.scanResponse);

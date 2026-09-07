@@ -10,6 +10,7 @@
 
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
 #include <btstack.h>
+#include <BluetoothLock.h>
 #endif
 
 #ifndef BLUETOOTH_DATA_TYPE_FLAGS
@@ -32,7 +33,8 @@ enum RadioMode : uint8_t
   RADIO_MODE_OFF,
   RADIO_MODE_GATT,
   RADIO_MODE_BEACON_MASTER,
-  RADIO_MODE_BEACON_FOLLOWER
+  RADIO_MODE_BEACON_FOLLOWER,
+  RADIO_MODE_SHOW_RECEIVER
 };
 
 RadioMode currentMode = RADIO_MODE_OFF;
@@ -86,6 +88,18 @@ char scanLastMfgHead[HEX_HEAD_BUFFER_SIZE] = "none";
 NkSyncBeaconV1 pendingBeacon;
 bool pendingBeaconAvailable = false;
 AudioSyncState audioSyncState;
+NkSyncBeaconV2 lastAudioBeacon = {};
+bool haveAudioBeacon = false;
+ShowScheduler showScheduler;
+uint32_t activeShortId = 0;
+bool showPacketsEnabled = false;
+uint32_t showReceived = 0, showInvalid = 0, showCrcErrors = 0, showTargetMiss = 0;
+
+bool isReceiveMode()
+{
+  return currentMode == RADIO_MODE_BEACON_FOLLOWER || currentMode == RADIO_MODE_SHOW_RECEIVER;
+}
+
 
 void formatHexBytes(const uint8_t* data, size_t len, char* output, size_t outputSize)
 {
@@ -131,91 +145,10 @@ const char* modeName(RadioMode mode)
     case RADIO_MODE_GATT: return "gatt";
     case RADIO_MODE_BEACON_MASTER: return "beacon_master";
     case RADIO_MODE_BEACON_FOLLOWER: return "beacon_follower";
+    case RADIO_MODE_SHOW_RECEIVER: return "show_receiver";
     case RADIO_MODE_OFF:
     default: return "off";
   }
-}
-
-bool isValidBeaconPattern(uint8_t pattern)
-{
-  return pattern >= NK_PATTERN_MIN_ID && pattern <= NK_PATTERN_MAX_ID;
-}
-
-bool isValidBeaconBrightness(uint8_t brightness)
-{
-  switch (brightness)
-  {
-    case 95:
-    case 127:
-    case 159:
-    case 191:
-    case 223:
-    case 255:
-      return true;
-    default:
-      return false;
-  }
-}
-
-uint16_t crc16Ccitt(const uint8_t* data, size_t len)
-{
-  uint16_t crc = 0xFFFF;
-  for (size_t i = 0; i < len; i++)
-  {
-    crc ^= (uint16_t)data[i] << 8;
-    for (uint8_t bit = 0; bit < 8; bit++)
-    {
-      crc = (crc & 0x8000) ? (uint16_t)((crc << 1) ^ 0x1021) : (uint16_t)(crc << 1);
-    }
-  }
-  return crc;
-}
-
-uint16_t computeBeaconCrc(const NkSyncBeaconV1& beacon)
-{
-  uint8_t bytes[NK_SYNC_BEACON_V1_PACKET_SIZE] = {0};
-  bytes[0] = beacon.magic0;
-  bytes[1] = beacon.magic1;
-  bytes[2] = beacon.version;
-  bytes[3] = beacon.groupId;
-  bytes[4] = beacon.flags;
-  bytes[5] = (uint8_t)(beacon.seq & 0xFF);
-  bytes[6] = (uint8_t)(beacon.seq >> 8);
-  bytes[7] = beacon.pattern;
-  bytes[8] = beacon.brightness;
-  bytes[9] = (uint8_t)(beacon.phaseMs & 0xFF);
-  bytes[10] = (uint8_t)((beacon.phaseMs >> 8) & 0xFF);
-  bytes[11] = (uint8_t)((beacon.phaseMs >> 16) & 0xFF);
-  bytes[12] = (uint8_t)(beacon.phaseMs >> 24);
-  bytes[13] = (uint8_t)(beacon.beatMs & 0xFF);
-  bytes[14] = (uint8_t)(beacon.beatMs >> 8);
-  return crc16Ccitt(bytes, sizeof(bytes));
-}
-
-uint16_t computeBeaconCrc(const NkSyncBeaconV2& beacon)
-{
-  uint8_t bytes[NK_SYNC_BEACON_V2_PACKET_SIZE] = {0};
-  bytes[0] = beacon.magic0;
-  bytes[1] = beacon.magic1;
-  bytes[2] = beacon.version;
-  bytes[3] = beacon.groupId;
-  bytes[4] = beacon.flags;
-  bytes[5] = (uint8_t)(beacon.seq & 0xFF);
-  bytes[6] = (uint8_t)(beacon.seq >> 8);
-  bytes[7] = beacon.pattern;
-  bytes[8] = beacon.brightness;
-  bytes[9] = (uint8_t)(beacon.phaseMs & 0xFF);
-  bytes[10] = (uint8_t)((beacon.phaseMs >> 8) & 0xFF);
-  bytes[11] = (uint8_t)((beacon.phaseMs >> 16) & 0xFF);
-  bytes[12] = (uint8_t)(beacon.phaseMs >> 24);
-  bytes[13] = (uint8_t)(beacon.beatMs & 0xFF);
-  bytes[14] = (uint8_t)(beacon.beatMs >> 8);
-  bytes[15] = beacon.audioEnergy;
-  bytes[16] = beacon.audioBass;
-  bytes[17] = beacon.audioMid;
-  bytes[18] = beacon.audioTreble;
-  bytes[19] = beacon.audioConfidence;
-  return crc16Ccitt(bytes, sizeof(bytes));
 }
 
 void copyV2SyncBasis(const NkSyncBeaconV2& source, NkSyncBeaconV1* target)
@@ -235,6 +168,11 @@ void copyV2SyncBasis(const NkSyncBeaconV2& source, NkSyncBeaconV1* target)
 
 void updateAudioSyncState(const NkSyncBeaconV2& beacon, unsigned long nowMs)
 {
+  // Identical controller-generated repeats are not new audio frames. Keep this
+  // identity across expiry so a stalled advertiser cannot revive old audio.
+  if (haveAudioBeacon && memcmp(&lastAudioBeacon, &beacon, sizeof(beacon)) == 0) return;
+  lastAudioBeacon = beacon;
+  haveAudioBeacon = true;
   audioSyncState.valid = true;
   audioSyncState.lastUpdateMs = nowMs;
   audioSyncState.seq = beacon.seq;
@@ -250,10 +188,11 @@ void updateAudioSyncState(const NkSyncBeaconV2& beacon, unsigned long nowMs)
 
 void expireAudioSyncState(unsigned long nowMs)
 {
-  if (audioSyncState.valid && nowMs - audioSyncState.lastUpdateMs > NK_AUDIO_SYNC_TIMEOUT_MS)
+  if (audioSyncState.valid && nowMs - audioSyncState.lastUpdateMs > NK_AUDIO_FRESHNESS_TIMEOUT_MS)
   {
-    audioSyncState.valid = false;
-    audioSyncState.beat = false;
+    const uint32_t lastUpdateMs = audioSyncState.lastUpdateMs;
+    audioSyncState = AudioSyncState{};
+    audioSyncState.lastUpdateMs = lastUpdateMs;
   }
 }
 
@@ -384,6 +323,9 @@ bool runCodecSelftest()
   }
 
   const AudioSyncState savedAudioState = audioSyncState;
+  const NkSyncBeaconV2 savedAudioBeacon = lastAudioBeacon;
+  const bool savedHaveAudioBeacon = haveAudioBeacon;
+  haveAudioBeacon = false;
   updateAudioSyncState(decodedAudio, 123);
   const bool audioStateOk = audioSyncState.valid &&
       audioSyncState.lastUpdateMs == 123 &&
@@ -396,9 +338,11 @@ bool runCodecSelftest()
       audioSyncState.mid == audioBeacon.audioMid &&
       audioSyncState.treble == audioBeacon.audioTreble &&
       audioSyncState.confidence == audioBeacon.audioConfidence;
-  expireAudioSyncState(123 + NK_AUDIO_SYNC_TIMEOUT_MS + 1);
+  expireAudioSyncState(123 + NK_AUDIO_FRESHNESS_TIMEOUT_MS + 1);
   const bool audioTimeoutOk = !audioSyncState.valid && !audioSyncState.beat;
   audioSyncState = savedAudioState;
+  lastAudioBeacon = savedAudioBeacon;
+  haveAudioBeacon = savedHaveAudioBeacon;
   if (!audioStateOk || !audioTimeoutOk)
   {
     return false;
@@ -444,7 +388,7 @@ void startScan()
 
 void handleGapReport(const uint8_t* advData, uint8_t advLen, int8_t rssi)
 {
-  if (currentMode != RADIO_MODE_BEACON_FOLLOWER)
+  if (!isReceiveMode())
   {
     return;
   }
@@ -484,6 +428,25 @@ void handleGapReport(const uint8_t* advData, uint8_t advLen, int8_t rssi)
     {
       scanRejectCompany++;
       scanLastCandidateReason = "company";
+      continue;
+    }
+    if (dataLen >= 4 && data[2] == 'N' && data[3] == 'S')
+    {
+      if (!showPacketsEnabled) continue;
+      ShowPacket packet;
+      const ShowDecodeResult decoded = showControlDecode(data + 2, dataLen - 2, &packet);
+      if (decoded != ShowDecodeResult::OK)
+      {
+        ++showInvalid;
+        if (decoded == ShowDecodeResult::CRC) ++showCrcErrors;
+      }
+      else if (!showTargetMatches(packet, activeGroup, activeShortId)) ++showTargetMiss;
+      else
+      {
+        ++showReceived;
+        const uint32_t nowMs = millis();
+        showScheduler.receive(packet, nowMs, nowMs);
+      }
       continue;
     }
     scanNkCandidates++;
@@ -610,7 +573,7 @@ void leaveBeaconMode()
 {
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
   stopScan();
-  if (currentMode == RADIO_MODE_BEACON_MASTER || currentMode == RADIO_MODE_BEACON_FOLLOWER)
+  if (currentMode == RADIO_MODE_BEACON_MASTER || isReceiveMode() || currentMode == RADIO_MODE_GATT)
   {
     rm2BleRestoreGattAdvertising();
   }
@@ -694,10 +657,6 @@ void syncBeaconRadioBegin()
 void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
 {
   syncBeaconRadioBegin();
-  expireAudioSyncState(millis());
-  const bool groupChanged = activeGroup != runtime.groupId;
-  activeGroup = runtime.groupId;
-
   const Rm2BleStatus ble = rm2BleStatus();
   if (!ble.initialized)
   {
@@ -706,11 +665,22 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
     return;
   }
 
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  BluetoothLock lock;
+#endif
+  const bool groupChanged = activeGroup != runtime.groupId;
+  activeGroup = runtime.groupId;
+  activeShortId = runtime.shortId;
+  showPacketsEnabled = runtime.showReceiveEnabled && runtime.wirelessEnabled;
+  if (!showPacketsEnabled) showScheduler.reset();
+  expireAudioSyncState(millis());
+  if (groupChanged) showScheduler.reset();
+
   const bool syncActive = runtime.syncEnabled &&
       runtime.wirelessEnabled &&
       runtime.playMode == SYNC_BEACON_PLAY_SYNC &&
       (runtime.syncRole == SYNC_BEACON_ROLE_MASTER || runtime.syncRole == SYNC_BEACON_ROLE_FOLLOWER);
-  if (!syncActive)
+  if (!syncActive && !(runtime.wirelessEnabled && runtime.showReceiveEnabled))
   {
     leaveBeaconMode();
     lastError = runtime.wirelessEnabled ? "none" : "wireless_disabled";
@@ -728,11 +698,12 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
     return;
   }
 
-  if (runtime.syncRole == SYNC_BEACON_ROLE_MASTER)
+  if (syncActive && runtime.syncRole == SYNC_BEACON_ROLE_MASTER)
   {
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
     stopScan();
 #endif
+    if (currentMode != RADIO_MODE_BEACON_MASTER) showScheduler.reset();
     currentMode = RADIO_MODE_BEACON_MASTER;
     const unsigned long nowMs = millis();
     if (nextTxMs == 0 || (int32_t)(nowMs - nextTxMs) >= 0)
@@ -743,14 +714,14 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
     return;
   }
 
-  if (currentMode != RADIO_MODE_BEACON_FOLLOWER || groupChanged)
+  if (!isReceiveMode() || groupChanged)
   {
     lastBeaconMs = 0;
     pendingBeaconAvailable = false;
     audioSyncState.valid = false;
     audioSyncState.beat = false;
   }
-  currentMode = RADIO_MODE_BEACON_FOLLOWER;
+  currentMode = syncActive ? RADIO_MODE_BEACON_FOLLOWER : RADIO_MODE_SHOW_RECEIVER;
   advActive = false;
   nextTxMs = 0;
 #if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
@@ -764,7 +735,14 @@ void syncBeaconRadioTick(const SyncBeaconRuntime& runtime)
 
 void syncBeaconRadioStop()
 {
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!rm2BleStatus().initialized) return;
+  BluetoothLock lock;
+#endif
   leaveBeaconMode();
+  pendingBeaconAvailable = false;
+  audioSyncState = AudioSyncState{};
+  showScheduler.reset();
 }
 
 SyncBeaconRadioStatus syncBeaconRadioStatus()
@@ -772,7 +750,7 @@ SyncBeaconRadioStatus syncBeaconRadioStatus()
   const Rm2BleStatus ble = rm2BleStatus();
   SyncBeaconRadioStatus status;
   status.supported = NIGHTKITE_BLE && NIGHTKITE_RM2;
-  status.active = currentMode == RADIO_MODE_BEACON_MASTER || currentMode == RADIO_MODE_BEACON_FOLLOWER;
+  status.active = currentMode == RADIO_MODE_BEACON_MASTER || isReceiveMode();
   status.beaconTx = currentMode == RADIO_MODE_BEACON_MASTER;
   status.beaconRx = currentMode == RADIO_MODE_BEACON_FOLLOWER;
   status.locked = status.beaconTx || (status.beaconRx && lastBeaconMs > 0 && (millis() - lastBeaconMs) <= FOLLOWER_LOST_MS);
@@ -988,12 +966,16 @@ String syncBeaconAudioBuildStatusFields()
   fields += " audio_beat_ms=";
   fields += status.audio.beatMs;
   fields += " audio_timeout_ms=";
-  fields += NK_AUDIO_SYNC_TIMEOUT_MS;
+  fields += NK_AUDIO_FRESHNESS_TIMEOUT_MS;
   return fields;
 }
 
 bool syncBeaconRadioConsumeBeacon(NkSyncBeaconV1* beacon)
 {
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!rm2BleStatus().initialized) return false;
+  BluetoothLock lock;
+#endif
   if (!pendingBeaconAvailable || beacon == nullptr)
   {
     return false;
@@ -1005,114 +987,52 @@ bool syncBeaconRadioConsumeBeacon(NkSyncBeaconV1* beacon)
 
 AudioSyncState syncBeaconAudioState()
 {
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!rm2BleStatus().initialized) return AudioSyncState{};
+  BluetoothLock lock;
+#endif
   expireAudioSyncState(millis());
   return audioSyncState;
 }
 
-bool syncBeaconEncode(const NkSyncBeaconV1& beacon, uint8_t* output, size_t outputSize, size_t* outputLen)
+
+bool syncBeaconRadioConsumeShow(ShowScheduledEvent* event)
 {
-  if (output == nullptr || outputLen == nullptr || outputSize < NK_SYNC_BEACON_PACKET_SIZE)
-  {
-    return false;
-  }
-  NkSyncBeaconV1 copy = beacon;
-  copy.magic0 = NK_SYNC_BEACON_MAGIC0;
-  copy.magic1 = NK_SYNC_BEACON_MAGIC1;
-  copy.version = NK_SYNC_BEACON_VERSION;
-  copy.crc = computeBeaconCrc(copy);
-  memcpy(output, &copy, NK_SYNC_BEACON_PACKET_SIZE);
-  *outputLen = NK_SYNC_BEACON_PACKET_SIZE;
-  return true;
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!rm2BleStatus().initialized || event == nullptr) return false;
+  BluetoothLock lock;
+  return showScheduler.popDue(millis(), *event);
+#else
+  (void)event;
+  return false;
+#endif
 }
 
-SyncBeaconDecodeResult syncBeaconDecode(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV1* beacon)
+void syncBeaconRadioResetShow()
 {
-  if (data == nullptr || beacon == nullptr || dataLen < NK_SYNC_BEACON_PACKET_SIZE)
-  {
-    return SYNC_BEACON_DECODE_TOO_SHORT;
-  }
-
-  NkSyncBeaconV1 decoded;
-  memcpy(&decoded, data, NK_SYNC_BEACON_PACKET_SIZE);
-  if (decoded.magic0 != NK_SYNC_BEACON_MAGIC0 || decoded.magic1 != NK_SYNC_BEACON_MAGIC1)
-  {
-    return SYNC_BEACON_DECODE_BAD_MAGIC;
-  }
-  if (decoded.version != NK_SYNC_BEACON_VERSION)
-  {
-    return SYNC_BEACON_DECODE_BAD_VERSION;
-  }
-  if (expectedGroup != 0 && decoded.groupId != expectedGroup)
-  {
-    return SYNC_BEACON_DECODE_BAD_GROUP;
-  }
-  if (!isValidBeaconPattern(decoded.pattern))
-  {
-    return SYNC_BEACON_DECODE_BAD_PATTERN;
-  }
-  if (!isValidBeaconBrightness(decoded.brightness))
-  {
-    return SYNC_BEACON_DECODE_BAD_BRIGHTNESS;
-  }
-  if (decoded.crc != computeBeaconCrc(decoded))
-  {
-    return SYNC_BEACON_DECODE_BAD_CRC;
-  }
-
-  *beacon = decoded;
-  return SYNC_BEACON_DECODE_OK;
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!rm2BleStatus().initialized) return;
+  BluetoothLock lock;
+#endif
+  showScheduler.reset();
 }
 
-SyncBeaconDecodeResult syncBeaconDecodeV2(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV2* beacon)
+ShowRadioStatus syncBeaconShowStatus()
 {
-  if (data == nullptr || beacon == nullptr || dataLen < NK_SYNC_BEACON_V2_PACKET_SIZE)
-  {
-    return SYNC_BEACON_DECODE_TOO_SHORT;
-  }
-
-  NkSyncBeaconV2 decoded;
-  memcpy(&decoded, data, NK_SYNC_BEACON_V2_PACKET_SIZE);
-  if (decoded.magic0 != NK_SYNC_BEACON_MAGIC0 || decoded.magic1 != NK_SYNC_BEACON_MAGIC1)
-  {
-    return SYNC_BEACON_DECODE_BAD_MAGIC;
-  }
-  if (decoded.version != NK_SYNC_BEACON_VERSION_V2)
-  {
-    return SYNC_BEACON_DECODE_BAD_VERSION;
-  }
-  if (expectedGroup != 0 && decoded.groupId != expectedGroup)
-  {
-    return SYNC_BEACON_DECODE_BAD_GROUP;
-  }
-  if (!isValidBeaconPattern(decoded.pattern))
-  {
-    return SYNC_BEACON_DECODE_BAD_PATTERN;
-  }
-  if (!isValidBeaconBrightness(decoded.brightness))
-  {
-    return SYNC_BEACON_DECODE_BAD_BRIGHTNESS;
-  }
-  if (decoded.crc != computeBeaconCrc(decoded))
-  {
-    return SYNC_BEACON_DECODE_BAD_CRC;
-  }
-
-  *beacon = decoded;
-  return SYNC_BEACON_DECODE_OK;
-}
-
-const char* syncBeaconDecodeResultName(SyncBeaconDecodeResult result)
-{
-  switch (result)
-  {
-    case SYNC_BEACON_DECODE_OK: return "ok";
-    case SYNC_BEACON_DECODE_TOO_SHORT: return "too_short";
-    case SYNC_BEACON_DECODE_BAD_MAGIC: return "bad_magic";
-    case SYNC_BEACON_DECODE_BAD_VERSION: return "bad_version";
-    case SYNC_BEACON_DECODE_BAD_GROUP: return "bad_group";
-    case SYNC_BEACON_DECODE_BAD_PATTERN: return "bad_pattern";
-    case SYNC_BEACON_DECODE_BAD_BRIGHTNESS: return "bad_brightness";
-    case SYNC_BEACON_DECODE_BAD_CRC: return "bad_crc";
-    default: return "invalid";
-  }
+  ShowRadioStatus status;
+#if NIGHTKITE_BLE && NIGHTKITE_RM2 && defined(PIO_FRAMEWORK_ARDUINO_ENABLE_BLUETOOTH) && defined(PICO_CYW43_SUPPORTED)
+  if (!rm2BleStatus().initialized) return status;
+  BluetoothLock lock;
+#endif
+  status.receiving = isReceiveMode() && showPacketsEnabled;
+  status.queueDepth = showScheduler.depth();
+  status.clockValid = showScheduler.clockValid();
+  status.clockOffsetMs = showScheduler.clockOffsetMs();
+  status.clockAgeMs = showScheduler.clockAgeMs(millis());
+  status.scheduler = showScheduler.status;
+  status.received = showReceived;
+  status.invalid = showInvalid;
+  status.crcErrors = showCrcErrors;
+  status.targetMiss = showTargetMiss;
+  return status;
 }

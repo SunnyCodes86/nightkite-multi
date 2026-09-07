@@ -32,6 +32,7 @@ int estimateBatteryPercent(float voltage);
 uint8_t batteryBarsForPercent(int percent);
 bool batteryStateCutsOff(BatteryState state);
 bool batteryStateCapsBrightness(BatteryState state);
+uint8_t batteryLimitedBrightness(uint8_t requested, BatteryState state, uint8_t criticalLimit);
 BatteryMeasurement batteryMeasurementFromAverage(float averagedVoltage, float displayedVoltage, bool firstSample);
 
 class BatteryStateTracker

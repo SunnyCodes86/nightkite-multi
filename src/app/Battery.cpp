@@ -1,5 +1,11 @@
 #include "app/Battery.h"
 
+uint8_t batteryLimitedBrightness(uint8_t requested, BatteryState state, uint8_t criticalLimit)
+{
+  if (batteryStateCutsOff(state)) return 0;
+  return batteryStateCapsBrightness(state) && requested > criticalLimit ? criticalLimit : requested;
+}
+
 #include <math.h>
 #include <stddef.h>
 

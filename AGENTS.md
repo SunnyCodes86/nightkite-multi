@@ -13,6 +13,7 @@
 - Board and RM2 pin assignments are physical wiring constraints, not freely interchangeable configuration. Change them only with explicit hardware direction.
 - Preserve the two mirrored WS281x outputs, MPU6050 motion/orientation behavior, button control, manual/autoplay/sync modes, battery and USB behavior, calibration, diagnostics, and recoverable persistent configuration.
 - Preserve every shipped pattern and its ID, name, enable/invert semantics, configuration ranges, and intended visual behavior unless the user requests a compatibility break. Motion-reactive inputs remain local even when animation timing is synchronized.
+- Patterns 23–27 require fresh Audio-Sync V2. Without it, clear output and audio history; never add local/synthetic fallback audio. V1 alone is not an audio source.
 - Battery warning, brightness limiting, cutoff, hysteresis, USB-power recovery, and flash-wear protections are safety behavior. Do not weaken them or overwrite the saved brightness merely to apply a runtime limit.
 - Do not add or enable Wi-Fi unless explicitly requested.
 
@@ -22,6 +23,8 @@
 - NK4 responses must echo the request sequence and remain short, line-based, and machine-parseable. Machine mode must not emit prompts, banners, or unrelated debug text.
 - BLE GATT, when compiled in, is an optional NK4 configuration/status/control transport. Preserve its UUIDs, newline framing, notification behavior, and USB fallback.
 - Real-time controller sync uses compact binary BLE advertising beacons, separate from NK4/GATT. Controllers render locally; do not stream LED frames or make GATT, Wi-Fi, or an external controller mandatory at runtime.
+- Autonomous controller master/follower operation must work without NightKite Link. Followers accept valid group master patterns regardless of their local enabled mask; do not add master-ID binding or sequence ordering that prevents master takeover.
+- Show Control is a timed, compact legacy-advertising event/output layer, never a pattern or LED-frame stream. Keep its versioned contract separate from unchanged Sync V1/V2 layouts. Queue, clock, buffers and overrides are runtime-only; only the receive preference may use versioned persistent wireless configuration; keep underlying sync/audio current for release and battery protection authoritative.
 - Preserve GATT/beacon advertising ownership and connection-priority behavior. A connected GATT client may pre-empt beacon operation; master and follower beacon modes must remain autonomous otherwise.
 - Pattern IDs, beacon byte layouts/versioning/CRC rules, and accepted legacy beacon versions are wire contracts. Extend them compatibly; never silently reinterpret or renumber existing values.
 - EEPROM addresses, magic/version values, masks, and stored meanings are storage contracts. Never reorder or reuse them. Any incompatible storage change needs explicit versioning, migration, validation, and a focused migration test.

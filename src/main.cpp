@@ -180,6 +180,7 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 #define EEPROM_ADDR_SYNC_LOSS_BEHAVIOR 176
 #define EEPROM_ADDR_WIRELESS_ENABLED 180
 #define EEPROM_ADDR_WIRELESS_PROFILE 184
+#define EEPROM_ADDR_SHOW_CONTROL_ENABLED 188
 const int EEPROM_MAGIC = 0x4E4B3434; // "NK44"
 
 // Size of emulated EEPROM.
@@ -229,7 +230,7 @@ uint32_t currentEnabledPatternMask = 0;
 uint32_t currentInvertedPatternMask = 0;
 int currentAutoplayEnabled = 0;
 int currentAutoplayIntervalMs = 20000;
-int currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+int currentConfigVersion = CONFIG_VERSION_CURRENT;
 char currentDeviceUid[DEVICE_UID_LENGTH + 1] = "";
 char currentShortId[SHORT_ID_LENGTH + 1] = "";
 char currentDeviceName[DEVICE_NAME_LENGTH + 1] = "";
@@ -279,7 +280,7 @@ uint32_t lastSavedEnabledPatternMask = 0;
 uint32_t lastSavedInvertedPatternMask = 0;
 int lastSavedAutoplayEnabled = 0;
 int lastSavedAutoplayIntervalMs = 20000;
-int lastSavedConfigVersion = CONFIG_VERSION_4_ALPHA;
+int lastSavedConfigVersion = CONFIG_VERSION_CURRENT;
 char lastSavedDeviceUid[DEVICE_UID_LENGTH + 1] = "";
 char lastSavedDeviceName[DEVICE_NAME_LENGTH + 1] = "";
 int lastSavedPlayMode = PLAY_MODE_MANUAL;
@@ -481,6 +482,27 @@ struct PatternDefinition
 
 PatternClock patternClock;
 SyncEngine syncEngine;
+ShowState showState;
+int showReceiveEnabled = 0; // Saved receive preference; all show execution state stays runtime-only.
+int lastSavedShowReceiveEnabled = 0;
+bool syncFallbackPending = false;
+PatternClock showPatternClock;
+uint8_t renderedPattern = 0;
+uint32_t renderedShowRevision = 0;
+AudioPatternFilter audioPatternFilter;
+AudioPatternFrame audioPatternFrame;
+
+PatternClock& renderPatternClock()
+{
+  return showState.output == ShowOutput::PATTERN ? showPatternClock : patternClock;
+}
+
+bool isFollowingLiveMaster()
+{
+  return currentPlayMode == PLAY_MODE_SYNC && currentSyncEnabled == 1 &&
+      currentSyncRole == SYNC_ROLE_FOLLOWER && syncEngine.locked;
+}
+
 
 // ============================================================================
 //  HELPERS
@@ -595,6 +617,10 @@ const PatternDefinition* getPatternDefinition(uint8_t patternId);
 void runPatternEntry(uint8_t patternId);
 void runPatternFrame(uint8_t patternId);
 void runPatternExit(uint8_t patternId);
+void PatternStateEntry();
+void PatternStateExit();
+void tickShowControl();
+String buildShowFields();
 void switchToPattern(uint8_t patternId, bool activatePatternState, const char* source = NULL, uint32_t latencyMs = 0);
 bool batteryViewTimedOut();
 bool chargingUsbDisconnected();
@@ -662,7 +688,7 @@ uint8_t pulseWave8(uint32_t ms, uint16_t cycleLength, uint16_t pulseLength)
 
 int sumPulse(int time_shift)
 {
-  const uint32_t phase = patternClock.phaseMs();
+  const uint32_t phase = renderPatternClock().phaseMs();
   int pulse1 = pulseWave8(phase + time_shift, cycleLength, pulseLength);
   int pulse2 = pulseWave8(phase + time_shift + pulseOffset, cycleLength, pulseLength);
   return qadd8(pulse1, pulse2); // Add pulses together without overflow
@@ -670,7 +696,7 @@ int sumPulse(int time_shift)
 
 uint16_t clockBeat16(uint16_t bpm)
 {
-  return (uint16_t)(((uint64_t)patternClock.phaseMs() * (uint64_t)bpm * 65536ULL) / 60000ULL);
+  return (uint16_t)(((uint64_t)renderPatternClock().phaseMs() * (uint64_t)bpm * 65536ULL) / 60000ULL);
 }
 
 uint8_t clockBeat8(uint16_t bpm)
@@ -693,86 +719,6 @@ inline uint32_t smoothedMotion() {
   uint32_t s = (uint32_t)abs(aaWorld.x) + (uint32_t)abs(aaWorld.y);
   myAccel.add(s);
   return myAccel.get();
-}
-
-struct AudioPatternFrame
-{
-  bool beat;
-  uint8_t phase8;
-  uint8_t beatPulse;
-  uint8_t energy;
-  uint8_t bass;
-  uint8_t mid;
-  uint8_t treble;
-  uint8_t confidence;
-};
-
-AudioPatternFrame buildAudioPatternFrame()
-{
-  static bool initialized = false;
-  static uint8_t energy = 0;
-  static uint8_t bass = 0;
-  static uint8_t mid = 0;
-  static uint8_t treble = 0;
-  static uint8_t confidence = 0;
-
-  const unsigned long now = millis();
-  const AudioSyncState state = syncBeaconAudioState();
-  const uint16_t beatMs = state.valid
-      ? sanitizeAudioPatternBeatMs(state.beatMs)
-      : AUDIO_PATTERN_DEFAULT_BEAT_MS;
-  const uint32_t phaseMs = state.valid
-      ? state.phaseMs + (uint32_t)(now - state.lastUpdateMs)
-      : patternClock.phaseMs();
-  const uint8_t phase8 = audioPatternPhase8(phaseMs, beatMs);
-  const uint8_t beatPulse = audioPatternBeatPulse8(phaseMs, beatMs);
-
-  // V1 or expired V2 data falls back to a quiet synthetic spectrum. This
-  // keeps every audio pattern moving and visible without pretending that
-  // audio confidence exists.
-  const uint8_t targetEnergy = state.valid
-      ? state.energy
-      : qadd8(52, scale8(sin8(phase8), 54));
-  const uint8_t targetBass = state.valid
-      ? state.bass
-      : qadd8(40, scale8(beatPulse, 80));
-  const uint8_t targetMid = state.valid
-      ? state.mid
-      : qadd8(48, scale8(sin8(phase8 + 64), 58));
-  const uint8_t targetTreble = state.valid
-      ? state.treble
-      : qadd8(30, scale8(sin8((uint8_t)(phase8 * 2U) + 96), 42));
-  const uint8_t targetConfidence = state.valid ? state.confidence : 0;
-
-  if (!initialized)
-  {
-    energy = targetEnergy;
-    bass = targetBass;
-    mid = targetMid;
-    treble = targetTreble;
-    confidence = targetConfidence;
-    initialized = true;
-  }
-  else
-  {
-    const uint8_t blendAmount = state.valid ? 64 : 18;
-    energy = lerp8by8(energy, targetEnergy, blendAmount);
-    bass = lerp8by8(bass, targetBass, blendAmount);
-    mid = lerp8by8(mid, targetMid, blendAmount);
-    treble = lerp8by8(treble, targetTreble, blendAmount);
-    confidence = lerp8by8(confidence, targetConfidence, blendAmount);
-  }
-
-  AudioPatternFrame frame;
-  frame.beat = state.valid && state.beat && (now - state.lastUpdateMs) < 180;
-  frame.phase8 = phase8;
-  frame.beatPulse = beatPulse;
-  frame.energy = energy;
-  frame.bass = bass;
-  frame.mid = mid;
-  frame.treble = treble;
-  frame.confidence = confidence;
-  return frame;
 }
 
 int currentYawDegrees()
@@ -931,6 +877,8 @@ void applyConfiguredStripLength()
 void applyPersistentConfig()
 {
   syncEngine.cancel();
+  showState.release();
+  syncBeaconRadioResetShow();
   applyConfiguredStripLength();
   currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
   currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
@@ -983,11 +931,8 @@ bool isSyncMasterAutoplayActive()
 
 bool shouldRunAutoplayTick()
 {
-  if (!isAutoplayEnabled())
-  {
-    return false;
-  }
-  return currentPlayMode == PLAY_MODE_AUTOPLAY || isSyncMasterAutoplayActive();
+  return !showState.active() && syncAutoplayAllowed(isAutoplayEnabled(),
+      currentPlayMode, currentSyncEnabled == 1, currentSyncRole);
 }
 
 unsigned long autoplayNextDueMs()
@@ -1238,7 +1183,7 @@ bool readStoredDeviceName(char* output, size_t outputSize)
 
 void applyDefaultExtendedConfig(bool resetName)
 {
-  currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+  currentConfigVersion = CONFIG_VERSION_CURRENT;
   currentPlayMode = DEFAULT_PLAY_MODE;
   currentBootMode = DEFAULT_BOOT_MODE;
   currentSyncEnabled = DEFAULT_SYNC_ENABLED;
@@ -1247,6 +1192,7 @@ void applyDefaultExtendedConfig(bool resetName)
   currentSyncMasterUid[0] = '\0';
   currentSyncLossBehavior = DEFAULT_SYNC_LOSS_BEHAVIOR;
   currentWirelessEnabled = DEFAULT_WIRELESS_ENABLED;
+  showReceiveEnabled = 0;
   currentWirelessProfile = DEFAULT_WIRELESS_PROFILE;
   if (resetName)
   {
@@ -1613,6 +1559,8 @@ String buildWirelessFields()
 {
   String fields = "wireless_enabled=";
   fields += currentWirelessEnabled;
+  fields += " show_control_enabled=";
+  fields += showReceiveEnabled;
   fields += " wireless_profile=";
   fields += wirelessProfileToString(currentWirelessProfile);
   fields += " ble=";
@@ -1818,6 +1766,8 @@ SyncBeaconRuntime buildSyncBeaconRuntime()
   runtime.wirelessProfile = (uint8_t)currentWirelessProfile;
   runtime.phaseMs = patternClock.now();
   runtime.beatMs = NK_SYNC_BEACON_BEAT_MS;
+  runtime.showReceiveEnabled = showReceiveEnabled;
+  runtime.shortId = strtoul(currentShortId, nullptr, 16);
   return runtime;
 }
 
@@ -1842,15 +1792,13 @@ void applyReceivedSyncBeacon()
     }
 
     const uint32_t localPhaseBeforeUpdate = patternClock.now();
-    syncEngine.state = SyncEngine::RUNNING;
-    syncEngine.locked = true;
-    syncEngine.lastSeq = beacon.seq;
-    syncEngine.armedGroup = beacon.groupId;
-    syncEngine.armedPattern = beacon.pattern;
-    syncEngine.armedBrightness = beacon.brightness;
-    syncEngine.armedPhaseMs = beacon.phaseMs;
-    syncEngine.localStartMs = millis();
-    syncEngine.driftMs = syncPhaseDeltaMs(beacon.phaseMs, localPhaseBeforeUpdate, beacon.beatMs);
+    if (!syncEngine.follow(beacon, currentSyncGroupId, receiveMs, localPhaseBeforeUpdate))
+    {
+      syncApplySkipped++;
+      syncApplyReason = "bad_pattern";
+      continue;
+    }
+    syncFallbackPending = false;
     syncApplyCount++;
     lastAppliedSeq = beacon.seq;
     syncApplyReason = "ok";
@@ -1871,11 +1819,6 @@ void applyReceivedSyncBeacon()
     {
       syncApplySkipped++;
       syncApplyReason = "bad_pattern";
-    }
-    else if (!isPatternEnabled(beacon.pattern))
-    {
-      syncApplySkipped++;
-      syncApplyReason = "pattern_disabled";
     }
     else if (currentPattern != beacon.pattern)
     {
@@ -1912,9 +1855,13 @@ void tickSyncBeaconRadio()
     if (currentSyncLossBehavior == SYNC_LOSS_FALLBACK_AUTOPLAY)
     {
       lastSyncLossAction = "fallback_autoplay";
-      currentPlayMode = PLAY_MODE_AUTOPLAY;
-      currentAutoplayEnabled = 1;
-      resetAutoplayTimer();
+      syncFallbackPending = showState.active();
+      if (!syncFallbackPending)
+      {
+        currentPlayMode = PLAY_MODE_AUTOPLAY;
+        currentAutoplayEnabled = 1;
+        resetAutoplayTimer();
+      }
     }
     else if (currentSyncLossBehavior == SYNC_LOSS_WARNING_ONLY)
     {
@@ -1925,6 +1872,70 @@ void tickSyncBeaconRadio()
       lastSyncLossAction = "continue_local";
     }
   }
+}
+
+void tickShowControl()
+{
+  static int showGroup = currentSyncGroupId;
+  const bool groupChanged = showGroup != currentSyncGroupId;
+  showGroup = currentSyncGroupId;
+  const bool autonomousMaster = currentPlayMode == PLAY_MODE_SYNC && currentSyncEnabled && currentSyncRole == SYNC_ROLE_MASTER;
+  if (groupChanged || ((!currentWirelessEnabled || autonomousMaster) && (showState.active() || showState.pendingValid)))
+  {
+    showState.release();
+    syncBeaconRadioResetShow();
+    applyEffectiveBrightness();
+  }
+  ShowScheduledEvent event;
+  for (uint8_t i = 0; i < NK_SHOW_QUEUE_CAPACITY && syncBeaconRadioConsumeShow(&event); ++i)
+  {
+    const bool wasActive = showState.active();
+    if (showState.apply(event.packet, event.dueMs, currentBrightness, TOTAL_LEDS))
+    {
+      if (event.packet.command == ShowCommand::SET_PATTERN)
+        showPatternClock.setPhase((uint32_t)millis() - event.dueMs);
+      if (wasActive && !showState.active())
+      {
+        applyEffectiveBrightness();
+        resetAutoplayTimer();
+      }
+    }
+  }
+  if (syncFallbackPending && !showState.active())
+  {
+    syncFallbackPending = false;
+    if (currentPlayMode == PLAY_MODE_SYNC && currentSyncRole == SYNC_ROLE_FOLLOWER && !syncEngine.locked)
+    {
+      setPlayMode(PLAY_MODE_AUTOPLAY);
+    }
+  }
+}
+
+String buildShowFields()
+{
+  const ShowRadioStatus radio = syncBeaconShowStatus();
+  char fields[1000];
+  snprintf(fields, sizeof(fields),
+      "show_supported=%u show_enabled=%u show_rx=%u show_active=%u show_output=%u show_pattern=%u "
+      "show_brightness=%u show_queue=%u show_last_event=%u show_last_cmd=%u show_executed=%lu show_rejected=%lu "
+      "show_received=%lu show_accepted=%lu show_duplicates=%lu show_stale=%lu show_full=%lu "
+      "show_invalid=%lu show_crc=%lu show_target_miss=%lu show_late=%lu show_dropped_late=%lu "
+      "show_clock_valid=%u show_clock_offset_ms=%ld show_clock_age_ms=%lu show_clock_samples=%lu "
+      "show_last_due_ms=%lu show_lateness_ms=%lu show_pending=%u show_image=%u show_segments=%u show_segment_mask=%lu",
+      (unsigned)(NIGHTKITE_BLE && NIGHTKITE_RM2), (unsigned)showReceiveEnabled, (unsigned)radio.receiving,
+      (unsigned)showState.active(), (unsigned)showState.output, (unsigned)showState.selectedPattern(currentPattern),
+      (unsigned)showState.selectedBrightness(currentBrightness), (unsigned)radio.queueDepth,
+      (unsigned)showState.lastEvent, (unsigned)showState.lastCommand,
+      (unsigned long)showState.executed, (unsigned long)showState.rejected,
+      (unsigned long)radio.received, (unsigned long)radio.scheduler.accepted,
+      (unsigned long)radio.scheduler.duplicates, (unsigned long)radio.scheduler.stale, (unsigned long)radio.scheduler.full,
+      (unsigned long)radio.invalid, (unsigned long)radio.crcErrors, (unsigned long)radio.targetMiss,
+      (unsigned long)radio.scheduler.late, (unsigned long)radio.scheduler.droppedLate,
+      (unsigned)radio.clockValid, (long)radio.clockOffsetMs, (unsigned long)radio.clockAgeMs,
+      (unsigned long)radio.scheduler.clockSamples, (unsigned long)radio.scheduler.lastDueMs,
+      (unsigned long)radio.scheduler.lastLatenessMs, (unsigned)showState.pendingValid,
+      (unsigned)showState.pendingId, (unsigned)showState.pendingSegments, (unsigned long)showState.receivedSegments);
+  return String(fields);
 }
 
 void announcePatternChange(const char* source)
@@ -2481,7 +2492,7 @@ void normalizePersistentConfig()
 
   currentAutoplayEnabled = sanitizeAutoplayEnabled(currentAutoplayEnabled);
   currentAutoplayIntervalMs = sanitizeAutoplayIntervalMs(currentAutoplayIntervalMs);
-  currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+  currentConfigVersion = CONFIG_VERSION_CURRENT;
   ensureDeviceIdentity();
   if (currentPlayMode < PLAY_MODE_MANUAL || currentPlayMode > PLAY_MODE_SYNC)
   {
@@ -2514,6 +2525,7 @@ void normalizePersistentConfig()
     currentSyncLossBehavior = DEFAULT_SYNC_LOSS_BEHAVIOR;
   }
   currentWirelessEnabled = sanitizeBinaryFlag(currentWirelessEnabled);
+  showReceiveEnabled = showReceiveEnabled == 1 ? 1 : 0;
   if (currentWirelessProfile < WIRELESS_PROFILE_LONG_RANGE || currentWirelessProfile > WIRELESS_PROFILE_FAST_SYNC)
   {
     currentWirelessProfile = DEFAULT_WIRELESS_PROFILE;
@@ -2525,7 +2537,7 @@ bool isCurrentConfigSane()
   char scratchName[DEVICE_NAME_LENGTH + 1];
   char scratchUid[DEVICE_UID_LENGTH + 1];
 
-  return currentConfigVersion == CONFIG_VERSION_4_ALPHA &&
+  return currentConfigVersion == CONFIG_VERSION_CURRENT &&
       isValidPatternId(currentPattern) &&
       isValidBrightnessLevel(currentBrightness) &&
       isValidStripLength(currentStripLength) &&
@@ -2550,6 +2562,7 @@ bool isCurrentConfigSane()
       currentSyncLossBehavior >= SYNC_LOSS_CONTINUE_LOCAL &&
       currentSyncLossBehavior <= SYNC_LOSS_WARNING_ONLY &&
       currentWirelessEnabled >= 0 && currentWirelessEnabled <= 1 &&
+      showReceiveEnabled >= 0 && showReceiveEnabled <= 1 &&
       currentWirelessProfile >= WIRELESS_PROFILE_LONG_RANGE &&
       currentWirelessProfile <= WIRELESS_PROFILE_FAST_SYNC;
 }
@@ -2801,16 +2814,12 @@ void updateBatteryMeasurement(bool force)
 
 void applyEffectiveBrightness()
 {
-  const int effectiveBrightness = batteryStateCapsBrightness(currentBatteryState) ? MIN_BRIGHTNESS : BRIGHTNESS;
-  FastLED.setBrightness(effectiveBrightness);
+  FastLED.setBrightness(batteryLimitedBrightness(BRIGHTNESS, currentBatteryState, MIN_BRIGHTNESS));
 }
 
 void applyBatteryBrightnessLimit()
 {
-  if (batteryStateCapsBrightness(currentBatteryState) && FastLED.getBrightness() > MIN_BRIGHTNESS)
-  {
-    FastLED.setBrightness(MIN_BRIGHTNESS);
-  }
+  FastLED.setBrightness(batteryLimitedBrightness(FastLED.getBrightness(), currentBatteryState, MIN_BRIGHTNESS));
 }
 
 void renderBatteryBar(int batteryBarMax)
@@ -2853,6 +2862,8 @@ void handleBatteryCutoff()
   if (!lowPowerCutoffActive)
   {
     lowPowerCutoffActive = true;
+    showState.release();
+    syncBeaconRadioResetShow();
     syncBeaconRadioStop();
     rm2BleStopAdvertising();
     fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
@@ -2993,6 +3004,7 @@ void markCurrentConfigSaved()
   copyCString(lastSavedSyncMasterUid, sizeof(lastSavedSyncMasterUid), currentSyncMasterUid);
   lastSavedSyncLossBehavior = currentSyncLossBehavior;
   lastSavedWirelessEnabled = currentWirelessEnabled;
+  lastSavedShowReceiveEnabled = showReceiveEnabled;
   lastSavedWirelessProfile = currentWirelessProfile;
 }
 
@@ -3026,6 +3038,7 @@ bool hasUnsavedConfigChanges()
       strcmp(currentSyncMasterUid, lastSavedSyncMasterUid) != 0 ||
       currentSyncLossBehavior != lastSavedSyncLossBehavior ||
       currentWirelessEnabled != lastSavedWirelessEnabled ||
+      showReceiveEnabled != lastSavedShowReceiveEnabled ||
       currentWirelessProfile != lastSavedWirelessProfile;
 }
 
@@ -3061,6 +3074,7 @@ bool saveConfigToEEPROM(bool verbose)
   writeEEPROMCString(EEPROM_ADDR_SYNC_MASTER_UID, currentSyncMasterUid, DEVICE_UID_LENGTH + 1);
   EEPROM.put(EEPROM_ADDR_SYNC_LOSS_BEHAVIOR, currentSyncLossBehavior);
   EEPROM.put(EEPROM_ADDR_WIRELESS_ENABLED, currentWirelessEnabled);
+  EEPROM.put(EEPROM_ADDR_SHOW_CONTROL_ENABLED, showReceiveEnabled);
   EEPROM.put(EEPROM_ADDR_WIRELESS_PROFILE, currentWirelessProfile);
 
   if (verbose)
@@ -3130,6 +3144,7 @@ void readConfigFromEEPROM(bool verbose)
   bool loadedExtendedConfig = false;
   bool loadedLegacyConfig = false;
   bool migratedAudioPatterns = false;
+  bool migratedShowConfig = false;
   configValid = false;
   configRepaired = false;
 
@@ -3192,11 +3207,11 @@ void readConfigFromEEPROM(bool verbose)
     EEPROM.get(EEPROM_ADDR_AUTOPLAY_ENABLED, currentAutoplayEnabled);
     EEPROM.get(EEPROM_ADDR_AUTOPLAY_INTERVAL_MS, currentAutoplayIntervalMs);
     EEPROM.get(EEPROM_ADDR_CONFIG_VERSION, storedConfigVersion);
-    if (storedConfigVersion == CONFIG_VERSION_4_ALPHA_22_PATTERNS ||
-        storedConfigVersion == CONFIG_VERSION_4_ALPHA)
+    if (supportsExtendedConfigVersion(storedConfigVersion))
     {
       loadedExtendedConfig = true;
-      currentConfigVersion = storedConfigVersion;
+      migratedShowConfig = storedConfigVersion < CONFIG_VERSION_CURRENT;
+      currentConfigVersion = CONFIG_VERSION_CURRENT;
       readEEPROMCString(EEPROM_ADDR_DEVICE_UID, currentDeviceUid, DEVICE_UID_LENGTH + 1);
       readEEPROMCString(EEPROM_ADDR_DEVICE_NAME, currentDeviceName, DEVICE_NAME_LENGTH + 1);
       EEPROM.get(EEPROM_ADDR_PLAY_MODE, currentPlayMode);
@@ -3208,11 +3223,14 @@ void readConfigFromEEPROM(bool verbose)
       EEPROM.get(EEPROM_ADDR_SYNC_LOSS_BEHAVIOR, currentSyncLossBehavior);
       EEPROM.get(EEPROM_ADDR_WIRELESS_ENABLED, currentWirelessEnabled);
       EEPROM.get(EEPROM_ADDR_WIRELESS_PROFILE, currentWirelessProfile);
+      if (storedConfigVersion >= CONFIG_VERSION_SHOW_CONTROL)
+        EEPROM.get(EEPROM_ADDR_SHOW_CONTROL_ENABLED, showReceiveEnabled);
+      showReceiveEnabled = migrateShowControlEnabled(storedConfigVersion, showReceiveEnabled);
     }
     if (needsAudioSyncPatternMigration(storedConfigVersion))
     {
       currentEnabledPatternMask = migrateEnabledPatternMask(storedConfigVersion, currentEnabledPatternMask);
-      currentConfigVersion = CONFIG_VERSION_4_ALPHA;
+      currentConfigVersion = CONFIG_VERSION_CURRENT;
       migratedAudioPatterns = true;
     }
   }
@@ -3223,8 +3241,8 @@ void readConfigFromEEPROM(bool verbose)
   const bool loadedValuesSane = loadedExtendedConfig && isCurrentConfigSane();
   normalizePersistentConfig();
   configValid = loadedValuesSane;
-  configRepaired = !loadedValuesSane || migratedAudioPatterns;
-  if (shouldPersistConfigRecovery(loadedValuesSane, migratedAudioPatterns))
+  configRepaired = !loadedValuesSane || migratedAudioPatterns || migratedShowConfig;
+  if (shouldPersistConfigRecovery(loadedValuesSane, migratedAudioPatterns || migratedShowConfig))
   {
     if (!saveConfigToEEPROM(false) && verbose)
     {
@@ -3424,7 +3442,8 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += PATTERN_COUNT;
     fields += " brightness_levels=95,127,159,191,223,255 battery=1 imu=1 autoplay=1 sync=1 ble=";
     fields += (NIGHTKITE_BLE ? 1 : 0);
-    fields += " wireless_profiles=long_range,balanced,fast_sync";
+    fields += " wireless_profiles=long_range,balanced,fast_sync show_control=";
+    fields += (NIGHTKITE_BLE && NIGHTKITE_RM2) ? 1 : 0;
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -3484,6 +3503,10 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
     fields += syncBeaconRadioStatus().mode;
     fields += " sync_locked=";
     fields += syncEngine.locked ? 1 : 0;
+    fields += " show_active=";
+    fields += showState.active() ? 1 : 0;
+    fields += " show_queue=";
+    fields += syncBeaconShowStatus().queueDepth;
     nk4WriteOk(writer, seq, fields);
     return;
   }
@@ -3520,7 +3543,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         nk4WriteError(writer, seq, "locked", "last_pattern");
         return;
       }
-      if (!isPatternEnabled((uint8_t)currentPattern))
+      if (!isFollowingLiveMaster() && !isPatternEnabled((uint8_t)currentPattern))
       {
         switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
       }
@@ -3840,7 +3863,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (applyField)
         {
           currentEnabledPatternMask = mask;
-          if (!isPatternEnabled((uint8_t)currentPattern))
+          if (!isFollowingLiveMaster() && !isPatternEnabled((uint8_t)currentPattern))
           {
             switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
           }
@@ -3891,7 +3914,7 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
         if (applyField)
         {
           updateEnabledPatternsFromMask(mask, false);
-          if (!isPatternEnabled((uint8_t)currentPattern))
+          if (!isFollowingLiveMaster() && !isPatternEnabled((uint8_t)currentPattern))
           {
             switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
           }
@@ -4245,6 +4268,37 @@ void handleNk4Command(const NkCommand& command, IResponseWriter& writer)
   if (command.command == "sync_radio_status")
   {
     nk4WriteOk(writer, seq, syncBeaconRadioBuildStatusFields());
+    return;
+  }
+
+  if (command.command == "show_status")
+  {
+    nk4WriteOk(writer, seq, buildShowFields());
+    return;
+  }
+
+  if (command.command == "show_control")
+  {
+    int enabled = 0;
+    if (!parseBinaryValue(nk4GetValue(command, "enabled"), &enabled))
+    {
+      nk4WriteError(writer, seq, "invalid_value", "bad_show_enabled");
+      return;
+    }
+    if (enabled && !(NIGHTKITE_BLE && NIGHTKITE_RM2))
+    {
+      nk4WriteError(writer, seq, "unsupported", "show_radio_unavailable");
+      return;
+    }
+    showReceiveEnabled = enabled != 0;
+    if (!showReceiveEnabled)
+    {
+      showState.release();
+      syncBeaconRadioResetShow();
+      applyEffectiveBrightness();
+      resetAutoplayTimer();
+    }
+    nk4WriteOk(writer, seq, buildShowFields());
     return;
   }
 
@@ -4828,7 +4882,7 @@ void onCliDisablePattern(cmd* cPtr)
     Serial.println("ERR at least one pattern must remain enabled");
     return;
   }
-  if (!isPatternEnabled((uint8_t)currentPattern))
+  if (!isFollowingLiveMaster() && !isPatternEnabled((uint8_t)currentPattern))
   {
     switchToPattern(getNextEnabledPattern((uint8_t)currentPattern), true, "pattern_mask");
   }
@@ -5167,19 +5221,17 @@ void BatteryRunning()
 void RunEntry()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 1;
   batteryViewActive = false;
 }
 
 void running()
 {
-  fill_rainbow(Strip, NUM_LEDS * 2, (uint8_t)(patternClock.phaseMs() / 20), 7);
+  fill_rainbow(Strip, NUM_LEDS * 2, (uint8_t)(renderPatternClock().phaseMs() / 20), 7);
 }
 
 void RunEntry2()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 2;
   batteryViewActive = false;
 }
 
@@ -5193,7 +5245,6 @@ void RunEntry3()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
   FastLED.setBrightness(30);
-  currentPattern = 3;
   batteryViewActive = false;
 }
 
@@ -5218,14 +5269,13 @@ void RunExit3()
 void RunEntry4()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 4;
   batteryViewActive = false;
 }
 
 void running4()
 {
   const uint8_t hue = currentYawHue();
-  const uint32_t phaseInCycle = patternClock.phaseMs() % 1500UL; // 40 BPM.
+  const uint32_t phaseInCycle = renderPatternClock().phaseMs() % 1500UL; // 40 BPM.
   uint8_t pos = (uint8_t)((phaseInCycle * (uint32_t)NUM_LEDS) / 1500UL);
   if (pos >= NUM_LEDS)
   {
@@ -5244,7 +5294,6 @@ void running4()
 void RunEntry5()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 5;
   batteryViewActive = false;
 }
 
@@ -5278,7 +5327,6 @@ void running5()
 void RunEntry6()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 6;
   batteryViewActive = false;
 }
 
@@ -5318,7 +5366,6 @@ void running6()
 void RunEntry7()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 7;
   batteryViewActive = false;
 }
 
@@ -5338,7 +5385,6 @@ void running7()
 void RunEntry8()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 8;
   batteryViewActive = false;
 }
 
@@ -5364,7 +5410,6 @@ void running8()
 void RunEntry9()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 9;
   batteryViewActive = false;
 }
 
@@ -5441,7 +5486,6 @@ void running9()
 void RunEntry10()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 10;
   batteryViewActive = false;
 }
 
@@ -5468,7 +5512,6 @@ void running10()
 void RunEntry11()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 11;
   batteryViewActive = false;
 }
 
@@ -5511,7 +5554,6 @@ void running11()
 void RunEntry12()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 12;
   batteryViewActive = false;
 }
 
@@ -5557,7 +5599,6 @@ void running12()
 void RunEntry13()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 13;
   batteryViewActive = false;
 }
 
@@ -5610,7 +5651,6 @@ void running13()
 void RunEntry14()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 14;
   batteryViewActive = false;
 }
 
@@ -5650,7 +5690,6 @@ void running14()
 void RunEntry15()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 15;
   batteryViewActive = false;
 }
 
@@ -5721,7 +5760,7 @@ void running15()
     flowDirection = -baseDirection;
   }
 
-  const unsigned long now = patternClock.phaseMs();
+  const unsigned long now = renderPatternClock().phaseMs();
   if (now - lastScrollMs >= 50)
   {
     lastScrollMs = now;
@@ -5776,7 +5815,6 @@ void running15()
 void RunEntry16()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 16;
   batteryViewActive = false;
 }
 
@@ -5788,7 +5826,7 @@ void running16()
   const uint16_t waveStepA = 10 + constrain(map((int)motion, 2000, 20000, 0, 18), 0, 20);
   const uint16_t waveStepB = 7 + constrain(map((int)motion, 2000, 20000, 0, 12), 0, 14);
   const uint16_t waveStepC = 4 + constrain(map((int)motion, 2000, 20000, 0, 8), 0, 10);
-  const uint32_t phase = patternClock.phaseMs();
+  const uint32_t phase = renderPatternClock().phaseMs();
   const uint16_t waveA = (uint16_t)((phase * waveStepA) / 20UL);
   const uint16_t waveB = (uint16_t)((phase * waveStepB) / 20UL);
   const uint16_t waveC = (uint16_t)((phase * waveStepC) / 20UL);
@@ -5817,7 +5855,6 @@ void running16()
 void RunEntry17()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 17;
   batteryViewActive = false;
 }
 
@@ -5849,7 +5886,6 @@ void running17()
 void RunEntry18()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 18;
   batteryViewActive = false;
 }
 
@@ -5903,7 +5939,6 @@ void running18()
 void RunEntry19()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 19;
   batteryViewActive = false;
 }
 
@@ -5917,7 +5952,7 @@ void running19()
 
   const uint8_t scale = constrain(map((int)motion, 2000, 20000, 22, 12), 10, 28);
   const uint8_t timeStepTenths = constrain(map((int)motion, 2000, 20000, 2, 10), 1, 12);
-  const uint16_t noiseTime = (uint16_t)((patternClock.phaseMs() * (uint32_t)timeStepTenths) / 200UL);
+  const uint16_t noiseTime = (uint16_t)((renderPatternClock().phaseMs() * (uint32_t)timeStepTenths) / 200UL);
 
   CRGBPalette16 noisePalette(
       CHSV(smoothedHue, 210, 28),
@@ -5944,7 +5979,6 @@ void running19()
 void RunEntry20()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 20;
   batteryViewActive = false;
 }
 
@@ -5954,7 +5988,7 @@ void running20()
   const uint8_t hueBase = map((int)(ypr[0] * 180.0f / M_PI), -180, 180, 0, 255);
   const uint8_t sat = constrain(map((int)motion, 2000, 20000, 180, 255), 170, 255);
   const uint8_t waveSpeed = constrain(map((int)motion, 2000, 20000, 2, 8), 1, 10);
-  const uint16_t phase = (uint16_t)((patternClock.phaseMs() * (uint32_t)waveSpeed) / 20UL);
+  const uint16_t phase = (uint16_t)((renderPatternClock().phaseMs() * (uint32_t)waveSpeed) / 20UL);
 
   for (int i = 0; i < TOTAL_LEDS; ++i)
   {
@@ -5967,7 +6001,6 @@ void running20()
 void RunEntry21()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 21;
   batteryViewActive = false;
 }
 
@@ -6006,7 +6039,6 @@ void running21()
 void RunEntry22()
 {
   fill_solid(Strip, NUM_LEDS * 2, CRGB::Black);
-  currentPattern = 22;
   batteryViewActive = false;
 }
 
@@ -6051,7 +6083,6 @@ void running22()
 void RunEntry23()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
-  currentPattern = 23;
   batteryViewActive = false;
 }
 
@@ -6059,7 +6090,7 @@ void running23()
 {
   // Audio Pulse Angle Color: beat phase drives the global pulse, energy sets
   // its body, bass adds the flash, and local yaw/pitch select the color.
-  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const AudioPatternFrame& audio = audioPatternFrame;
   const uint8_t baseHue = audioPatternLocalHue();
   const int pitchOffset = audioPatternPitchOffset();
   const uint8_t baseValue = qadd8(22, scale8(audio.energy, 128));
@@ -6077,7 +6108,7 @@ void running23()
       const uint8_t value = qadd8(baseValue, scale8(flash, qadd8(176, scale8(spatial, 78))));
       const uint8_t hue = baseHue + pitchOffset + scale8(spatial, 22) + (stripIndex * 8);
       const uint8_t saturation = qsub8(245, scale8(audio.energy, 44));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 96);
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), audio.fresh ? 255 : 96);
     }
   }
 }
@@ -6085,7 +6116,6 @@ void running23()
 void RunEntry24()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
-  currentPattern = 24;
   batteryViewActive = false;
 }
 
@@ -6093,7 +6123,7 @@ void running24()
 {
   // Audio Spectrum Ribbon: one broad bass wave and two broad mid ribbons
   // travel in opposite directions. Treble only brightens their crests.
-  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const AudioPatternFrame& audio = audioPatternFrame;
   const uint8_t baseHue = audioPatternLocalHue();
   const int pitchOffset = audioPatternPitchOffset();
   const uint8_t bandWeight = qadd8(72, scale8(audio.confidence, 120));
@@ -6118,7 +6148,7 @@ void running24()
           qadd8(qadd8(broadGlow, ribbon), highlight));
       const uint8_t hue = baseHue + pitchOffset + scale8(midWave, 32) + scale8(bassWave, 12);
       const uint8_t saturation = qsub8(238, scale8(highlight, 64));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 40);
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), audio.fresh ? 255 : 40);
     }
   }
 }
@@ -6126,7 +6156,6 @@ void running24()
 void RunEntry25()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
-  currentPattern = 25;
   batteryViewActive = false;
 }
 
@@ -6134,7 +6163,7 @@ void running25()
 {
   // Audio Beat Ripples: the synchronized beat phase moves rings from each
   // strip center. Bass/energy set strength and confidence sharpens the wave.
-  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const AudioPatternFrame& audio = audioPatternFrame;
   const uint8_t baseHue = audioPatternLocalHue();
   const int pitchOffset = audioPatternPitchOffset();
   const int center = NUM_LEDS / 2;
@@ -6161,15 +6190,14 @@ void running25()
     const uint8_t value = qadd8(qadd8(18, scale8(audio.energy, 74)), qadd8(ring, softWave));
     const uint8_t hue = baseHue + pitchOffset + (distance * 7);
     const CRGB target = CHSV(hue, qsub8(240, scale8(audio.confidence, 52)), value);
-    nblend(Strip[i], target, 104);
-    nblend(Strip[i + NUM_LEDS], target, 104);
+    nblend(Strip[i], target, audio.fresh ? 255 : 104);
+    nblend(Strip[i + NUM_LEDS], target, audio.fresh ? 255 : 104);
   }
 }
 
 void RunEntry26()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
-  currentPattern = 26;
   batteryViewActive = false;
 }
 
@@ -6177,7 +6205,7 @@ void running26()
 {
   // Audio Band Comets: two broad bass/mid comets scan in opposite directions.
   // Energy lights their path and treble adds a restrained shared accent.
-  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const AudioPatternFrame& audio = audioPatternFrame;
   const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
   uint8_t phase = audio.phase8;
   if (getPatternDirectionFactor(26) < 0)
@@ -6214,7 +6242,7 @@ void running26()
       target += CHSV(baseHue, 238, bassValue);
       target += CHSV(baseHue + 86, 216, midValue);
       target += CHSV(baseHue + 160, 138, accentValue);
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, 48);
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, audio.fresh ? 255 : 48);
     }
   }
 }
@@ -6222,7 +6250,6 @@ void running26()
 void RunEntry27()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
-  currentPattern = 27;
   batteryViewActive = false;
 }
 
@@ -6230,7 +6257,7 @@ void running27()
 {
   // Audio Beat Mosaic: three to five mirrored color zones stay spatially
   // stable while band levels and beat phase move a soft brightness focus.
-  const AudioPatternFrame audio = buildAudioPatternFrame();
+  const AudioPatternFrame& audio = audioPatternFrame;
   const uint8_t baseHue = audioPatternLocalHue();
   const int pitchOffset = audioPatternPitchOffset();
   const int zoneCount = constrain(NUM_LEDS / 5, 3, 5);
@@ -6260,7 +6287,7 @@ void running27()
           qadd8(scale8(bandLevel, 92), qadd8(movement, beatAccent)));
       const uint8_t hue = baseHue + pitchOffset + ((uint16_t)zone * 256U) / zoneCount + scale8(zoneWave, 10);
       const uint8_t saturation = qsub8(232, scale8(bandLevel, 28));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), 32);
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), audio.fresh ? 255 : 32);
     }
   }
 }
@@ -6314,6 +6341,7 @@ const PatternDefinition* getPatternDefinition(uint8_t patternId)
 
 void runPatternEntry(uint8_t patternId)
 {
+  audioPatternFilter.reset();
   // Dispatch into the selected pattern's entry function, if it has one.
   const PatternDefinition* pattern = getPatternDefinition(patternId);
   if (pattern != NULL && pattern->entry != NULL)
@@ -6324,6 +6352,15 @@ void runPatternEntry(uint8_t patternId)
 
 void runPatternFrame(uint8_t patternId)
 {
+  if (patternId >= 23 && patternId <= 27)
+  {
+    audioPatternFrame = audioPatternFilter.update(syncBeaconAudioState(), millis());
+    if (!audioPatternFrame.valid)
+    {
+      fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+      return;
+    }
+  }
   // Dispatch one animation frame of the selected pattern.
   const PatternDefinition* pattern = getPatternDefinition(patternId);
   if (pattern != NULL && pattern->run != NULL)
@@ -6350,7 +6387,7 @@ void switchToPattern(uint8_t patternId, bool activatePatternState, const char* s
   }
 
   // Pattern cycling is only "live" while we are not inside battery or charging view.
-  const bool patternCurrentlyActive = !batteryViewActive && !UsbConnected;
+  const bool patternCurrentlyActive = !batteryViewActive && !UsbConnected && !showState.controlsOutput();
   const uint8_t previousPattern = (uint8_t)currentPattern;
 
   if (patternCurrentlyActive && previousPattern == patternId && !activatePatternState)
@@ -6363,7 +6400,7 @@ void switchToPattern(uint8_t patternId, bool activatePatternState, const char* s
 
   if (patternCurrentlyActive)
   {
-    runPatternExit(previousPattern);
+    PatternStateExit();
   }
 
   currentPattern = patternId;
@@ -6372,7 +6409,7 @@ void switchToPattern(uint8_t patternId, bool activatePatternState, const char* s
   resetAutoplayTimer();
   batteryViewLastInteractionMs = millis();
 
-  if (activatePatternState)
+  if (activatePatternState && !showState.controlsOutput())
   {
     // Used by CLI "set pattern" to force a clean re-entry through the state machine.
     fsm.setInitialState(&s[2]);
@@ -6382,26 +6419,44 @@ void switchToPattern(uint8_t patternId, bool activatePatternState, const char* s
 
   if (patternCurrentlyActive)
   {
-    runPatternEntry((uint8_t)currentPattern);
+    PatternStateEntry();
   }
 }
 
 void PatternStateEntry()
 {
-  // Enter whichever user pattern is currently selected.
-  runPatternEntry((uint8_t)currentPattern);
+  batteryViewActive = false;
+  const bool patternOutput = !showState.controlsOutput() || showState.output == ShowOutput::PATTERN;
+  renderedPattern = patternOutput ? showState.selectedPattern(currentPattern) : 0;
+  renderedShowRevision = showState.revision;
+  if (renderedPattern) runPatternEntry(renderedPattern);
 }
 
 void PatternStateRunning()
 {
-  // Render whichever user pattern is currently selected.
-  runPatternFrame((uint8_t)currentPattern);
+  const bool patternOutput = !showState.controlsOutput() || showState.output == ShowOutput::PATTERN;
+  const uint8_t desired = patternOutput ? showState.selectedPattern(currentPattern) : 0;
+  if (desired != renderedPattern || renderedShowRevision != showState.revision)
+  {
+    PatternStateExit();
+    PatternStateEntry();
+    applyEffectiveBrightness();
+  }
+  if (renderedPattern) runPatternFrame(renderedPattern);
+  else
+  {
+    for (int i = 0; i < TOTAL_LEDS; ++i)
+    {
+      const ShowRgb rgb = showState.pixel(i);
+      Strip[i] = CRGB(rgb.r, rgb.g, rgb.b);
+    }
+  }
 }
 
 void PatternStateExit()
 {
-  // Give the active pattern a chance to restore temporary state such as brightness overrides.
-  runPatternExit((uint8_t)currentPattern);
+  if (renderedPattern) runPatternExit(renderedPattern);
+  renderedPattern = 0;
 }
 
 // ============================================================================
@@ -6659,7 +6714,8 @@ void loop()
           Serial.println("5 minute interval reached. Checking values for changes...");
         }
 
-        const bool syncTimingActive = (syncEngine.state == SyncEngine::ARMED || syncEngine.state == SyncEngine::RUNNING);
+        const bool syncTimingActive = (syncEngine.state == SyncEngine::ARMED || syncEngine.state == SyncEngine::RUNNING ||
+            showReceiveEnabled || showState.active() || syncBeaconShowStatus().queueDepth > 0);
         // Save only when something actually changed and no local sync timing is active.
         if (hasUnsavedConfigChanges() && !syncTimingActive) {
             // At least one value changed.
@@ -6707,7 +6763,6 @@ void loop()
     return;
   }
 
-  fsm.run(0);
   multiresponseButton.poll();
 
   if (multiresponseButton.longPress())
@@ -6756,6 +6811,7 @@ void loop()
   syncEngine.tick();
   tickSyncBeaconRadio();
   applySyncStartIfDue();
+  tickShowControl();
 
   if (multiresponseButton.singleClick() && batteryViewActive)
   {
@@ -6793,6 +6849,11 @@ void loop()
   {
     autoplayWasPaused = false;
   }
+
+  // Execute events before rendering their first visible frame.
+  fsm.run(0);
+  if (showState.active() && !batteryViewActive && !UsbConnected)
+    FastLED.setBrightness(showState.selectedBrightness(BRIGHTNESS));
 
   // Copy the logical LEDs into the fixed physical strip layout and show them.
   clearInactiveLeds();

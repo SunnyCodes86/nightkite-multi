@@ -68,6 +68,11 @@ static void testDisplayHysteresisDoesNotDelayProtection()
 
 int main()
 {
+  assert(batteryLimitedBrightness(255, BATTERY_STATE_NORMAL, 95) == 255);
+  assert(batteryLimitedBrightness(255, BATTERY_STATE_CRITICAL, 95) == 95);
+  assert(batteryLimitedBrightness(1, BATTERY_STATE_CRITICAL, 95) == 1);
+  assert(batteryLimitedBrightness(255, BATTERY_STATE_SOFT_CUTOFF, 95) == 0);
+  assert(batteryLimitedBrightness(255, BATTERY_STATE_EMERGENCY_CUTOFF, 95) == 0);
   testSocInterpolation();
   testStateTransitions();
   testDisplayHysteresisDoesNotDelayProtection();

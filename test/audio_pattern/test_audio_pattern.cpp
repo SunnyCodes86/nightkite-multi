@@ -23,8 +23,60 @@ static void testPhaseAndPulse()
   assert(audioPatternBeatPulse8(500, 500) == 255);
 }
 
+static void assertSilent(const AudioPatternFrame& f)
+{
+  assert(!f.valid && !f.fresh && !f.beat);
+  assert(f.phase8 == 0 && f.beatPulse == 0 && f.energy == 0 && f.bass == 0);
+  assert(f.mid == 0 && f.treble == 0 && f.confidence == 0);
+}
+
+static void testStrictAudioLifetime()
+{
+  AudioPatternFilter filter;
+  AudioSyncState audio; // Also represents V1-only operation: no audio source.
+  for (uint32_t now = 0; now < 20000; now += 19) assertSilent(filter.update(audio, now));
+  audio.valid = true;
+  audio.lastUpdateMs = 100;
+  audio.phaseMs = 10;
+  audio.beatMs = 500;
+  audio.beat = true;
+  audio.energy = 220; audio.bass = 190; audio.mid = 80; audio.treble = 44; audio.confidence = 255;
+  auto f = filter.update(audio, 100);
+  assert(f.valid && f.fresh && f.beat && f.energy == 220 && f.bass == 190);
+  audio.energy = 100;
+  f = filter.update(audio, 108);
+  assert(!f.fresh && f.energy == 190); // Same 64/256 FastLED smoothing.
+  assert(filter.update(audio, 600).valid);
+  assertSilent(filter.update(audio, 601));
+  assertSilent(filter.update(audio, 602));
+  audio.lastUpdateMs = 1700;
+  audio.energy = 5; audio.bass = 3; audio.mid = 2; audio.treble = 1;
+  f = filter.update(audio, 1700);
+  assert(f.fresh && f.energy == 5 && f.bass == 3 && f.mid == 2 && f.treble == 1);
+  audio.valid = false;
+  assertSilent(filter.update(audio, 1701));
+  audio.valid = true;
+  audio.lastUpdateMs = 2000;
+  assert(filter.update(audio, 2000).fresh);
+  // Filter was not rendered while a solid override was active.
+  audio.lastUpdateMs = 4000;
+  audio.energy = 250;
+  assert(filter.update(audio, 4000).energy == 250);
+  // Loss and reacquisition may both occur between two render frames at the timeout boundary.
+  assert(filter.update(audio, 4500).valid);
+  audio.lastUpdateMs = 4501;
+  audio.energy = 1;
+  f = filter.update(audio, 4501);
+  assert(f.fresh && f.energy == 1);
+  filter.reset();
+  audio.lastUpdateMs = UINT32_MAX - 15;
+  assert(filter.update(audio, 15).valid);
+  assertSilent(filter.update(audio, 1600));
+}
+
 int main()
 {
+  testStrictAudioLifetime();
   testBeatSanitizing();
   testPhaseAndPulse();
   return 0;

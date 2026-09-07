@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Arduino.h>
-#include "app/SyncEngine.h"
+#include "protocol/SyncBeaconCodec.h"
+#include "app/AudioPatternMath.h"
+#include "app/ShowControl.h"
 
 enum SyncBeaconRole : uint8_t
 {
@@ -36,6 +38,18 @@ struct SyncBeaconRuntime
   uint8_t wirelessProfile;
   uint32_t phaseMs;
   uint16_t beatMs;
+  bool showReceiveEnabled;
+  uint32_t shortId;
+};
+
+struct ShowRadioStatus
+{
+  bool receiving = false, clockValid = false;
+  uint8_t queueDepth = 0;
+  int32_t clockOffsetMs = 0;
+  uint32_t clockAgeMs = 0;
+  uint32_t received = 0, invalid = 0, crcErrors = 0, targetMiss = 0;
+  ShowSchedulerStatus scheduler;
 };
 
 struct SyncBeaconRadioStatus
@@ -102,41 +116,6 @@ struct SyncBeaconRadioStatus
   const char* scanLastCandidateReason;
 };
 
-enum SyncBeaconDecodeResult : uint8_t
-{
-  SYNC_BEACON_DECODE_OK = 0,
-  SYNC_BEACON_DECODE_TOO_SHORT,
-  SYNC_BEACON_DECODE_BAD_MAGIC,
-  SYNC_BEACON_DECODE_BAD_VERSION,
-  SYNC_BEACON_DECODE_BAD_GROUP,
-  SYNC_BEACON_DECODE_BAD_PATTERN,
-  SYNC_BEACON_DECODE_BAD_BRIGHTNESS,
-  SYNC_BEACON_DECODE_BAD_CRC
-};
-
-constexpr uint8_t NK_SYNC_BEACON_VERSION_V1 = 1;
-constexpr uint8_t NK_SYNC_BEACON_VERSION_V2 = 2;
-// The firmware's beacon transmitter intentionally remains V1.
-constexpr uint8_t NK_SYNC_BEACON_VERSION = NK_SYNC_BEACON_VERSION_V1;
-constexpr uint16_t NK_SYNC_BEACON_BEAT_MS = 1000;
-constexpr uint8_t NK_SYNC_BEACON_MAGIC0 = 'N';
-constexpr uint8_t NK_SYNC_BEACON_MAGIC1 = 'K';
-constexpr uint16_t NK_SYNC_BEACON_COMPANY_ID = 0xFFFF;
-constexpr uint8_t NK_SYNC_BEACON_FLAG_AUDIO_BEAT = 0x01;
-constexpr unsigned long NK_AUDIO_SYNC_TIMEOUT_MS = 1500;
-constexpr size_t NK_SYNC_BEACON_V1_PACKET_SIZE = sizeof(NkSyncBeaconV1);
-constexpr size_t NK_SYNC_BEACON_V2_PACKET_SIZE = sizeof(NkSyncBeaconV2);
-constexpr size_t NK_SYNC_BEACON_PACKET_SIZE = NK_SYNC_BEACON_V1_PACKET_SIZE;
-constexpr uint8_t NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET = 2;
-constexpr size_t NK_SYNC_BEACON_MFG_LEN = NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET + NK_SYNC_BEACON_PACKET_SIZE;
-constexpr size_t NK_SYNC_BEACON_ADV_LEN = 3 + 2 + NK_SYNC_BEACON_MFG_LEN;
-constexpr size_t NK_SYNC_BEACON_V2_MFG_LEN = NK_SYNC_BEACON_MFG_PAYLOAD_OFFSET + NK_SYNC_BEACON_V2_PACKET_SIZE;
-constexpr size_t NK_SYNC_BEACON_V2_ADV_LEN = 3 + 2 + NK_SYNC_BEACON_V2_MFG_LEN;
-
-static_assert(sizeof(NkSyncBeaconV1) == 17, "Unexpected V1 sync beacon layout");
-static_assert(sizeof(NkSyncBeaconV2) == 22, "Unexpected V2 sync beacon layout");
-static_assert(NK_SYNC_BEACON_V2_ADV_LEN <= 31, "V2 sync beacon exceeds legacy advertising");
-
 void syncBeaconRadioBegin();
 void syncBeaconRadioTick(const SyncBeaconRuntime& runtime);
 void syncBeaconRadioStop();
@@ -145,8 +124,6 @@ String syncBeaconRadioBuildStatusFields();
 String syncBeaconAudioBuildStatusFields();
 bool syncBeaconRadioConsumeBeacon(NkSyncBeaconV1* beacon);
 AudioSyncState syncBeaconAudioState();
-
-bool syncBeaconEncode(const NkSyncBeaconV1& beacon, uint8_t* output, size_t outputSize, size_t* outputLen);
-SyncBeaconDecodeResult syncBeaconDecode(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV1* beacon);
-SyncBeaconDecodeResult syncBeaconDecodeV2(const uint8_t* data, size_t dataLen, uint8_t expectedGroup, NkSyncBeaconV2* beacon);
-const char* syncBeaconDecodeResultName(SyncBeaconDecodeResult result);
+bool syncBeaconRadioConsumeShow(ShowScheduledEvent* event);
+void syncBeaconRadioResetShow();
+ShowRadioStatus syncBeaconShowStatus();

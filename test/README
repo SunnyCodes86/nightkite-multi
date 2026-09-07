@@ -1,11 +1,17 @@
+Host assert checks (requires Python 3 and a C++11 compiler, no test framework):
 
-This directory is intended for PlatformIO Test Runner and project tests.
+    python3 test/run_host_tests.py
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+The runner builds every test/*/test_*.cpp with warnings as errors, AddressSanitizer
+and UndefinedBehaviorSanitizer in a temporary directory. CXX selects the compiler.
+It also extracts actual main.cpp orchestration and GAP dispatch functions into
+host harnesses with hardware doubles to check sync/show/audio/render integration,
+radio ownership and EEPROM field migration. These checks
+do not simulate BTstack, the FSM library, sensors, LED timing or physical power.
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+Firmware validation, all supported environments:
+
+    pio run
+    git diff --check
+
+Show protocol and hardware checklist: docs/show-control-v1.md.
