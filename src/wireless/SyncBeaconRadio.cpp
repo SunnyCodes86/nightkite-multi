@@ -173,17 +173,19 @@ void updateAudioSyncState(const NkSyncBeaconV2& beacon, unsigned long nowMs)
   if (haveAudioBeacon && memcmp(&lastAudioBeacon, &beacon, sizeof(beacon)) == 0) return;
   lastAudioBeacon = beacon;
   haveAudioBeacon = true;
-  audioSyncState.valid = true;
+  audioSyncState.valid = (beacon.flags & NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID) != 0;
+  audioSyncState.beatLocked = audioSyncState.valid &&
+      (beacon.flags & NK_SYNC_BEACON_FLAG_AUDIO_BEAT_LOCKED) != 0;
   audioSyncState.lastUpdateMs = nowMs;
   audioSyncState.seq = beacon.seq;
-  audioSyncState.phaseMs = beacon.phaseMs;
-  audioSyncState.beatMs = beacon.beatMs;
-  audioSyncState.beat = (beacon.flags & NK_SYNC_BEACON_FLAG_AUDIO_BEAT) != 0;
-  audioSyncState.energy = beacon.audioEnergy;
-  audioSyncState.bass = beacon.audioBass;
-  audioSyncState.mid = beacon.audioMid;
-  audioSyncState.treble = beacon.audioTreble;
-  audioSyncState.confidence = beacon.audioConfidence;
+  audioSyncState.phaseMs = audioSyncState.beatLocked ? beacon.phaseMs : 0;
+  audioSyncState.beatMs = audioSyncState.beatLocked ? beacon.beatMs : 0;
+  audioSyncState.beat = audioSyncState.valid && (beacon.flags & NK_SYNC_BEACON_FLAG_AUDIO_BEAT) != 0;
+  audioSyncState.energy = audioSyncState.valid ? beacon.audioEnergy : 0;
+  audioSyncState.bass = audioSyncState.valid ? beacon.audioBass : 0;
+  audioSyncState.mid = audioSyncState.valid ? beacon.audioMid : 0;
+  audioSyncState.treble = audioSyncState.valid ? beacon.audioTreble : 0;
+  audioSyncState.confidence = audioSyncState.valid ? beacon.audioConfidence : 0;
 }
 
 void expireAudioSyncState(unsigned long nowMs)
@@ -297,7 +299,8 @@ bool runCodecSelftest()
   audioBeacon.magic1 = NK_SYNC_BEACON_MAGIC1;
   audioBeacon.version = NK_SYNC_BEACON_VERSION_V2;
   audioBeacon.groupId = 1;
-  audioBeacon.flags = NK_SYNC_BEACON_FLAG_AUDIO_BEAT;
+  audioBeacon.flags = NK_SYNC_BEACON_FLAG_AUDIO_BEAT | NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID |
+                      NK_SYNC_BEACON_FLAG_AUDIO_BEAT_LOCKED;
   audioBeacon.seq = 43;
   audioBeacon.pattern = NK_PATTERN_MAX_ID;
   audioBeacon.brightness = 159;
@@ -332,6 +335,7 @@ bool runCodecSelftest()
       audioSyncState.seq == audioBeacon.seq &&
       audioSyncState.phaseMs == audioBeacon.phaseMs &&
       audioSyncState.beatMs == audioBeacon.beatMs &&
+      audioSyncState.beatLocked &&
       audioSyncState.beat &&
       audioSyncState.energy == audioBeacon.audioEnergy &&
       audioSyncState.bass == audioBeacon.audioBass &&
@@ -939,6 +943,8 @@ String syncBeaconAudioBuildStatusFields()
   fields += status.supported ? 1 : 0;
   fields += " audio_valid=";
   fields += status.audio.valid ? 1 : 0;
+  fields += " signal_valid=";
+  fields += status.audio.valid ? 1 : 0;
   fields += " last_beacon_version=";
   fields += status.lastBeaconVersion;
   fields += " scan_decode_v1=";
@@ -951,6 +957,8 @@ String syncBeaconAudioBuildStatusFields()
   fields += status.audioAgeMs;
   fields += " audio_beat=";
   fields += status.audio.beat ? 1 : 0;
+  fields += " beat_locked=";
+  fields += status.audio.beatLocked ? 1 : 0;
   fields += " audio_energy=";
   fields += status.audio.energy;
   fields += " audio_bass=";

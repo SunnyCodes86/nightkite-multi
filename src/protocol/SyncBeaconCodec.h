@@ -30,8 +30,8 @@ struct NkSyncBeaconV1
 } __attribute__((packed));
 
 // V2 preserves V1 offsets through beatMs, uses audio values at offsets 15..19,
-// and moves the CRC to offsets 20..21. Flags bit 0 marks an audio beat; all
-// other flag bits are reserved.
+// and moves the CRC to offsets 20..21. Flags mark an audio beat, a signal that
+// passed the sender's gate, and a real or explicitly manual beat lock.
 // At 22 bytes it fits in a 29-byte legacy advertisement including flags,
 // manufacturer AD framing, and the 0xFFFF company ID.
 struct NkSyncBeaconV2
@@ -75,6 +75,8 @@ constexpr uint8_t NK_SYNC_BEACON_MAGIC0 = 'N';
 constexpr uint8_t NK_SYNC_BEACON_MAGIC1 = 'K';
 constexpr uint16_t NK_SYNC_BEACON_COMPANY_ID = 0xFFFF;
 constexpr uint8_t NK_SYNC_BEACON_FLAG_AUDIO_BEAT = 0x01;
+constexpr uint8_t NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID = 0x02;
+constexpr uint8_t NK_SYNC_BEACON_FLAG_AUDIO_BEAT_LOCKED = 0x04;
 constexpr size_t NK_SYNC_BEACON_V1_PACKET_SIZE = sizeof(NkSyncBeaconV1);
 constexpr size_t NK_SYNC_BEACON_V2_PACKET_SIZE = sizeof(NkSyncBeaconV2);
 constexpr size_t NK_SYNC_BEACON_PACKET_SIZE = NK_SYNC_BEACON_V1_PACKET_SIZE;

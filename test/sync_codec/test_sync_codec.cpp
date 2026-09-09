@@ -8,6 +8,9 @@ int main()
   const uint8_t v1[] = {0x4e,0x4b,0x01,0x07,0x00,0xfa,0xff,0x1b,0x9f,0x4e,0x61,0xbc,0x00,0xe8,0x03,0x70,0xab};
   const uint8_t v2[] = {0x4e,0x4b,0x02,0x07,0x01,0x02,0x00,0x19,0xdf,0x31,0xd4,0x00,0x00,0xf4,0x01,0xc9,0xca,0xcb,0xcc,0xcd,0x70,0x6a};
   assert(NK_SYNC_BEACON_ADV_LEN == 24 && NK_SYNC_BEACON_V2_ADV_LEN == 29);
+  assert(NK_SYNC_BEACON_V2_PACKET_SIZE == 22);
+  assert((NK_SYNC_BEACON_FLAG_AUDIO_BEAT | NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID |
+          NK_SYNC_BEACON_FLAG_AUDIO_BEAT_LOCKED) == 0x07);
   NkSyncBeaconV1 a;
   NkSyncBeaconV2 b;
   assert(syncBeaconDecode(v1, sizeof(v1), 7, &a) == SYNC_BEACON_DECODE_OK);
@@ -16,6 +19,12 @@ int main()
   assert(b.seq == 2 && b.pattern == 25 && b.phaseMs == 54321 && b.beatMs == 500);
   assert(b.audioEnergy == 201 && b.audioBass == 202 && b.audioMid == 203 && b.audioTreble == 204 && b.audioConfidence == 205);
   assert(computeBeaconCrc(a) == 0xAB70 && computeBeaconCrc(b) == 0x6A70);
+  b.flags = NK_SYNC_BEACON_FLAG_AUDIO_BEAT | NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID |
+            NK_SYNC_BEACON_FLAG_AUDIO_BEAT_LOCKED;
+  b.crc = computeBeaconCrc(b);
+  NkSyncBeaconV2 flagged;
+  assert(syncBeaconDecodeV2((uint8_t*)&b, sizeof(b), 7, &flagged) == SYNC_BEACON_DECODE_OK);
+  assert(flagged.flags == 0x07 && computeBeaconCrc(flagged) == b.crc);
   uint8_t encoded[17];
   size_t length = 0;
   assert(syncBeaconEncode(a, encoded, sizeof(encoded), &length) && length == sizeof(v1));

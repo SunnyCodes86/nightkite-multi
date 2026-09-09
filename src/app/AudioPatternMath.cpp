@@ -54,9 +54,10 @@ AudioPatternFrame AudioPatternFilter::update(const AudioSyncState& state, uint32
   frame.mid = smooth(frame.mid, state.mid);
   frame.treble = smooth(frame.treble, state.treble);
   frame.confidence = smooth(frame.confidence, state.confidence);
+  frame.beatLocked = state.beatLocked;
   frame.beat = state.beat && age < 180;
-  frame.phase8 = audioPatternPhase8(state.phaseMs + age, state.beatMs);
-  frame.beatPulse = audioPatternBeatPulse8(state.phaseMs + age, state.beatMs);
+  frame.phase8 = state.beatLocked ? audioPatternPhase8(state.phaseMs + age, state.beatMs) : 0;
+  frame.beatPulse = state.beatLocked ? audioPatternBeatPulse8(state.phaseMs + age, state.beatMs) : 0;
   lastFrameMs = nowMs;
   lastAudioUpdateMs = state.lastUpdateMs;
   return frame;

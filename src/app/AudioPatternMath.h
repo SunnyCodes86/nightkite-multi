@@ -9,6 +9,7 @@ struct AudioSyncState
   uint16_t seq = 0;
   uint32_t phaseMs = 0;
   uint16_t beatMs = 0;
+  bool beatLocked = false;
   bool beat = false;
   uint8_t energy = 0;
   uint8_t bass = 0;
@@ -33,6 +34,7 @@ struct AudioPatternFrame
 {
   bool valid = false;
   bool fresh = false;
+  bool beatLocked = false;
   bool beat = false;
   uint8_t phase8 = 0;
   uint8_t beatPulse = 0;

@@ -25,7 +25,7 @@ static void testPhaseAndPulse()
 
 static void assertSilent(const AudioPatternFrame& f)
 {
-  assert(!f.valid && !f.fresh && !f.beat);
+  assert(!f.valid && !f.fresh && !f.beatLocked && !f.beat);
   assert(f.phase8 == 0 && f.beatPulse == 0 && f.energy == 0 && f.bass == 0);
   assert(f.mid == 0 && f.treble == 0 && f.confidence == 0);
 }
@@ -43,6 +43,10 @@ static void testStrictAudioLifetime()
   audio.energy = 220; audio.bass = 190; audio.mid = 80; audio.treble = 44; audio.confidence = 255;
   auto f = filter.update(audio, 100);
   assert(f.valid && f.fresh && f.beat && f.energy == 220 && f.bass == 190);
+  assert(!f.beatLocked && f.phase8 == 0 && f.beatPulse == 0);
+  audio.beatLocked = true;
+  f = filter.update(audio, 100);
+  assert(f.beatLocked && f.phase8 > 0 && f.beatPulse > 0);
   audio.energy = 100;
   f = filter.update(audio, 108);
   assert(!f.fresh && f.energy == 190); // Same 64/256 FastLED smoothing.
@@ -56,6 +60,7 @@ static void testStrictAudioLifetime()
   audio.valid = false;
   assertSilent(filter.update(audio, 1701));
   audio.valid = true;
+  audio.beatLocked = false;
   audio.lastUpdateMs = 2000;
   assert(filter.update(audio, 2000).fresh);
   // Filter was not rendered while a solid override was active.

@@ -293,7 +293,10 @@ do not recycle a build ID while its old commands are still in flight.
 
 ## Strict audio and autonomous sync contracts
 
-Patterns 23–27 render only when V2 audio is valid and age <=500 ms. The central
+Patterns 23–27 render only when V2 has `SIGNAL_VALID` (flags bit 1) and age
+<=500 ms. `BEAT` (bit 0) marks a reported onset; `BEAT_LOCKED` (bit 2) alone
+enables received BeatMs/phase and the derived beat pulse. Valid signal without
+a beat lock still supplies energy and bands with zero phase/pulse. The central
 `NK_AUDIO_FRESHNESS_TIMEOUT_MS` in `AudioPatternMath.h` is independent of the
 1500 ms controller-sync loss timeout. At the slowest existing 5 Hz profile, 500 ms
 allows two missing 200 ms frames plus 100 ms receive jitter margin; 10/20 Hz also

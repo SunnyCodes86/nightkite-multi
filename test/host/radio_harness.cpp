@@ -90,7 +90,8 @@ static void syncAdvertisement(uint8_t version, uint8_t* adv, size_t& size) {
   if (version == 2) {
     NkSyncBeaconV2 b = {};
     b.magic0 = 'N'; b.magic1 = 'K'; b.version = 2; b.groupId = 7;
-    b.pattern = 25; b.brightness = 159; b.audioEnergy = 210; b.beatMs = 500; b.seq = 2;
+    b.flags = NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID;
+    b.pattern = 25; b.brightness = 159; b.audioEnergy = 210; b.beatMs = 500; b.phaseMs = 125; b.seq = 2;
     b.crc = computeBeaconCrc(b);
     memcpy(adv + 7, &b, sizeof(b)); size = 7 + sizeof(b);
   } else {
@@ -104,11 +105,28 @@ static void syncAdvertisement(uint8_t version, uint8_t* adv, size_t& size) {
 
 int main() {
   assert(ADV_TYPE_NONCONNECTABLE == 3 && LEGACY_ADV_MAX_LEN == 31 && FOLLOWER_LOST_MS == 1500);
+  NkSyncBeaconV2 semantic = {};
+  semantic.flags = NK_SYNC_BEACON_FLAG_AUDIO_BEAT;
+  semantic.phaseMs = 123; semantic.beatMs = 500; semantic.audioEnergy = 210;
+  updateAudioSyncState(semantic, 10);
+  assert(!audioSyncState.valid && !audioSyncState.beat && audioSyncState.phaseMs == 0 && audioSyncState.energy == 0);
+  semantic.seq = 1;
+  semantic.flags = NK_SYNC_BEACON_FLAG_AUDIO_SIGNAL_VALID;
+  updateAudioSyncState(semantic, 11);
+  assert(audioSyncState.valid && !audioSyncState.beatLocked && audioSyncState.phaseMs == 0 &&
+         audioSyncState.beatMs == 0 && audioSyncState.energy == 210);
+  semantic.seq = 2;
+  semantic.flags |= NK_SYNC_BEACON_FLAG_AUDIO_BEAT | NK_SYNC_BEACON_FLAG_AUDIO_BEAT_LOCKED;
+  updateAudioSyncState(semantic, 12);
+  assert(audioSyncState.valid && audioSyncState.beatLocked && audioSyncState.beat &&
+         audioSyncState.phaseMs == 123 && audioSyncState.beatMs == 500);
+  audioSyncState = AudioSyncState{}; lastAudioBeacon = NkSyncBeaconV2{}; haveAudioBeacon = false;
   currentMode = RADIO_MODE_BEACON_FOLLOWER; activeGroup = 7; activeShortId = 0xABC123;
   uint8_t adv[31]; size_t size;
   syncAdvertisement(2, adv, size);
   handleGapReport(adv, size, -42);
-  assert(audioSyncState.valid && audioSyncState.energy == 210 && pendingBeacon.pattern == 25);
+  assert(audioSyncState.valid && !audioSyncState.beatLocked && audioSyncState.phaseMs == 0 &&
+         audioSyncState.energy == 210 && pendingBeacon.pattern == 25);
   assert(scanDecodeV2 == 1);
   ShowPacket p;
   p.command = ShowCommand::SET_PATTERN; p.params[0] = 23; p.eventId = 1;
