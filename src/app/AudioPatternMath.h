@@ -29,6 +29,7 @@ constexpr uint16_t AUDIO_PATTERN_MAX_BEAT_MS = 2000;
 uint16_t sanitizeAudioPatternBeatMs(uint16_t beatMs);
 uint8_t audioPatternPhase8(uint32_t phaseMs, uint16_t beatMs);
 uint8_t audioPatternBeatPulse8(uint32_t phaseMs, uint16_t beatMs);
+uint8_t audioToVisualBrightness(uint8_t level);
 
 struct AudioPatternFrame
 {

@@ -9,6 +9,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = {
     "audio_pattern": ["app/AudioPatternMath.cpp"],
+    "audio_patterns_integration": ["app/AudioPatternMath.cpp"],
     "battery": ["app/Battery.cpp"],
     "sync_math": ["app/SyncMath.cpp"],
     "sync_codec": ["protocol/SyncBeaconCodec.cpp"],
@@ -32,6 +33,13 @@ def runtime_source(output):
         functions.append(match.group())
     (Path(output) / "runtime_under_test.inc").write_text("\n\n".join(functions))
     return ROOT / "test/host/runtime_harness.cpp"
+
+def audio_patterns_source(output):
+    source = (ROOT / "src/main.cpp").read_text()
+    start = source.index("struct Pattern24Spark")
+    end = source.index("\nconst PatternDefinition patternDefinitions[]", start)
+    (Path(output) / "audio_patterns_under_test.inc").write_text(source[start:end])
+    return ROOT / "test/host/audio_patterns_harness.cpp"
 
 def radio_source(output):
     source = (ROOT / "src/wireless/SyncBeaconRadio.cpp").read_text()
@@ -77,6 +85,7 @@ def main():
     tests = sorted((ROOT / "test").glob("*/test_*.cpp"))
     with tempfile.TemporaryDirectory(prefix="nightkite-host-") as output:
         tests.append(runtime_source(output))
+        tests.append(audio_patterns_source(output))
         tests.append(radio_source(output))
         tests.append(config_source(output))
         for test in tests:

@@ -23,6 +23,19 @@ static void testPhaseAndPulse()
   assert(audioPatternBeatPulse8(500, 500) == 255);
 }
 
+static void testVisualBrightnessMapping()
+{
+  assert(audioToVisualBrightness(0) == 0);
+  assert(audioToVisualBrightness(20) == 64);
+  assert(audioToVisualBrightness(40) == 104);
+  assert(audioToVisualBrightness(64) == 152);
+  assert(audioToVisualBrightness(120) == 194);
+  assert(audioToVisualBrightness(160) == 224);
+  assert(audioToVisualBrightness(255) == 255);
+  for (int level = 1; level < 256; ++level)
+    assert(audioToVisualBrightness((uint8_t)level) >= audioToVisualBrightness((uint8_t)(level - 1)));
+}
+
 static void assertSilent(const AudioPatternFrame& f)
 {
   assert(!f.valid && !f.fresh && !f.beatLocked && !f.beat);
@@ -84,5 +97,6 @@ int main()
   testStrictAudioLifetime();
   testBeatSanitizing();
   testPhaseAndPulse();
+  testVisualBrightnessMapping();
   return 0;
 }

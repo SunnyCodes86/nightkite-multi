@@ -6080,6 +6080,57 @@ void running22()
   }
 }
 
+struct Pattern24Spark
+{
+  uint8_t position;
+  uint8_t life;
+  uint8_t value;
+};
+
+static uint8_t pattern24Heat[2][MAX_LEDS_PER_STRIP];
+static Pattern24Spark pattern24Sparks[2][2];
+static uint16_t pattern24BassAccumulator[2];
+static uint16_t pattern24SparkAccumulator[2];
+static uint16_t pattern24HeatRng = 0x6D2B;
+static uint16_t pattern24SparkRng = 0xB529;
+static uint16_t pattern24Step = 0;
+static uint16_t pattern24SparkSpawnCount = 0;
+static uint32_t pattern24LastStepMs = UINT32_MAX;
+static bool pattern24BeatPending = false;
+static bool pattern24BeatSeen = false;
+
+static uint8_t pattern24Random8(uint16_t& state)
+{
+  state ^= (uint16_t)(state << 7);
+  state ^= state >> 9;
+  state ^= (uint16_t)(state << 8);
+  return state >> 8;
+}
+
+static uint8_t pattern24Random8(uint16_t& state, uint8_t limit)
+{
+  return limit == 0 ? 0 : ((uint16_t)pattern24Random8(state) * limit) >> 8;
+}
+
+static void resetPattern24State()
+{
+  memset(pattern24Heat, 0, sizeof(pattern24Heat));
+  memset(pattern24Sparks, 0, sizeof(pattern24Sparks));
+  memset(pattern24BassAccumulator, 0, sizeof(pattern24BassAccumulator));
+  memset(pattern24SparkAccumulator, 0, sizeof(pattern24SparkAccumulator));
+  pattern24HeatRng = 0x6D2B;
+  pattern24SparkRng = 0xB529;
+  pattern24Step = 0;
+  pattern24SparkSpawnCount = 0;
+  pattern24LastStepMs = UINT32_MAX;
+  pattern24BeatPending = false;
+  pattern24BeatSeen = false;
+}
+
+static uint8_t pattern27LastPhase = 0;
+static bool pattern27Reverse = false;
+static bool pattern27HadLock = false;
+
 void RunEntry23()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
@@ -6088,27 +6139,34 @@ void RunEntry23()
 
 void running23()
 {
-  // Audio Pulse Angle Color: beat phase drives the global pulse, energy sets
-  // its body, bass adds the flash, and local yaw/pitch select the color.
+  // Audio Pulse Angle Color: a stable, dark body leaves ample headroom for
+  // the separate confidence-weighted envelope of a real locked beat.
   const AudioPatternFrame& audio = audioPatternFrame;
-  const uint8_t baseHue = audioPatternLocalHue();
-  const int pitchOffset = audioPatternPitchOffset();
-  const uint8_t baseValue = qadd8(22, scale8(audio.energy, 128));
-  uint8_t flash = scale8(audio.beatPulse, qadd8(72, scale8(audio.bass, 156)));
-  if (audio.beat)
-  {
-    flash = qadd8(flash, 48);
-  }
+  const uint8_t hue = audioPatternLocalHue() + audioPatternPitchOffset();
+  const uint8_t body = min(
+      104,
+      (int)qadd8(scale8(audio.energy, 88), scale8(audio.bass, 32)));
+  const uint8_t beatDepth = qadd8(
+      qadd8(128, scale8(audio.confidence, 112)),
+      scale8(audio.bass, 24));
+  const uint8_t beatDrive = audio.beatLocked
+      ? qadd8(audio.beatPulse, audio.beat ? 24 : 0)
+      : 0;
+  const uint8_t breath = qadd8(body, scale8(beatDrive, beatDepth));
 
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
     for (int i = 0; i < NUM_LEDS; ++i)
     {
-      const uint8_t spatial = sin8((uint8_t)(i * 10 + audio.phase8));
-      const uint8_t value = qadd8(baseValue, scale8(flash, qadd8(176, scale8(spatial, 78))));
-      const uint8_t hue = baseHue + pitchOffset + scale8(spatial, 22) + (stripIndex * 8);
+      const int centerDistance = abs((i * 2) - (NUM_LEDS - 1));
+      const uint8_t edgeDistance = (uint8_t)(((uint16_t)centerDistance * 255U) / (NUM_LEDS - 1));
+      const uint8_t value = scale8(breath, qsub8(255, scale8(edgeDistance, 28)));
       const uint8_t saturation = qsub8(245, scale8(audio.energy, 44));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), audio.fresh ? 255 : 96);
+      const uint8_t blendAmount = audio.fresh ? 255 : (beatDrive > 0 ? 192 : 96);
+      nblend(
+          Strip[(stripIndex * NUM_LEDS) + i],
+          CHSV(hue + (stripIndex * 4), saturation, value),
+          blendAmount);
     }
   }
 }
@@ -6117,38 +6175,199 @@ void RunEntry24()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
   batteryViewActive = false;
+  resetPattern24State();
 }
 
 void running24()
 {
-  // Audio Spectrum Ribbon: one broad bass wave and two broad mid ribbons
-  // travel in opposite directions. Treble only brightens their crests.
+  // Audio Firestorm: a persistent heat simulation rises from each strip base.
+  // Audio changes fuel, flare size, turbulence and sparks rather than acting as
+  // another brightness multiplier on a static shape.
   const AudioPatternFrame& audio = audioPatternFrame;
-  const uint8_t baseHue = audioPatternLocalHue();
-  const int pitchOffset = audioPatternPitchOffset();
-  const uint8_t bandWeight = qadd8(72, scale8(audio.confidence, 120));
-  const uint8_t bassLevel = lerp8by8(audio.energy, audio.bass, bandWeight);
-  const uint8_t midLevel = lerp8by8(audio.energy, audio.mid, bandWeight);
+  const uint32_t now = millis();
+  if (audio.fresh)
+  {
+    resetPattern24State();
+    fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
+  }
+  if (!audio.beatLocked)
+  {
+    pattern24BeatSeen = false;
+    pattern24BeatPending = false;
+  }
+  else if (!audio.beat)
+  {
+    pattern24BeatSeen = false;
+  }
+  else if (!pattern24BeatSeen)
+  {
+    pattern24BeatSeen = true;
+    pattern24BeatPending = true;
+  }
 
+  constexpr uint8_t stepMs = 40;
+  if (pattern24LastStepMs == UINT32_MAX)
+  {
+    pattern24LastStepMs = now - stepMs;
+  }
+  if (now - pattern24LastStepMs >= stepMs)
+  {
+    pattern24LastStepMs = now;
+    ++pattern24Step;
+    const uint8_t stormAmount = qadd8(
+        scale8(audio.mid, 190),
+        scale8(audio.energy, 32));
+    const uint8_t cooling = qsub8(
+        60,
+        qadd8(scale8(audio.energy, 24), scale8(audio.bass, 12)));
+    const uint8_t fuelChance = qadd8(28, scale8(audio.energy, 100));
+    const uint8_t fuelWidth = constrain(1 + NUM_LEDS / 14, 1, 3);
+
+    for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
+    {
+      for (int i = 0; i < NUM_LEDS; ++i)
+      {
+        const uint8_t coolingRange = ((uint16_t)cooling * 10U) / NUM_LEDS + 2U;
+        pattern24Heat[stripIndex][i] = qsub8(
+            pattern24Heat[stripIndex][i],
+            pattern24Random8(pattern24HeatRng, coolingRange));
+      }
+
+      for (int k = NUM_LEDS - 1; k >= 2; --k)
+      {
+        const uint8_t calm = (uint8_t)(
+            (pattern24Heat[stripIndex][k - 1] +
+             pattern24Heat[stripIndex][k - 2] * 2U) / 3U);
+        const uint8_t wave = sin8((uint8_t)(pattern24Step * 9U + k * 31U + stripIndex * 53U));
+        const uint8_t turbulent = lerp8by8(
+            pattern24Heat[stripIndex][k - 1],
+            pattern24Heat[stripIndex][max(0, k - 3)],
+            wave);
+        const uint8_t height = (uint8_t)(((uint16_t)k * 255U) / max(1, NUM_LEDS - 1));
+        const uint8_t upperZone = qsub8(height, 80);
+        const uint8_t transported = lerp8by8(
+            calm,
+            turbulent,
+            scale8(stormAmount, 160));
+        const uint8_t heightCooling = scale8(
+            ((uint16_t)upperZone * upperZone) >> 9,
+            qsub8(255, scale8(transported, 128)));
+        pattern24Heat[stripIndex][k] = qsub8(
+            transported,
+            heightCooling);
+      }
+
+      if (pattern24Random8(pattern24HeatRng) < fuelChance)
+      {
+        const uint8_t y = pattern24Random8(pattern24HeatRng, fuelWidth);
+        pattern24Heat[stripIndex][y] = qadd8(
+            pattern24Heat[stripIndex][y],
+            qadd8(88, scale8(audio.energy, 120)));
+      }
+
+      pattern24BassAccumulator[stripIndex] += audio.bass;
+      if (pattern24BassAccumulator[stripIndex] >= 1200)
+      {
+        pattern24BassAccumulator[stripIndex] -= 1200;
+        const uint8_t width = min(
+            NUM_LEDS,
+            max(2, NUM_LEDS / 10) + scale8(audio.bass, 3));
+        const uint8_t flare = qadd8(108, scale8(audio.bass, 136));
+        for (uint8_t y = 0; y < width; ++y)
+        {
+          pattern24Heat[stripIndex][y] = qadd8(
+              pattern24Heat[stripIndex][y],
+              qsub8(flare, y * 16));
+        }
+      }
+
+      if (pattern24BeatPending)
+      {
+        const uint8_t width = min(
+            NUM_LEDS,
+            max(2, NUM_LEDS / 6) + scale8(audio.bass, 3));
+        const uint8_t flare = qadd8(
+            qadd8(160, scale8(audio.confidence, 80)),
+            scale8(audio.bass, 32));
+        for (uint8_t y = 0; y < width; ++y)
+        {
+          pattern24Heat[stripIndex][y] = qadd8(
+              pattern24Heat[stripIndex][y],
+              qsub8(flare, y * 12));
+        }
+      }
+
+      if (pattern24Random8(pattern24HeatRng) < scale8(audio.mid, 80))
+      {
+        const uint8_t tongueWidth = min(NUM_LEDS, max(2, NUM_LEDS / 3));
+        const uint8_t y = pattern24Random8(pattern24HeatRng, tongueWidth);
+        pattern24Heat[stripIndex][y] = qadd8(
+            pattern24Heat[stripIndex][y],
+            qadd8(72, scale8(audio.mid, 144)));
+      }
+
+      for (Pattern24Spark& spark : pattern24Sparks[stripIndex])
+      {
+        if (spark.life == 0) continue;
+        if (++spark.position >= NUM_LEDS || --spark.life == 0)
+        {
+          spark.life = 0;
+          continue;
+        }
+        spark.value = scale8(spark.value, 196);
+      }
+
+      pattern24SparkAccumulator[stripIndex] += audio.treble;
+      if (pattern24SparkAccumulator[stripIndex] >= 900)
+      {
+        pattern24SparkAccumulator[stripIndex] -= 900;
+        Pattern24Spark* freeSpark = NULL;
+        for (Pattern24Spark& spark : pattern24Sparks[stripIndex])
+        {
+          if (spark.life == 0) { freeSpark = &spark; break; }
+        }
+        if (freeSpark != NULL)
+        {
+          uint8_t flameTop = 0;
+          for (uint8_t i = 0; i < NUM_LEDS; ++i)
+          {
+            if (pattern24Heat[stripIndex][i] >= 48) flameTop = i;
+          }
+          const uint8_t remaining = NUM_LEDS - 1 - flameTop;
+          const uint8_t lift = min((uint8_t)2, remaining);
+          freeSpark->position = flameTop + pattern24Random8(pattern24SparkRng, lift + 1);
+          freeSpark->life = qadd8(3, scale8(audio.treble, 3));
+          freeSpark->value = qadd8(160, scale8(audio.treble, 95));
+          ++pattern24SparkSpawnCount;
+        }
+      }
+    }
+    pattern24BeatPending = false;
+  }
+
+  const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
+  const bool inverted = getPatternDirectionFactor(24) < 0;
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
     for (int i = 0; i < NUM_LEDS; ++i)
     {
-      const uint8_t position = (uint8_t)(((uint16_t)i * 255U) / max(1, NUM_LEDS - 1));
-      const uint8_t directionPhase = stripIndex == 0 ? audio.phase8 : (uint8_t)(255 - audio.phase8);
-      const uint8_t bassWave = sin8(position - directionPhase);
-      const uint8_t midWave = sin8((uint8_t)(position * 2U) + directionPhase);
-      const uint8_t broadGlow = scale8(bassWave, scale8(bassLevel, 110));
-      const uint8_t ribbon = scale8(midWave, scale8(midLevel, 120));
-      const uint8_t highlight = scale8(
-          scale8(qsub8(midWave, 208), audio.treble),
-          qadd8(80, scale8(audio.confidence, 96)));
-      const uint8_t value = qadd8(
-          qadd8(14, scale8(audio.energy, 70)),
-          qadd8(qadd8(broadGlow, ribbon), highlight));
-      const uint8_t hue = baseHue + pitchOffset + scale8(midWave, 32) + scale8(bassWave, 12);
-      const uint8_t saturation = qsub8(238, scale8(highlight, 64));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), audio.fresh ? 255 : 40);
+      const uint8_t heat = pattern24Heat[stripIndex][i];
+      CRGB target = CRGB::Black;
+      if (heat > 0)
+      {
+        const uint8_t value = qadd8(scale8(heat, heat), scale8(heat, 64));
+        target = CHSV(
+            baseHue + scale8(heat, 18),
+            qsub8(244, scale8(heat, 84)),
+            value);
+      }
+      for (const Pattern24Spark& spark : pattern24Sparks[stripIndex])
+      {
+        if (spark.life > 0 && spark.position == i)
+          target += CHSV(baseHue + 24, 72, spark.value);
+      }
+      const int logical = inverted ? NUM_LEDS - 1 - i : i;
+      nblend(Strip[(stripIndex * NUM_LEDS) + logical], target, audio.fresh ? 255 : 192);
     }
   }
 }
@@ -6161,37 +6380,45 @@ void RunEntry25()
 
 void running25()
 {
-  // Audio Beat Ripples: the synchronized beat phase moves rings from each
-  // strip center. Bass/energy set strength and confidence sharpens the wave.
+  // Audio Beat Ripples: one synchronized wave moves from each strip center.
+  // Without beat lock no new phase is invented and the existing wave fades.
   const AudioPatternFrame& audio = audioPatternFrame;
-  const uint8_t baseHue = audioPatternLocalHue();
-  const int pitchOffset = audioPatternPitchOffset();
+  const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
+  const uint8_t energy = audioToVisualBrightness(audio.energy);
+  const uint8_t bass = audioToVisualBrightness(audio.bass);
+  const uint8_t mid = audioToVisualBrightness(audio.mid);
+  const uint8_t treble = audioToVisualBrightness(audio.treble);
   const int center = NUM_LEDS / 2;
   const int maxDistance = max(1, center);
-  const int ringPosition = ((int)audio.phase8 * (maxDistance + 2)) / 255;
-  const int ringWidth = audio.confidence >= 128 ? 1 : 2;
-  uint8_t ringStrength = qadd8(scale8(audio.energy, 132), scale8(audio.bass, 116));
-  ringStrength = qadd8(ringStrength, scale8(audio.beatPulse, 96));
-  if (audio.beat)
-  {
-    ringStrength = qadd8(ringStrength, 40);
-  }
+  const int ringPosition = ((int)audio.phase8 * (maxDistance + 1)) / 255;
+  const int ringWidth = 1 + ((uint16_t)audio.bass * max(1, NUM_LEDS / 12) / 255U);
+  const uint8_t beatAccent = scale8(audio.beatPulse, scale8(audio.confidence, 64));
+  const uint8_t ringStrength = qadd8(
+      energy,
+      qadd8(scale8(bass, 128), beatAccent));
 
   for (int i = 0; i < NUM_LEDS; ++i)
   {
     const int distance = abs(i - center);
     const int delta = abs(distance - ringPosition);
-    uint8_t ring = 0;
-    if (delta <= ringWidth)
+    uint8_t halo = 0;
+    uint8_t front = 0;
+    const int haloWidth = ringWidth + 2;
+    if (audio.beatLocked && delta <= haloWidth)
     {
-      ring = (uint8_t)map(delta, 0, ringWidth + 1, ringStrength, 0);
+      halo = (uint8_t)(((uint16_t)(haloWidth + 1 - delta) * scale8(mid, 160)) / (haloWidth + 1));
     }
-    const uint8_t softWave = scale8(sin8((uint8_t)(distance * 34 - audio.phase8)), 52);
-    const uint8_t value = qadd8(qadd8(18, scale8(audio.energy, 74)), qadd8(ring, softWave));
-    const uint8_t hue = baseHue + pitchOffset + (distance * 7);
-    const CRGB target = CHSV(hue, qsub8(240, scale8(audio.confidence, 52)), value);
-    nblend(Strip[i], target, audio.fresh ? 255 : 104);
-    nblend(Strip[i + NUM_LEDS], target, audio.fresh ? 255 : 104);
+    if (audio.beatLocked && delta <= ringWidth)
+    {
+      front = (uint8_t)(((uint16_t)(ringWidth + 1 - delta) * ringStrength) / (ringWidth + 1));
+    }
+    CRGB target = CHSV(baseHue, 240, scale8(energy, 72));
+    target += CHSV(baseHue + 16, 210, halo);
+    target += CHSV(baseHue, 238, front);
+    target += CHSV(baseHue + 48, 112, scale8(front, treble));
+    const uint8_t blendAmount = audio.fresh ? 255 : (audio.beatLocked ? 112 : 64);
+    nblend(Strip[i], target, blendAmount);
+    nblend(Strip[i + NUM_LEDS], target, blendAmount);
   }
 }
 
@@ -6203,46 +6430,65 @@ void RunEntry26()
 
 void running26()
 {
-  // Audio Band Comets: two broad bass/mid comets scan in opposite directions.
-  // Energy lights their path and treble adds a restrained shared accent.
+  // Beat Scanner: locked beat phase alone sets a deterministic ping-pong head.
+  // Energy, bass, mids and treble control body, width, halo and bright tip.
   const AudioPatternFrame& audio = audioPatternFrame;
   const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
-  uint8_t phase = audio.phase8;
-  if (getPatternDirectionFactor(26) < 0)
+  const uint8_t energy = audioToVisualBrightness(audio.energy);
+  const uint8_t bass = audioToVisualBrightness(audio.bass);
+  const uint8_t mid = audioToVisualBrightness(audio.mid);
+  const uint8_t treble = audioToVisualBrightness(audio.treble);
+  static uint8_t lastPhase = 0;
+  static bool reverse = false;
+  static bool hadLock = false;
+  if (audio.fresh || !audio.beatLocked)
   {
-    phase = 255 - phase;
+    lastPhase = audio.phase8;
+    reverse = false;
+    hadLock = audio.beatLocked;
   }
-  const int bassHead = ((uint16_t)triwave8(phase) * (NUM_LEDS - 1)) / 255U;
-  const int midHead = ((uint16_t)triwave8((uint8_t)(phase + 128)) * (NUM_LEDS - 1)) / 255U;
-  const int radius = constrain(NUM_LEDS / 10, 1, 3);
-  const uint8_t bandWeight = qadd8(80, scale8(audio.confidence, 128));
-  const uint8_t bassLevel = lerp8by8(audio.energy, audio.bass, bandWeight);
-  const uint8_t midLevel = lerp8by8(audio.energy, audio.mid, bandWeight);
-  const uint8_t trebleLevel = scale8(
-      audio.treble,
-      qadd8(24, scale8(audio.confidence, 48)));
+  else if (hadLock && audio.phase8 < lastPhase && lastPhase - audio.phase8 > 128)
+  {
+    reverse = !reverse;
+  }
+  if (audio.beatLocked)
+  {
+    lastPhase = audio.phase8;
+    hadLock = true;
+  }
+  const bool rightToLeft = reverse != (getPatternDirectionFactor(26) < 0);
+  const uint8_t position = rightToLeft ? (uint8_t)(255 - audio.phase8) : audio.phase8;
+  const int head = ((uint16_t)position * (NUM_LEDS - 1)) / 255U;
+  const int headRadius = 1 + ((uint16_t)bass * max(1, NUM_LEDS / 12) / 255U);
+  const int haloRadius = headRadius + 1 + ((uint16_t)mid * max(2, NUM_LEDS / 6) / 255U);
+  const uint8_t beatAccent = scale8(audio.beatPulse, scale8(audio.confidence, 64));
+  const uint8_t headValue = qadd8(
+      energy,
+      qadd8(scale8(bass, 96), beatAccent));
 
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
     for (int i = 0; i < NUM_LEDS; ++i)
     {
-      const int bassDistance = abs(i - bassHead);
-      const int midDistance = abs(i - midHead);
-      const uint8_t bassShape = bassDistance > radius
-          ? 0
-          : (uint8_t)(255 - ((uint16_t)bassDistance * 255U) / (radius + 1));
-      const uint8_t midShape = midDistance > radius
-          ? 0
-          : (uint8_t)(255 - ((uint16_t)midDistance * 255U) / (radius + 1));
-      const uint8_t bassValue = scale8(bassShape, qadd8(scale8(bassLevel, 150), scale8(audio.energy, 36)));
-      const uint8_t midValue = scale8(midShape, qadd8(scale8(midLevel, 144), scale8(audio.energy, 30)));
-      const uint8_t accentValue = scale8(max(bassShape, midShape), trebleLevel);
-
-      CRGB target = CHSV(baseHue + (stripIndex * 8), 190, qadd8(10, scale8(audio.energy, 48)));
-      target += CHSV(baseHue, 238, bassValue);
-      target += CHSV(baseHue + 86, 216, midValue);
-      target += CHSV(baseHue + 160, 138, accentValue);
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, audio.fresh ? 255 : 48);
+      CRGB target = CHSV(baseHue + (stripIndex * 4), 232, scale8(energy, 64));
+      if (audio.beatLocked)
+      {
+        const int distance = abs(i - head);
+        const uint8_t haloShape = distance > haloRadius
+            ? 0
+            : (uint8_t)(((uint16_t)(haloRadius + 1 - distance) * 255U) / (haloRadius + 1));
+        const uint8_t headShape = distance > headRadius
+            ? 0
+            : (uint8_t)(((uint16_t)(headRadius + 1 - distance) * 255U) / (headRadius + 1));
+        target += CHSV(baseHue + 20, 205, scale8(haloShape, scale8(mid, 160)));
+        target += CHSV(baseHue, 238, scale8(headShape, headValue));
+        if (distance == 0)
+        {
+          target += CHSV(baseHue + 46, 96, treble);
+        }
+      }
+      const uint8_t blendAmount = audio.fresh ? 255 : (audio.beatLocked ? 104 : 48);
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, blendAmount);
     }
   }
 }
@@ -6251,22 +6497,45 @@ void RunEntry27()
 {
   fill_solid(Strip, TOTAL_LEDS, CRGB::Black);
   batteryViewActive = false;
+  pattern27LastPhase = 0;
+  pattern27Reverse = false;
+  pattern27HadLock = false;
 }
 
 void running27()
 {
-  // Audio Beat Mosaic: three to five mirrored color zones stay spatially
-  // stable while band levels and beat phase move a soft brightness focus.
+  // Rhythm Tiles: a few large alternating groups crossfade on locked phase;
+  // without lock both groups remain in a calm, static balance.
   const AudioPatternFrame& audio = audioPatternFrame;
-  const uint8_t baseHue = audioPatternLocalHue();
-  const int pitchOffset = audioPatternPitchOffset();
-  const int zoneCount = constrain(NUM_LEDS / 5, 3, 5);
-  const uint8_t bandWeight = qadd8(72, scale8(audio.confidence, 128));
-  uint8_t phase = audio.phase8;
-  if (getPatternDirectionFactor(27) < 0)
+  const uint8_t baseHue = audioPatternLocalHue() + audioPatternPitchOffset();
+  const int zoneCount = constrain(NUM_LEDS / 5, 2, 6);
+  const uint8_t energy = audioToVisualBrightness(audio.energy);
+  const uint8_t bass = audioToVisualBrightness(audio.bass);
+  const uint8_t mid = audioToVisualBrightness(audio.mid);
+  const uint8_t treble = audioToVisualBrightness(audio.treble);
+  if (audio.fresh || !audio.beatLocked)
   {
-    phase = 255 - phase;
+    pattern27LastPhase = audio.phase8;
+    pattern27Reverse = false;
+    pattern27HadLock = audio.beatLocked;
   }
+  else if (pattern27HadLock && audio.phase8 < pattern27LastPhase && pattern27LastPhase - audio.phase8 > 128)
+  {
+    pattern27Reverse = !pattern27Reverse;
+  }
+  if (audio.beatLocked)
+  {
+    pattern27LastPhase = audio.phase8;
+    pattern27HadLock = true;
+  }
+  const uint8_t forwardMix = sin8((uint8_t)((audio.phase8 >> 1) - 64));
+  const uint8_t mixB = audio.beatLocked
+      ? (pattern27Reverse ? (uint8_t)(255 - forwardMix) : forwardMix)
+      : 128;
+  const bool inverted = getPatternDirectionFactor(27) < 0;
+  const uint8_t beatAccent = audio.beatLocked
+      ? scale8(audio.beatPulse, scale8(audio.confidence, 28))
+      : 0;
 
   for (int stripIndex = 0; stripIndex < 2; ++stripIndex)
   {
@@ -6274,20 +6543,22 @@ void running27()
     {
       const int logicalIndex = stripIndex == 0 ? i : (NUM_LEDS - 1 - i);
       const int zone = (logicalIndex * zoneCount) / NUM_LEDS;
-      const uint8_t band = (uint8_t)(zone % 3);
-      const uint8_t bandValue = band == 0 ? audio.bass : (band == 1 ? audio.mid : audio.treble);
-      const uint8_t bandLevel = lerp8by8(audio.energy, bandValue, bandWeight);
-      const uint8_t zoneWave = sin8((uint8_t)(phase + ((uint16_t)zone * 256U) / zoneCount));
-      const uint8_t movement = scale8(zoneWave, qadd8(20, scale8(bandLevel, 72)));
-      const uint8_t beatAccent = scale8(
-          scale8(audio.beatPulse, zoneWave),
-          qadd8(12, scale8(audio.bass, 44)));
+      const bool groupB = ((zone & 1) != 0) != inverted;
+      const uint8_t groupMix = groupB ? mixB : (uint8_t)(255 - mixB);
+      const uint8_t bandLevel = groupB ? mid : bass;
+      const uint8_t groupLevel = qadd8(scale8(energy, 112), scale8(bandLevel, 208));
       const uint8_t value = qadd8(
-          qadd8(14, scale8(audio.energy, 72)),
-          qadd8(scale8(bandLevel, 92), qadd8(movement, beatAccent)));
-      const uint8_t hue = baseHue + pitchOffset + ((uint16_t)zone * 256U) / zoneCount + scale8(zoneWave, 10);
-      const uint8_t saturation = qsub8(232, scale8(bandLevel, 28));
-      nblend(Strip[(stripIndex * NUM_LEDS) + i], CHSV(hue, saturation, value), audio.fresh ? 255 : 32);
+          scale8(groupLevel, qadd8(64, scale8(groupMix, 191))),
+          beatAccent);
+      const int zoneStart = (zone * NUM_LEDS) / zoneCount;
+      const bool boundary = logicalIndex == zoneStart;
+
+      CRGB target = CHSV(baseHue + (groupB ? 34 : 0), 228, value);
+      if (boundary)
+      {
+        target += CHSV(baseHue + 62, 112, treble);
+      }
+      nblend(Strip[(stripIndex * NUM_LEDS) + i], target, audio.fresh ? 255 : 80);
     }
   }
 }
@@ -6316,10 +6587,10 @@ const PatternDefinition patternDefinitions[] = {
     {21, "confetti_jerk", RunEntry21, running21, NULL},
     {22, "center_ripple", RunEntry22, running22, NULL},
     {23, "audio_pulse_angle_color", RunEntry23, running23, NULL},
-    {24, "audio_spectrum_ribbon", RunEntry24, running24, NULL},
+    {24, "audio_firestorm", RunEntry24, running24, NULL},
     {25, "audio_beat_ripples", RunEntry25, running25, NULL},
-    {26, "audio_band_comets", RunEntry26, running26, NULL},
-    {27, "audio_beat_mosaic", RunEntry27, running27, NULL},
+    {26, "audio_beat_scanner", RunEntry26, running26, NULL},
+    {27, "audio_rhythm_tiles", RunEntry27, running27, NULL},
 };
 
 static_assert(

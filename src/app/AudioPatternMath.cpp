@@ -27,6 +27,14 @@ uint8_t audioPatternBeatPulse8(uint32_t phaseMs, uint16_t beatMs)
   return (uint8_t)(255U - ((uint32_t)elapsedMs * 255UL) / pulseMs);
 }
 
+uint8_t audioToVisualBrightness(uint8_t level)
+{
+  if (level == 0) return 0;
+  if (level < 64) return (uint8_t)(24U + (uint16_t)level * 2U);
+  if (level < 160) return (uint8_t)(152U + ((uint16_t)(level - 64U) * 3U) / 4U);
+  return (uint8_t)(224U + ((uint16_t)(level - 160U) * 31U) / 95U);
+}
+
 void AudioPatternFilter::reset()
 {
   frame = AudioPatternFrame{};
